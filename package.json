@@ -1,0 +1,20 @@
+{
+  "name": "@thomasfosterau/wikidata",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "test:unit": "vp test run tests",
+    "test:coverage": "vp test run tests --coverage"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/language-service": "catalog:"
+  }
+}
