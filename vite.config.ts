@@ -1,5 +1,5 @@
 import { defineConfig } from "vite-plus";
-import { packageTest } from "../../tooling/test-config";
+import { packageTest } from "@thomasfosterau/test-config";
 
 export default defineConfig({
   test: packageTest({

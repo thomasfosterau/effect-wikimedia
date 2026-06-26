@@ -15,6 +15,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/language-service": "catalog:"
+    "@effect/language-service": "catalog:",
+    "@thomasfosterau/test-config": "workspace:*"
   }
 }
