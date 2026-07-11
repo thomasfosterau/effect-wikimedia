@@ -23,14 +23,15 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
-import type { WikidataCandidate, WikidataFacts } from "@thomasfosterau/wikidata/candidate";
 import {
   type ExternalIdentifier,
   InvalidQuery,
   LookupFailed,
+  type WikidataCandidate,
+  type WikidataFacts,
   WikidataLookup,
   wikidataLookupClientLayer,
-} from "@thomasfosterau/wikidata/lookup";
+} from "@thomasfosterau/wikidata";
 import { expectFailureInstanceOf, runTest } from "@test-helpers/effect";
 
 // ── Fetch router stub ────────────────────────────────────────────────
