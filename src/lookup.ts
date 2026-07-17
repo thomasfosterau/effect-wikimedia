@@ -21,7 +21,7 @@
  * candidates and Enrich returns neutral facts; storing a chosen QID (on the
  * stable `entity_external_identifier` table) and asserting enriched facts
  * (on the versioned `entity_mapping` table) are the operation layer's job
- * (`src/lib/server/operations/entities.ts`).
+ * (`apps/api/src/operations/entities.ts`).
  *
  * Untrusted-data discipline (mirrors the biblio lookup service):
  * - inputs (label, property id, identifier value) are validated /
