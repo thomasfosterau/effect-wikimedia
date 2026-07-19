@@ -15,13 +15,12 @@
  * stable, identity-level authority reference that belongs on `entity`
  * (per the {@link
  * ../../../docs/decisions/ontology-mappings-and-status-assertions.md
- * ontology-mappings decision}). Because the existing single
- * `entity.authoritySource` / `entity.authorityId` pair is already used by
- * biblio imports (openlibrary / crossref) and cannot also hold a QID, a
- * confirmed QID is persisted through the stable `entity_external_identifier`
- * table (KB-004) via `updateEntity`'s `externalIdentifiers` input — see
- * {@link module:lib/server/operations/entities}. This module remains the
- * Match step only and still persists nothing itself.
+ * ontology-mappings decision}). A confirmed QID is persisted through the
+ * stable `entity_external_identifier` table (KB-004 — since #864 S5/D5
+ * also the biblio pipeline's `openlibrary` / `crossref` provenance home,
+ * one row per authority) via `updateEntity`'s `externalIdentifiers` input
+ * — see {@link module:lib/server/operations/entities}. This module
+ * remains the Match step only and still persists nothing itself.
  *
  * Everything in this module is pure: input validation and the candidate
  * shape are unit-testable without a database or network.
