@@ -1,0 +1,19 @@
+Unbalanced braces: {{foo|bar and {{{arg|no close
+Nested deep: {{a|{{b|{{c|{{d|e}}}}}}}}
+Apostrophe jungle: '''''bold italic''' still italic'' and normal.
+Odd bold: a'''b''c'''d and I'''m sure.
+Quintuple close }}}}} and open {{{{{ mixed.
+Wikilink with pipes: [[File:X.png|thumb|right|A ''caption'' with [[Link]] inside]]
+External bare: [https://example.com] and [ftp://host/path label text].
+Mismatched tags: <ref>open with no close and <b>bold</b> <br/> <div class="x>weird">z</div>
+Extension raw: <nowiki>{{not a template}} '''not bold'''</nowiki> after.
+Entities: &amp; &#160; &#x1F600; &notanentity &bad
+Heading-ish but not: == inline == text on the same line.
+=== Real heading with surplus ==
+Table markup stays text:
+{| class="wikitable"
+|-
+! Header
+| Cell {{tmpl}} value
+|}
+Comment to EOF: <!-- never closed

@@ -1,0 +1,38 @@
+{{Short description|English mathematician (1815–1852)}}
+{{Infobox person
+| name         = Ada Lovelace
+| birth_name   = Augusta Ada Byron
+| birth_date   = {{birth date|1815|12|10|df=y}}
+| birth_place  = [[London]], England
+| death_date   = {{death date and age|1852|11|27|1815|12|10|df=y}}
+| known_for    = [[Analytical Engine]]<br />First computer program
+| nationality  = British
+}}
+
+'''Augusta Ada King, Countess of Lovelace''' (''née'' Byron; 10 December 1815 –
+27 November 1852) was an English [[mathematician]] and writer, chiefly known
+for her work on Charles Babbage's proposed [[mechanical computer|mechanical
+general-purpose computer]], the [[Analytical Engine]].<ref name="bio">Toole,
+Betty A. (1998). ''Ada, the Enchantress of Numbers''. p.&nbsp;12.</ref>
+
+== Biography ==
+She was the only legitimate child of the poet Lord [[Byron]] and his wife
+[[Anne Isabella Byron|Lady Byron]].{{sfn|Turney|1972|p=35}} All her
+half-siblings were born out of wedlock.
+
+=== Early life ===
+Ada described her approach as "poetical science"<ref>See {{harvnb|Woolley|1999}}.</ref>
+and herself as an "Analyst (& Metaphysician)".
+
+She was often visited by [https://example.org/scientists notable scientists],
+including {{nowrap|Charles Babbage}} and Michael Faraday.
+
+<!-- TODO: expand the notes section with the Menabrea translation -->
+
+== See also ==
+* [[Women in computing]]
+* [[List of pioneers in computer science]]
+
+{{DEFAULTSORT:Lovelace, Ada}}
+[[Category:1815 births]]
+[[Category:English mathematicians]]

@@ -19,6 +19,10 @@
  *   parsed HTML for a title or revision, typed page/revision metadata.
  * - **`Commons`** — Commons file info and `Special:FilePath` URL
  *   construction (subsumes `packages/wikidata`'s `normaliseCommonsImage`).
+ * - **`Wikitext`** — a pure, dependency-free wikitext → typed AST parser
+ *   (issue #1065): round-trip serializer plus a query/manipulation surface.
+ *   The one module here that imports nothing (not even {@link Core}) — see
+ *   `docs/decisions/wikitext-parser-design.md`.
  *
  * Zero website-internal dependencies anywhere in this package — designed
  * from day one for extraction to its own repository/npm package.
@@ -30,3 +34,4 @@ export * as Action from "./action";
 export * as Commons from "./commons";
 export * as Core from "./core";
 export * as Rest from "./rest";
+export * as Wikitext from "./wikitext";
