@@ -28,6 +28,12 @@
  *   (issue #1065): round-trip serializer plus a query/manipulation surface.
  *   The one module here that imports nothing (not even {@link Core}) — see
  *   `docs/decisions/wikitext-parser-design.md`.
+ * - **`Dumps`** — Wikimedia dump processing as `Stream` pipelines (issue
+ *   #1066): the Wikidata JSON entity dump decoded through {@link Wikidata}'s
+ *   model, MediaWiki XML pages / incrementals via a scoped SAX-style scanner,
+ *   and Node-only byte sources (file / resumable HTTP range) with pluggable
+ *   gzip / bz2 decompression stages. The one Node-only entry point; the
+ *   pipelines themselves stay runtime-agnostic over any `Stream<Uint8Array>`.
  *
  * Zero website-internal dependencies anywhere in this package — designed
  * from day one for extraction to its own repository/npm package.
@@ -38,6 +44,7 @@
 export * as Action from "./action";
 export * as Commons from "./commons";
 export * as Core from "./core";
+export * as Dumps from "./dumps";
 export * as Rest from "./rest";
 export * as Sparql from "./sparql";
 export * as Wikidata from "./wikidata";

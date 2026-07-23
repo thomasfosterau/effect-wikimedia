@@ -1,0 +1,9 @@
+[
+{"type":"item","id":"Q1","labels":{"en":{"language":"en","value":"Universe"}},"descriptions":{"en":{"language":"en","value":"totality of space and time"}},"claims":{}},
+{"type":"item","id":"Q42","labels":{"en":{"language":"en","value":"Douglas Adams"}},"claims":{"P569":[{"mainsnak":{"snaktype":"value","property":"P569","datatype":"time","datavalue":{"type":"time","value":{"time":"+1952-03-11T00:00:00Z","precision":11,"calendarmodel":"http://www.wikidata.org/entity/Q1985727"}}},"type":"statement","rank":"normal"}]},"sitelinks":{"enwiki":{"site":"enwiki","title":"Douglas Adams","badges":[]}}},
+{"type":"item","id":"Q64","labels":{"en":{"language":"en","value":"Berlin"}},"claims":{"P569":[{"mainsnak":{"snaktype":"value","property":"P569","datatype":"time","datavalue":{"type":"time","value":{"time":"+1237-01-01T00:00:00Z","precision":9}}},"type":"statement","rank":"normal"}]}},
+{"type":"property","id":"P31","datatype":"wikibase-item","labels":{"en":{"language":"en","value":"instance of"}},"claims":{}},
+{ this line is deliberately not valid json },
+{"foo":"bar","note":"valid json but not a wikidata entity"},
+{"type":"item","id":"Q5","labels":{"en":{"language":"en","value":"human"}},"claims":{}}
+]

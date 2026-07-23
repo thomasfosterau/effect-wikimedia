@@ -36,9 +36,13 @@ const MARKERS = {
   commons: ["Commons.getFileInfo"],
   wikidata: ["Wikidata.getEntities", "Wikidata.searchEntities"],
   sparql: ["Sparql.query"],
+  // Literals unique to the Dumps modules, on the referenced pipeline paths —
+  // one per sub-module (entities / xml / sources). Their presence proves the
+  // Dumps surface bundled; their absence proves it did not.
+  dumps: ["dumps/not-an-entity", "dumps/malformed-revision", "dumps/source-read-failed"],
 } as const;
 
-type Surface = "Action" | "Rest" | "Commons" | "Wikidata" | "Sparql";
+type Surface = "Action" | "Rest" | "Commons" | "Wikidata" | "Sparql" | "Dumps";
 
 /** Bundles a one-line entry that imports and uses only the given namespace from the package barrel. */
 async function bundleImporting(namespace: Surface): Promise<string> {
@@ -48,6 +52,7 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     Commons: `import { Commons } from "./index";\nconsole.log(Commons.getFileInfo, Commons.filePathUrl);\n`,
     Wikidata: `import { Wikidata } from "./index";\nconsole.log(Wikidata.getEntities, Wikidata.searchEntities);\n`,
     Sparql: `import { Sparql } from "./index";\nconsole.log(Sparql.query, Sparql.hasLimitClause);\n`,
+    Dumps: `import { Dumps } from "./index";\nconsole.log(Dumps.entityRecords, Dumps.pageRecords, Dumps.incrementalRecords, Dumps.fromFile, Dumps.gunzip);\n`,
   };
 
   const result = await build({
@@ -66,8 +71,9 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     logLevel: "silent",
     // `effect` is the package's only dependency; excluding it keeps the
     // check focused on this package's own module boundaries (and keeps the
-    // bundle fast — effect is large).
-    external: ["effect", "effect/*"],
+    // bundle fast — effect is large). `node:*` builtins are external too — the
+    // Dumps sources module is the sanctioned Node-only entry point.
+    external: ["effect", "effect/*", "node:*"],
   });
   const output = result.outputFiles?.[0]?.text;
   if (output === undefined) throw new Error("esbuild produced no output");
@@ -83,27 +89,35 @@ const SURFACES: readonly {
   {
     namespace: "Action",
     own: MARKERS.action,
-    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql],
+    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql, MARKERS.dumps],
   },
   {
     namespace: "Rest",
     own: MARKERS.rest,
-    foreign: [MARKERS.action, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql],
+    foreign: [MARKERS.action, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql, MARKERS.dumps],
   },
   {
     namespace: "Commons",
     own: MARKERS.commons,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.wikidata, MARKERS.sparql],
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.wikidata, MARKERS.sparql, MARKERS.dumps],
   },
   {
     namespace: "Wikidata",
     own: MARKERS.wikidata,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.sparql],
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.sparql, MARKERS.dumps],
   },
   {
     namespace: "Sparql",
     own: MARKERS.sparql,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.wikidata],
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.wikidata, MARKERS.dumps],
+  },
+  {
+    // Dumps legitimately depends on the Wikidata module (it decodes each dump
+    // line through W2's item model), so Wikidata is *not* foreign here — only
+    // the unrelated Action / Rest / Commons / Sparql surfaces are.
+    namespace: "Dumps",
+    own: MARKERS.dumps,
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.sparql],
   },
 ];
 

@@ -578,6 +578,20 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
 }
 
 /**
+ * Decodes one already-`JSON.parse`d entity object — an `wbgetentities`
+ * entity, or a single line from a Wikidata JSON **dump** — into the typed
+ * {@link WikidataItem} model. Returns `null` when the value is not an object,
+ * carries no valid id, or Wikibase flagged it `missing`. Pure, total, and
+ * lenient: a partial / malformed / future-shaped object yields `null` (or a
+ * best-effort item), never a throw. This is the entry point the
+ * {@link "./dumps"} entity-dump pipeline runs each dump line through.
+ */
+export function decodeEntity(raw: unknown): WikidataItem | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  return normaliseItem(raw as RawEntity);
+}
+
+/**
  * Normalises a whole `wbgetentities` response into typed items keyed by
  * their id. Entities Wikibase flagged `missing`, or that carry no valid id,
  * are omitted — a caller reads "present" as "key exists". Pure and total: a
