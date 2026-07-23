@@ -10,9 +10,10 @@
  * package's own module boundaries) over an entry that imports and uses
  * exactly one surface namespace, then inspects the emitted code for each
  * surface's `Effect.fn` span-name markers (`"Action.getWikitext"`,
- * `"Rest.getPageMetadata"`, `"Commons.getFileInfo"`, …) — string literals
- * unique to each module's source, so their presence/absence in the output
- * is a direct, unambiguous read of what got bundled.
+ * `"Rest.getPageMetadata"`, `"Commons.getFileInfo"`, `"Wikidata.getEntities"`,
+ * `"Sparql.query"`, …) — string literals unique to each module's source, so
+ * their presence/absence in the output is a direct, unambiguous read of what
+ * got bundled.
  *
  * @module tests/tree-shaking
  */
@@ -33,15 +34,21 @@ const MARKERS = {
     "Rest.getRevisionHtml",
   ],
   commons: ["Commons.getFileInfo"],
+  wikidata: ["Wikidata.getEntities", "Wikidata.searchEntities"],
+  sparql: ["Sparql.query"],
 } as const;
 
+type Surface = "Action" | "Rest" | "Commons" | "Wikidata" | "Sparql";
+
 /** Bundles a one-line entry that imports and uses only the given namespace from the package barrel. */
-async function bundleImporting(namespace: "Action" | "Rest" | "Commons"): Promise<string> {
-  const entryByNamespace = {
+async function bundleImporting(namespace: Surface): Promise<string> {
+  const entryByNamespace: Record<Surface, string> = {
     Action: `import { Action } from "./index";\nconsole.log(Action.getWikitext, Action.getPageMetadata, Action.search, Action.parsePage);\n`,
     Rest: `import { Rest } from "./index";\nconsole.log(Rest.getPageMetadata, Rest.getRevisionMetadata, Rest.getParsedHtml, Rest.getRevisionHtml);\n`,
     Commons: `import { Commons } from "./index";\nconsole.log(Commons.getFileInfo, Commons.filePathUrl);\n`,
-  } as const;
+    Wikidata: `import { Wikidata } from "./index";\nconsole.log(Wikidata.getEntities, Wikidata.searchEntities);\n`,
+    Sparql: `import { Sparql } from "./index";\nconsole.log(Sparql.query, Sparql.hasLimitClause);\n`,
+  };
 
   const result = await build({
     stdin: {
@@ -67,25 +74,47 @@ async function bundleImporting(namespace: "Action" | "Rest" | "Commons"): Promis
   return output;
 }
 
+/** Each surface, its own markers, and the marker groups it must NOT pull. */
+const SURFACES: readonly {
+  readonly namespace: Surface;
+  readonly own: readonly string[];
+  readonly foreign: readonly (readonly string[])[];
+}[] = [
+  {
+    namespace: "Action",
+    own: MARKERS.action,
+    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql],
+  },
+  {
+    namespace: "Rest",
+    own: MARKERS.rest,
+    foreign: [MARKERS.action, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql],
+  },
+  {
+    namespace: "Commons",
+    own: MARKERS.commons,
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.wikidata, MARKERS.sparql],
+  },
+  {
+    namespace: "Wikidata",
+    own: MARKERS.wikidata,
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.sparql],
+  },
+  {
+    namespace: "Sparql",
+    own: MARKERS.sparql,
+    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.wikidata],
+  },
+];
+
 describe("module-per-surface tree-shaking", () => {
-  it("importing Action pulls no Rest or Commons code", async () => {
-    const bundle = await bundleImporting("Action");
-    for (const marker of MARKERS.action) expect(bundle).toContain(marker);
-    for (const marker of MARKERS.rest) expect(bundle).not.toContain(marker);
-    for (const marker of MARKERS.commons) expect(bundle).not.toContain(marker);
-  });
-
-  it("importing Rest pulls no Action or Commons code", async () => {
-    const bundle = await bundleImporting("Rest");
-    for (const marker of MARKERS.rest) expect(bundle).toContain(marker);
-    for (const marker of MARKERS.action) expect(bundle).not.toContain(marker);
-    for (const marker of MARKERS.commons) expect(bundle).not.toContain(marker);
-  });
-
-  it("importing Commons pulls no Action or Rest code", async () => {
-    const bundle = await bundleImporting("Commons");
-    for (const marker of MARKERS.commons) expect(bundle).toContain(marker);
-    for (const marker of MARKERS.action) expect(bundle).not.toContain(marker);
-    for (const marker of MARKERS.rest) expect(bundle).not.toContain(marker);
-  });
+  for (const { namespace, own, foreign } of SURFACES) {
+    it(`importing ${namespace} pulls no other surface's code`, async () => {
+      const bundle = await bundleImporting(namespace);
+      for (const marker of own) expect(bundle).toContain(marker);
+      for (const group of foreign) {
+        for (const marker of group) expect(bundle).not.toContain(marker);
+      }
+    });
+  }
 });

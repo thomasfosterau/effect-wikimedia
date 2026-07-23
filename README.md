@@ -2,7 +2,7 @@
 
 A strongly typed, Effect-idiomatic client family for Wikimedia properties (Wikipedia, Wikidata, Commons, and siblings). One package, **module-per-surface**, designed from day one for extraction to its own repository/npm package — see [the decision doc](../../docs/decisions/effect-wikimedia-as-the-wikimedia-client-toolkit.md).
 
-Every surface is a namespace on the package's single `"."` barrel (`import { Action, Rest, Commons, Core } from "@thomasfosterau/effect-wikimedia"`); importing one namespace never pulls another surface's code into a bundle (`tests/tree-shaking.test.ts` proves this with a real `esbuild` build).
+Every surface is a namespace on the package's single `"."` barrel (`import { Action, Rest, Commons, Wikidata, Sparql, Core } from "@thomasfosterau/effect-wikimedia"`); importing one namespace never pulls another surface's code into a bundle (`tests/tree-shaking.test.ts` proves this with a real `esbuild` build).
 
 ## Module surface
 
@@ -10,8 +10,10 @@ Every surface is a namespace on the package's single `"."` barrel (`import { Act
 - **`Action`** — the Action API (`/w/api.php`): `getWikitext`, `getPageMetadata`, `search`, `parsePage` (sections/links/categories/templates).
 - **`Rest`** — the Core REST API / Parsoid surface (`/w/rest.php/v1/...`): `getPageMetadata`, `getRevisionMetadata`, `getParsedHtml`, `getRevisionHtml`.
 - **`Commons`** — `filePathUrl` (`Special:FilePath` URL construction, with optional thumbnail width) and `getFileInfo`.
+- **`Wikidata`** — the typed Wikidata item / claim model: branded `Q`/`P`/`L` ids (`ItemId` / `PropertyId` / `LexemeId`), the full snak `DataValue` union (`wikibase-entityid`, `time`, `globecoordinate`, `quantity`, `monolingualtext`, `string`, `external-id`, and a lenient `unknown` degrade), statements with rank / qualifiers / references, sitelinks, and per-language label / description / alias maps. `getEntities` (batched `wbgetentities`, 50-id chunking) and `searchEntities` (`wbsearchentities`).
+- **`Sparql`** — the Wikidata Query Service (WDQS) SPARQL client: `query` (with a LIMIT-enforcing helper, `hasLimitClause`) decoding SPARQL 1.1 JSON results into typed terms (`uri` / `literal` / `bnode` / `unknown`), and `literalKind` mapping `xsd:*` datatypes back toward the Wikibase datavalue vocabulary.
 
-Later epic slices (#1064-#1066) add `Wikidata`/`Sparql`, `Wikitext`, and `Dumps` as further namespaces on the same barrel.
+Later epic slices (#1065-#1066) add `Wikitext` and `Dumps` as further namespaces on the same barrel.
 
 ## Usage
 

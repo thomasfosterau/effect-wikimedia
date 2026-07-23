@@ -19,6 +19,11 @@
  *   parsed HTML for a title or revision, typed page/revision metadata.
  * - **`Commons`** — Commons file info and `Special:FilePath` URL
  *   construction (subsumes `packages/wikidata`'s `normaliseCommonsImage`).
+ * - **`Wikidata`** — the typed Wikidata item / claim model (branded
+ *   `Q`/`P`/`L` ids, the full snak datavalue union) plus `wbgetentities`
+ *   (batched, 50-id chunking) and `wbsearchentities`.
+ * - **`Sparql`** — the Wikidata Query Service (WDQS) SPARQL client: typed
+ *   result terms and a LIMIT-enforcing query helper.
  * - **`Wikitext`** — a pure, dependency-free wikitext → typed AST parser
  *   (issue #1065): round-trip serializer plus a query/manipulation surface.
  *   The one module here that imports nothing (not even {@link Core}) — see
@@ -34,4 +39,6 @@ export * as Action from "./action";
 export * as Commons from "./commons";
 export * as Core from "./core";
 export * as Rest from "./rest";
+export * as Sparql from "./sparql";
+export * as Wikidata from "./wikidata";
 export * as Wikitext from "./wikitext";

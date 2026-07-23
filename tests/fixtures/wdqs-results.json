@@ -1,0 +1,34 @@
+{
+  "head": {
+    "vars": ["item", "itemLabel", "dob", "height", "coord", "article", "anon"]
+  },
+  "results": {
+    "bindings": [
+      {
+        "item": { "type": "uri", "value": "http://www.wikidata.org/entity/Q42" },
+        "itemLabel": { "type": "literal", "xml:lang": "en", "value": "Douglas Adams" },
+        "dob": {
+          "datatype": "http://www.w3.org/2001/XMLSchema#dateTime",
+          "type": "literal",
+          "value": "1952-03-11T00:00:00Z"
+        },
+        "height": {
+          "datatype": "http://www.w3.org/2001/XMLSchema#decimal",
+          "type": "literal",
+          "value": "1.96"
+        },
+        "coord": {
+          "datatype": "http://www.opengis.net/ont/geosparql#wktLiteral",
+          "type": "literal",
+          "value": "Point(0.1218 52.2053)"
+        },
+        "article": { "type": "uri", "value": "https://en.wikipedia.org/wiki/Douglas_Adams" },
+        "anon": { "type": "bnode", "value": "t42" }
+      },
+      {
+        "item": { "type": "uri", "value": "http://www.wikidata.org/entity/Q28421831" },
+        "itemLabel": { "type": "literal", "value": "Q28421831" }
+      }
+    ]
+  }
+}

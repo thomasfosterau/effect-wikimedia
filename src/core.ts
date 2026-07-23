@@ -102,11 +102,16 @@ const ALLOWED_HOSTS: ReadonlySet<string> = new Set(["wikidata.org", "www.wikidat
 
 /**
  * Host suffixes accepted for the per-wiki families: any language edition of
- * Wikipedia (`en.wikipedia.org`, `zh-yue.wikipedia.org`, …) and any other
- * Wikimedia project host (`commons.wikimedia.org`, `meta.wikimedia.org`,
- * `www.wikidata.org`'s siblings, …).
+ * Wikipedia (`en.wikipedia.org`, `zh-yue.wikipedia.org`, …), any other
+ * Wikimedia project host (`commons.wikimedia.org`, `meta.wikimedia.org`, …),
+ * and any Wikidata subdomain — notably `query.wikidata.org`, the Wikidata
+ * Query Service (WDQS) SPARQL endpoint the {@link "./sparql"} module targets.
  */
-const ALLOWED_HOST_SUFFIXES: readonly string[] = [".wikipedia.org", ".wikimedia.org"];
+const ALLOWED_HOST_SUFFIXES: readonly string[] = [
+  ".wikipedia.org",
+  ".wikimedia.org",
+  ".wikidata.org",
+];
 
 /** Upper bound on a host string before it is even pattern-checked. */
 const MAX_HOST_LENGTH = 100;
