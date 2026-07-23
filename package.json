@@ -12,6 +12,7 @@
     "test:coverage": "vp test run tests --coverage"
   },
   "dependencies": {
+    "@thomasfosterau/effect-wikimedia": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -10,12 +10,20 @@
  * to disambiguate (Match, #575). `enrich` then pulls the selected facts for
  * a **confirmed** QID — the QID self-link, `sameAs` external identifiers,
  * dates, and images ({@link WikidataFacts}) — for the operation layer to
- * stamp as provenance-marked mapping assertions (Enrich, #613). Runs over
- * Effect's `HttpClient`. The Wikidata public APIs are free and need no
- * credentials. The service is an injectable `Context.Service` so callers
- * depend on the contract, not on `fetch`: tests provide a stubbed client
- * under {@link wikidataLookupClientLayer}, production provides
- * {@link wikidataLookupLayer} over `FetchHttpClient`.
+ * stamp as provenance-marked mapping assertions (Enrich, #613).
+ *
+ * Runs over `@thomasfosterau/effect-wikimedia`'s `Wikidata` / `Action`
+ * modules — the general Wikimedia client toolkit — via its injectable
+ * `Core.WikimediaClient` service: tests provide a stub client under
+ * {@link wikidataLookupClientLayer}, production provides
+ * {@link wikidataLookupLayer} over the general package's `Core.wikimediaLayer`
+ * (which is itself backed by the global `fetch`). This module (issue #1067)
+ * no longer owns any HTTP plumbing or wire decode — that lives in
+ * effect-wikimedia, which types the wire honestly and decodes leniently.
+ * What stays here is site policy: the {@link WikidataLookup} service
+ * contract, the input validators, the curated allowlists, and the
+ * candidate/fact shapes feeding `entity_mapping` (see `./candidate` and
+ * `./normalise`).
  *
  * The lookup service itself is **persistence-free**: Match returns
  * candidates and Enrich returns neutral facts; storing a chosen QID (on the
@@ -25,31 +33,27 @@
  *
  * Untrusted-data discipline (mirrors the biblio lookup service):
  * - inputs (label, property id, identifier value) are validated /
- *   normalised before any URL is built, so a caller-supplied value can
- *   never escape its intended position (SSRF / injection guard — see
- *   `normaliseLabelQuery` / `normalisePropertyId` / `normaliseExternalIdValue`);
- * - every request targets a fixed host + protocol over `https`, with all
- *   variable parts placed in `URLSearchParams` (percent-encoded), never
- *   interpolated into the path;
- * - responses decode through deliberately-lenient schemas and are then
- *   sanitised field-by-field by the normalisers;
- * - an empty result decodes to an empty candidate list (not an error);
- *   transport / decode faults land on the typed {@link LookupError}.
+ *   normalised before being handed to effect-wikimedia, so a caller-supplied
+ *   value can never escape its intended position (SSRF / injection guard —
+ *   see `normaliseLabelQuery` / `normalisePropertyId` / `normaliseExternalIdValue`);
+ * - effect-wikimedia targets a fixed, allowlisted Wikidata host over
+ *   `https`, with all variable parts percent-encoded, never interpolated
+ *   into a path;
+ * - responses come back through effect-wikimedia's typed `WikidataItem` /
+ *   `SearchHit` model; this layer's normalisers ({@link module:lib/server/wikidata/normalise})
+ *   still re-validate every field they read against this site's policy
+ *   before returning it;
+ * - an empty upstream result decodes to an empty candidate list (not an
+ *   error); transport / decode faults land on the typed {@link LookupError}.
  *
  * @module lib/server/wikidata/lookup
  */
 
+import { Action, Core, Wikidata } from "@thomasfosterau/effect-wikimedia";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-  type HttpClientError,
-} from "effect/unstable/http";
 import {
   MAX_CANDIDATES,
   normaliseExternalIdValue,
@@ -59,32 +63,21 @@ import {
   type WikidataCandidate,
   type WikidataFacts,
 } from "./candidate";
-import {
-  identifierMatchQids,
-  normaliseEntities,
-  normaliseFacts,
-  normaliseSearch,
-  QuerySearchResponse,
-  WbGetEntitiesResponse,
-  WbSearchResponse,
-} from "./normalise";
+import { dedupedQids, hitToCandidate, itemToCandidate, normaliseFacts } from "./normalise";
 
 /**
- * The fixed Wikidata API endpoint. Pinned host + protocol: every request
- * this service makes targets exactly this URL, varying only the query
- * string. A caller can never redirect the request elsewhere.
+ * The fixed Wikidata host every request in this module targets. Passed
+ * explicitly to each effect-wikimedia call (that package's host is always a
+ * parameter, never a constant it bakes in) — pinning it here is this site's
+ * choice, not the general package's.
  */
-const WIKIDATA_API = "https://www.wikidata.org/w/api.php";
+const WIKIDATA_HOST = "www.wikidata.org";
 
 /** The interface language we ask Wikidata for labels / descriptions in. */
 const DEFAULT_LANGUAGE = "en";
 
-/**
- * A polite User-Agent. Wikimedia's API etiquette asks callers to identify
- * themselves so abusive traffic can be contacted rather than blanket
- * blocked.
- */
-const USER_AGENT = "thomasfoster.au-wikidata-match/1.0 (mailto:me@thomasfoster.au)";
+/** The `wbgetentities` facets this service ever needs — narrower than effect-wikimedia's full-item default. */
+const ENTITY_PROPS = ["labels", "descriptions", "claims"] as const;
 
 /** A bad input the caller supplied — fix the input, don't retry. */
 export class InvalidQuery extends Schema.TaggedErrorClass<InvalidQuery>()("InvalidQuery", {
@@ -141,67 +134,53 @@ export class WikidataLookup extends Context.Service<
   }
 >()("@app/WikidataLookup") {}
 
-// ── HTTP plumbing ─────────────────────────────────────────────────────
-
 /**
- * Builds the fixed-host API URL with the given query parameters. All
- * variable values go through `URLSearchParams`, which percent-encodes
- * them — they are never interpolated into the path. `format=json` is
- * forced on every request.
+ * Maps effect-wikimedia's typed error channel onto this service's
+ * {@link LookupFailed}. `InvalidRequest` is included defensively — every
+ * request this module builds already validates its inputs against this
+ * layer's own policy before calling effect-wikimedia, so the general
+ * package should never see anything it rejects; if it somehow does, that's
+ * an upstream/transport concern from this service's contract, not a caller
+ * input error.
  */
-function apiUrl(params: Record<string, string>): string {
-  const url = new URL(WIKIDATA_API);
-  url.search = new URLSearchParams({ ...params, format: "json" }).toString();
-  return url.toString();
-}
-
-function describeHttpError(error: HttpClientError.HttpClientError): string {
-  return error.reason._tag === "StatusCodeError"
-    ? `wikidata returned HTTP ${error.reason.response.status}`
-    : `request failed: ${String(error)}`;
+function toLookupFailed(error: Core.WikimediaError): LookupFailed {
+  switch (error._tag) {
+    case "RequestFailed":
+      return new LookupFailed({ description: error.description });
+    case "RateLimited":
+      return new LookupFailed({
+        description: `wikidata rate-limited the request (retry after ${error.retryAfterSeconds}s)`,
+      });
+    case "InvalidRequest":
+      return new LookupFailed({
+        description: `unexpected invalid request building the wikidata query (${error.kind}: ${error.value})`,
+      });
+  }
 }
 
 // ── Service implementation ────────────────────────────────────────────
 
 /**
- * Builds the {@link WikidataLookup} service over an `HttpClient`. Wrapped
- * by {@link wikidataLookupClientLayer} (which tests drive with a stub
- * client) and {@link wikidataLookupLayer} (production, over the global
- * fetch); not exported because both layers live in this module.
+ * Builds the {@link WikidataLookup} service over a `Core.WikimediaClient`.
+ * Wrapped by {@link wikidataLookupClientLayer} (which tests drive with a
+ * stub client) and {@link wikidataLookupLayer} (production, over
+ * effect-wikimedia's `Core.wikimediaLayer`); not exported because both
+ * layers live in this module.
  */
 const makeWikidataLookup = Effect.fnUntraced(function* () {
-  const baseClient = yield* HttpClient.HttpClient;
-  const client = baseClient.pipe(
-    HttpClient.mapRequest((request) =>
-      request.pipe(
-        HttpClientRequest.setHeader("user-agent", USER_AGENT),
-        HttpClientRequest.acceptJson,
-      ),
-    ),
-    // Raise a `StatusCodeError` for any non-2xx response. `HttpClient`
-    // does NOT fail on status by default, so without this a 5xx that
-    // still carries a JSON body would decode against the (lenient)
-    // schemas and look like an empty success.
-    HttpClient.filterStatusOk,
-  );
+  // Resolved once at layer-build time (mirrors effect-wikimedia's own
+  // `WikimediaClient` construction over `HttpClient`) so every service
+  // method below is `R = never`, matching the `WikidataLookup` contract —
+  // callers depend on the service, not on effect-wikimedia's context.
+  const client = yield* Core.WikimediaClient;
 
-  /** JSON GET against the fixed API URL, decoded through `schema`. */
-  const getJson = <S extends Schema.Top>(
-    url: string,
-    schema: S,
-  ): Effect.Effect<S["Type"], LookupFailed, S["DecodingServices"]> =>
-    client.get(url).pipe(
-      Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-      Effect.catchTags({
-        HttpClientError: (error) =>
-          Effect.fail(new LookupFailed({ description: describeHttpError(error) })),
-        SchemaError: (error) =>
-          Effect.fail(
-            new LookupFailed({
-              description: `wikidata response did not match the expected shape: ${String(error)}`,
-            }),
-          ),
-      }),
+  /** Runs an effect-wikimedia call against the resolved client, mapping its error channel onto {@link LookupFailed}. */
+  const run = <A>(
+    effect: Effect.Effect<A, Core.WikimediaError, Core.WikimediaClient>,
+  ): Effect.Effect<A, LookupFailed> =>
+    effect.pipe(
+      Effect.provideService(Core.WikimediaClient, client),
+      Effect.mapError(toLookupFailed),
     );
 
   const searchByLabel = Effect.fn("WikidataLookup.searchByLabel")(function* (label: string) {
@@ -209,16 +188,14 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
     if (query === null) {
       return yield* new InvalidQuery({ kind: "label", value: label });
     }
-    const url = apiUrl({
-      action: "wbsearchentities",
-      search: query,
-      language: DEFAULT_LANGUAGE,
-      uselang: DEFAULT_LANGUAGE,
-      type: "item",
-      limit: String(MAX_CANDIDATES),
-    });
-    const response = yield* getJson(url, WbSearchResponse);
-    return normaliseSearch(response);
+    const hits = yield* run(
+      Wikidata.searchEntities(WIKIDATA_HOST, query, {
+        language: DEFAULT_LANGUAGE,
+        type: "item",
+        limit: MAX_CANDIDATES,
+      }),
+    );
+    return hits.flatMap(hitToCandidate);
   });
 
   const searchByIdentifier = Effect.fn("WikidataLookup.searchByIdentifier")(function* (
@@ -235,27 +212,25 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
 
     // `haswbstatement:P<prop>=<value>` is the cheap "items carrying this
     // identifier" search. Both halves are validated above; the whole
-    // clause is still placed in a query parameter and percent-encoded.
-    const searchUrl = apiUrl({
-      action: "query",
-      list: "search",
-      srsearch: `haswbstatement:${property}=${value}`,
-      srlimit: String(MAX_CANDIDATES),
-    });
-    const matches = yield* getJson(searchUrl, QuerySearchResponse);
-    const qids = identifierMatchQids(matches);
+    // clause is still handed to effect-wikimedia as a single query
+    // parameter value, never interpolated into a path.
+    const hits = yield* run(
+      Action.search(WIKIDATA_HOST, `haswbstatement:${property}=${value}`, {
+        limit: MAX_CANDIDATES,
+      }),
+    );
+    const qids = dedupedQids(hits);
     if (qids.length === 0) return [] as readonly WikidataCandidate[];
 
     // One batched enrichment call resolves label / description / P31 for
     // every matched QID. The ids are all validated `Q<digits>`.
-    const enrichUrl = apiUrl({
-      action: "wbgetentities",
-      ids: qids.join("|"),
-      props: "labels|descriptions|claims",
-      languages: DEFAULT_LANGUAGE,
-    });
-    const entities = yield* getJson(enrichUrl, WbGetEntitiesResponse);
-    return normaliseEntities(entities, qids, DEFAULT_LANGUAGE);
+    const entities = yield* run(
+      Wikidata.getEntities(WIKIDATA_HOST, qids, {
+        languages: [DEFAULT_LANGUAGE],
+        props: ENTITY_PROPS,
+      }),
+    );
+    return qids.flatMap((qid) => itemToCandidate(entities[qid], qid, DEFAULT_LANGUAGE));
   });
 
   const enrich = Effect.fn("WikidataLookup.enrich")(function* (qid: string) {
@@ -263,38 +238,41 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
     if (validated === null) {
       return yield* new InvalidQuery({ kind: "identifier", value: qid });
     }
-    // Single confirmed item, widest props we read. `ids` is the validated
-    // QID, placed (like every value) in the percent-encoded query string.
-    const url = apiUrl({
-      action: "wbgetentities",
-      ids: validated,
-      props: "labels|descriptions|claims",
-      languages: DEFAULT_LANGUAGE,
-    });
-    const response = yield* getJson(url, WbGetEntitiesResponse);
-    return normaliseFacts(response, validated);
+    // Single confirmed item; `validated` is the already-validated QID.
+    const entities = yield* run(
+      Wikidata.getEntities(WIKIDATA_HOST, [validated], {
+        languages: [DEFAULT_LANGUAGE],
+        props: ENTITY_PROPS,
+      }),
+    );
+    const item = entities[validated];
+    if (item === undefined) return null;
+    return normaliseFacts(item, validated);
   });
 
   return { searchByLabel, searchByIdentifier, enrich } as const;
 });
 
 /**
- * {@link WikidataLookup} layer over whatever `HttpClient` is in context.
- * The production graph supplies `FetchHttpClient` (see
- * {@link wikidataLookupLayer}); a test supplies a stubbed fetch under the
- * same `FetchHttpClient` slot. Kept separate from {@link wikidataLookupLayer}
- * so tests can inject their own client without bundling the global fetch.
+ * {@link WikidataLookup} layer over whatever `Core.WikimediaClient` is in
+ * context. The production graph supplies {@link Core.wikimediaLayer} (see
+ * {@link wikidataLookupLayer}); a test supplies a stub `Core.WikimediaClient`
+ * directly under the same slot (see `tests/lookup.test.ts` — stubbing at
+ * this layer rather than at `FetchHttpClient` keeps this suite decoupled
+ * from effect-wikimedia's own URL-building / wire-decode tests). Kept
+ * separate from {@link wikidataLookupLayer} so tests can inject their own
+ * client without bundling the global fetch.
  */
-export const wikidataLookupClientLayer: Layer.Layer<WikidataLookup, never, HttpClient.HttpClient> =
+export const wikidataLookupClientLayer: Layer.Layer<WikidataLookup, never, Core.WikimediaClient> =
   Layer.effect(WikidataLookup)(makeWikidataLookup());
 
 /**
- * Production {@link WikidataLookup} layer, backed by the Worker global
- * fetch via `FetchHttpClient`. Provided by the deferred reconciliation
- * HTTP / Form surface that triggers a Match (filed back to #575); this
- * slice ships the layer and exercises the service through
- * {@link wikidataLookupClientLayer}.
+ * Production {@link WikidataLookup} layer, backed by effect-wikimedia's
+ * `Core.wikimediaLayer` (the Worker global fetch via `FetchHttpClient`).
+ * Provided by the deferred reconciliation HTTP / Form surface that triggers
+ * a Match (filed back to #575); this slice ships the layer and exercises
+ * the service through {@link wikidataLookupClientLayer}.
  */
 export const wikidataLookupLayer: Layer.Layer<WikidataLookup> = wikidataLookupClientLayer.pipe(
-  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(Core.wikimediaLayer),
 );

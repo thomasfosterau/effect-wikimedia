@@ -2,14 +2,18 @@
  * @copyright Thomas Foster
  *
  * Neutral candidate-match shape and untrusted-input helpers for the
- * Wikidata reconciliation lookup service (KB-011, issue #575).
+ * Wikidata reconciliation lookup service (KB-011, issue #575). This
+ * package's policy layer over `@thomasfosterau/effect-wikimedia` (#1067) —
+ * the general package types and decodes the Wikidata wire; this module
+ * defines what *this site* trusts and stores.
  *
  * A {@link WikidataCandidate} is the provider-neutral match the lookup
- * service ({@link module:lib/server/wikidata/lookup}) normalises its raw
- * Wikidata API responses into. This slice is the **Match** step only: it
- * resolves an Entity's label and/or external identifiers to candidate
- * QIDs for the owner to disambiguate. It deliberately does **not**
- * persist anything.
+ * service ({@link module:lib/server/wikidata/lookup}) normalises
+ * effect-wikimedia's typed `Wikidata.WikidataItem` / `SearchHit` values
+ * into ({@link module:lib/server/wikidata/normalise}). This slice is the
+ * **Match** step only: it resolves an Entity's label and/or external
+ * identifiers to candidate QIDs for the owner to disambiguate. It
+ * deliberately does **not** persist anything.
  *
  * Persistence is a separate concern, delivered by issue #612: a QID is a
  * stable, identity-level authority reference that belongs on `entity`

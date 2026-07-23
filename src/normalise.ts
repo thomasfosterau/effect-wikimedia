@@ -1,32 +1,33 @@
 /**
  * @copyright Thomas Foster
  *
- * Untrusted-response schemas and pure normalisers for the Wikidata
- * reconciliation lookup service (KB-011, issue #575).
+ * Reconciliation shaping policy for the Wikidata lookup service (KB-011,
+ * issue #575 / #613; shrunk to a policy layer over `@thomasfosterau/effect-wikimedia`
+ * in #1067). `@thomasfosterau/effect-wikimedia`'s `Wikidata` module now owns
+ * the HTTP plumbing and the lenient wire decode — a fully typed
+ * `WikidataItem` / `DataValue` union, honest at the type, lenient at the
+ * wire (see {@link module:@thomasfosterau/effect-wikimedia/wikidata}). This
+ * module is what is left once that's gone: **this site's** reconciliation
+ * policy — which fields become a {@link WikidataCandidate}, which claims
+ * become a {@link WikidataFact} — expressed over that typed surface.
  *
- * Wikidata API responses are **untrusted**: the schemas here are
- * deliberately lenient (every field optional, arrays of unknown shapes
- * tolerated) so a partial or unexpected payload decodes rather than
- * throwing, and the normalisers then extract only the fields we trust,
- * sanitising each one ({@link module:lib/server/wikidata/candidate}).
- * Decoding never trusts upstream lengths or types — a hostile response
- * can at worst yield fewer / no candidates, never an injection.
+ * Untrusted-data discipline still applies at this layer, even though the
+ * general package already typed the wire: every value this module reads off
+ * a `WikidataItem` is re-validated / re-bounded by this package's own
+ * policy validators ({@link module:lib/server/wikidata/candidate}) before
+ * it is returned or built into a `WikidataFact`/`WikidataCandidate` — field
+ * bounds, the curated `EXTERNAL_ID_AUTHORITIES` allowlist, and the
+ * injection-guard character classes are this layer's job, not the general
+ * package's (it types the shape; it doesn't know this site's policy).
  *
- * Three response shapes are modelled, one per lookup path:
- * - `wbsearchentities` (label search) → `search[]` with `id` / `label` /
- *   `description`;
- * - `query` + `list=search` (`haswbstatement` identifier search) →
- *   `query.search[]` with a `title` that is the matched QID;
- * - `wbgetentities` (label / description / `instance of` enrichment) →
- *   `entities` keyed by QID.
- *
- * These functions are pure and unit-tested against captured fixtures
- * without any network access.
+ * These functions are pure and unit-tested against typed fixtures (no
+ * network, no HTTP stub) — only `Wikidata.WikidataItem` / `SearchHit` /
+ * `SearchResult` values in, `WikidataCandidate` / `WikidataFacts` values out.
  *
  * @module lib/server/wikidata/normalise
  */
 
-import * as Schema from "effect/Schema";
+import type { Action, Wikidata } from "@thomasfosterau/effect-wikimedia";
 import {
   DATE_PROPERTIES,
   EXTERNAL_ID_AUTHORITIES,
@@ -50,73 +51,39 @@ import {
 // ── wbsearchentities (label search) ───────────────────────────────────
 
 /**
- * Lenient schema for a single `wbsearchentities` result. Only the fields
- * we read are modelled, all optional. Unknown extra keys are ignored.
+ * Maps one typed `wbsearchentities` hit to a neutral candidate. Empty when
+ * the hit's id is not a well-formed QID (a defensive re-validation of the
+ * general package's already-typed `EntityId` — this layer's candidates are
+ * always item ids). Label search does not fetch claims, so `instanceOf` is
+ * always empty.
  */
-const WbSearchEntity = Schema.Struct({
-  id: Schema.optional(Schema.Unknown),
-  label: Schema.optional(Schema.Unknown),
-  description: Schema.optional(Schema.Unknown),
-});
-
-/** Lenient schema for the `wbsearchentities` response envelope. */
-export const WbSearchResponse = Schema.Struct({
-  search: Schema.optional(Schema.Array(WbSearchEntity)),
-});
-export type WbSearchResponse = typeof WbSearchResponse.Type;
-
-/**
- * Normalises a `wbsearchentities` response into neutral candidates.
- * Entries whose `id` is not a well-formed QID are dropped (a defensive
- * re-validation of the upstream id before it is returned / persisted).
- * Label search does not fetch claims, so `instanceOf` is always empty.
- */
-export function normaliseSearch(response: WbSearchResponse): readonly WikidataCandidate[] {
-  const out: WikidataCandidate[] = [];
-  for (const entry of response.search ?? []) {
-    if (out.length >= MAX_CANDIDATES) break;
-    const qid = typeof entry.id === "string" ? normaliseQid(entry.id) : null;
-    if (qid === null) continue;
-    out.push({
+export function hitToCandidate(hit: Wikidata.SearchHit): readonly WikidataCandidate[] {
+  const qid = normaliseQid(hit.id);
+  if (qid === null) return [];
+  return [
+    {
       qid,
-      label: sanitiseText(entry.label),
-      description: sanitiseText(entry.description),
+      label: sanitiseText(hit.label),
+      description: sanitiseText(hit.description),
       instanceOf: [],
-    });
-  }
-  return out;
+    },
+  ];
 }
 
-// ── query + list=search (identifier search) ───────────────────────────
-
-/** Lenient schema for a single `query.search` result. */
-const QuerySearchHit = Schema.Struct({
-  title: Schema.optional(Schema.Unknown),
-});
-
-/** Lenient schema for the `query` + `list=search` response envelope. */
-export const QuerySearchResponse = Schema.Struct({
-  query: Schema.optional(
-    Schema.Struct({
-      search: Schema.optional(Schema.Array(QuerySearchHit)),
-    }),
-  ),
-});
-export type QuerySearchResponse = typeof QuerySearchResponse.Type;
+// ── list=search (identifier search) ────────────────────────────────────
 
 /**
- * Extracts the matched QIDs from a `haswbstatement` search response. Each
- * hit's `title` is the page title, which for a main-namespace Wikidata
- * item is the QID itself. Non-QID titles are dropped; the result is
- * de-duplicated and capped.
+ * Extracts the matched QIDs from a `haswbstatement` search (run through
+ * `Action.search` — for a main-namespace Wikidata item, the page title
+ * *is* the QID). Non-QID titles are dropped; the result is de-duplicated
+ * and capped at {@link MAX_CANDIDATES}.
  */
-export function identifierMatchQids(response: QuerySearchResponse): readonly string[] {
-  const hits = response.query?.search ?? [];
+export function dedupedQids(hits: readonly Action.SearchResult[]): readonly string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const hit of hits) {
     if (out.length >= MAX_CANDIDATES) break;
-    const qid = typeof hit.title === "string" ? normaliseQid(hit.title) : null;
+    const qid = normaliseQid(hit.title);
     if (qid === null || seen.has(qid)) continue;
     seen.add(qid);
     out.push(qid);
@@ -124,138 +91,77 @@ export function identifierMatchQids(response: QuerySearchResponse): readonly str
   return out;
 }
 
-// ── wbgetentities (label / description / instance-of enrichment) ───────
-
-/** A localised text value (`{ language, value }`). */
-const LocalisedText = Schema.Struct({
-  value: Schema.optional(Schema.Unknown),
-});
-
-/**
- * A single Wikidata statement, modelled only down to the main snak's
- * `datavalue.value`. That value is left `Unknown` because its shape varies
- * by datatype — a `Q<id>` object for `instance of`, a bare string for an
- * external-id or image, a `{ time }` object for a date — and each consumer
- * narrows it defensively. Everything else (qualifiers, references, rank) is
- * tolerated and ignored.
- */
-const ClaimStatement = Schema.Struct({
-  mainsnak: Schema.optional(
-    Schema.Struct({
-      datavalue: Schema.optional(
-        Schema.Struct({
-          value: Schema.optional(Schema.Unknown),
-        }),
-      ),
-    }),
-  ),
-});
-type ClaimStatement = typeof ClaimStatement.Type;
-
-/**
- * Lenient schema for a single `wbgetentities` item. `claims` is a generic
- * record keyed by property id (`P31`, `P214`, `P569`, `P18`, …); the
- * normalisers read only the properties they recognise.
- */
-const WbEntity = Schema.Struct({
-  id: Schema.optional(Schema.Unknown),
-  // Wikidata flags a non-existent item as `{ id, missing: "" }` keyed under
-  // its QID (the key is present, the item is not). Modelled so the enrich
-  // path can tell "no such item" from a real one with no claims.
-  missing: Schema.optional(Schema.Unknown),
-  labels: Schema.optional(Schema.Record(Schema.String, LocalisedText)),
-  descriptions: Schema.optional(Schema.Record(Schema.String, LocalisedText)),
-  claims: Schema.optional(Schema.Record(Schema.String, Schema.Array(ClaimStatement))),
-});
-type WbEntity = typeof WbEntity.Type;
-
-/** The main-snak value of a statement, or `undefined` when absent. */
-function claimValue(claim: ClaimStatement): unknown {
-  return claim.mainsnak?.datavalue?.value;
-}
-
-/** Lenient schema for the `wbgetentities` response envelope. */
-export const WbGetEntitiesResponse = Schema.Struct({
-  entities: Schema.optional(Schema.Record(Schema.String, WbEntity)),
-});
-export type WbGetEntitiesResponse = typeof WbGetEntitiesResponse.Type;
-
-/** Reads the preferred-language label/description value, sanitised. */
-function localisedValue(
-  record: Record<string, { value?: unknown }> | undefined,
-  language: string,
-): string | null {
-  if (!record) return null;
-  return sanitiseText(record[language]?.value);
-}
-
-/** Extracts the validated `instance of` QIDs from an entity's P31 claims. */
-function instanceOfQids(entity: WbEntity): readonly string[] {
-  const claims = entity.claims?.P31 ?? [];
+/** The validated `wikibase-entityid` targets of a P31 (`instance of`) statement list, capped. */
+function instanceOfQids(item: Wikidata.WikidataItem): readonly string[] {
   const out: string[] = [];
-  for (const claim of claims) {
+  for (const statement of item.claims.P31 ?? []) {
     if (out.length >= MAX_INSTANCE_OF) break;
-    // A P31 value is a `{ id: "Q…" }` entity reference.
-    const value = claimValue(claim);
-    const id = typeof value === "object" && value !== null ? (value as { id?: unknown }).id : null;
-    const qid = typeof id === "string" ? normaliseQid(id) : null;
+    if (statement.mainsnak._tag !== "value") continue;
+    const value = statement.mainsnak.value;
+    if (value._tag !== "wikibase-entityid") continue;
+    const qid = normaliseQid(value.id);
     if (qid !== null) out.push(qid);
   }
   return out;
 }
 
 /**
- * Normalises a `wbgetentities` response into candidates, preserving the
- * order of `qids` (the identifier-search match order) and skipping any
- * QID the response didn't return. `language` selects which localised
- * label / description to surface.
+ * Maps a fetched `WikidataItem` (keyed by `qid`, the identifier-search
+ * match) to a neutral candidate — `undefined` when the batched
+ * `wbgetentities` fetch didn't return this id (an upstream miss for one
+ * QID in the batch). Re-validates the echoed id, falling back to the
+ * requested `qid` (already validated before the request was built).
  */
-export function normaliseEntities(
-  response: WbGetEntitiesResponse,
-  qids: readonly string[],
+export function itemToCandidate(
+  item: Wikidata.WikidataItem | undefined,
+  qid: string,
   language: string,
 ): readonly WikidataCandidate[] {
-  const entities = response.entities ?? {};
-  const out: WikidataCandidate[] = [];
-  for (const requested of qids) {
-    const entity = entities[requested];
-    if (!entity) continue;
-    // Re-validate the echoed id; fall back to the requested QID, which we
-    // already validated before building the request.
-    const echoed = typeof entity.id === "string" ? normaliseQid(entity.id) : null;
-    out.push({
-      qid: echoed ?? requested,
-      label: localisedValue(entity.labels, language),
-      description: localisedValue(entity.descriptions, language),
-      instanceOf: instanceOfQids(entity),
-    });
+  if (item === undefined) return [];
+  return [
+    {
+      qid: normaliseQid(item.id) ?? qid,
+      label: sanitiseText(item.labels[language]),
+      description: sanitiseText(item.descriptions[language]),
+      instanceOf: instanceOfQids(item),
+    },
+  ];
+}
+
+// ── wbgetentities → enrich facts (#613) ─────────────────────────────────
+
+/** The values of every `value`-kind statement on `property`, in claim order. */
+function statementValues(
+  item: Wikidata.WikidataItem,
+  property: string,
+): readonly Wikidata.DataValue[] {
+  const out: Wikidata.DataValue[] = [];
+  for (const statement of item.claims[property] ?? []) {
+    if (statement.mainsnak._tag === "value") out.push(statement.mainsnak.value);
   }
   return out;
 }
 
-// ── wbgetentities → enrich facts (#613) ───────────────────────────────
-
-/** An entity's claims, keyed by property id. */
-type WbClaims = Record<string, readonly ClaimStatement[]>;
-
 /**
  * `sameAs` facts — an `exact` mapping per allowlisted external-id claim
- * ({@link EXTERNAL_ID_AUTHORITIES}). Each value is re-validated by
- * {@link normaliseExternalIdValue} and slotted into the authority's fixed
- * IRI template, so a hostile value never reaches a stored IRI.
+ * ({@link EXTERNAL_ID_AUTHORITIES}). Only a typed `external-id` datavalue
+ * is read (the property's registered Wikibase datatype); its value is
+ * re-validated by {@link normaliseExternalIdValue} and slotted into the
+ * authority's fixed IRI template, so a hostile value never reaches a
+ * stored IRI.
  */
-function sameAsFacts(claims: WbClaims): WikidataFact[] {
+function sameAsFacts(item: Wikidata.WikidataItem): WikidataFact[] {
   const out: WikidataFact[] = [];
   for (const [property, scheme] of Object.entries(EXTERNAL_ID_AUTHORITIES)) {
-    for (const claim of claims[property] ?? []) {
+    for (const value of statementValues(item, property)) {
       if (out.length >= MAX_SAME_AS) return out;
-      const raw = claimValue(claim);
-      const value = typeof raw === "string" ? normaliseExternalIdValue(raw) : null;
-      if (value === null) continue;
+      if (value._tag !== "external-id") continue;
+      const validated = normaliseExternalIdValue(value.value);
+      if (validated === null) continue;
       out.push({
         authority: scheme.authority,
-        externalId: value,
-        externalIri: scheme.iri(value),
+        externalId: validated,
+        externalIri: scheme.iri(validated),
         mappingKind: "exact",
         notes: null,
       });
@@ -266,19 +172,16 @@ function sameAsFacts(claims: WbClaims): WikidataFact[] {
 
 /**
  * Date facts ({@link DATE_PROPERTIES}) — `equivalent` mappings keyed by the
- * date property's entity IRI, the `{ time }` value validated by
+ * date property's entity IRI, the typed `time` value validated by
  * {@link normaliseTimeValue}, the human label stored in `notes`.
  */
-function dateFacts(claims: WbClaims): WikidataFact[] {
+function dateFacts(item: Wikidata.WikidataItem): WikidataFact[] {
   const out: WikidataFact[] = [];
   for (const [property, label] of Object.entries(DATE_PROPERTIES)) {
-    for (const claim of claims[property] ?? []) {
+    for (const value of statementValues(item, property)) {
       if (out.length >= MAX_DATES) return out;
-      const raw = claimValue(claim);
-      const time =
-        typeof raw === "object" && raw !== null
-          ? normaliseTimeValue((raw as { time?: unknown }).time)
-          : null;
+      if (value._tag !== "time") continue;
+      const time = normaliseTimeValue(value.time);
       if (time === null) continue;
       out.push({
         authority: "wikidata",
@@ -295,13 +198,19 @@ function dateFacts(claims: WbClaims): WikidataFact[] {
 /**
  * Image facts ({@link IMAGE_PROPERTIES}) — `equivalent` mappings to the
  * Commons `Special:FilePath` URL built by {@link normaliseCommonsImage}.
+ * Deliberately keeps this package's own filename → URL policy rather than
+ * effect-wikimedia's `Commons.filePathUrl` — that helper canonicalises
+ * spaces to underscores (MediaWiki's canonical title form), which would
+ * change the `externalIri` this layer has always stored for existing
+ * `entity_mapping` rows; see the PR description for the trade-off.
  */
-function imageFacts(claims: WbClaims): WikidataFact[] {
+function imageFacts(item: Wikidata.WikidataItem): WikidataFact[] {
   const out: WikidataFact[] = [];
   for (const property of IMAGE_PROPERTIES) {
-    for (const claim of claims[property] ?? []) {
+    for (const value of statementValues(item, property)) {
       if (out.length >= MAX_IMAGES) return out;
-      const image = normaliseCommonsImage(claimValue(claim));
+      if (value._tag !== "string") continue;
+      const image = normaliseCommonsImage(value.value);
       if (image === null) continue;
       out.push({
         authority: "wikimedia-commons",
@@ -316,20 +225,16 @@ function imageFacts(claims: WbClaims): WikidataFact[] {
 }
 
 /**
- * Normalises the confirmed item in a `wbgetentities` response into the
- * neutral {@link WikidataFacts} the enrich operation asserts: the **QID
- * self-link** plus the {@link sameAsFacts}, {@link dateFacts}, and
- * {@link imageFacts} branches. Each branch is bounded and re-validates the
- * upstream value, so a hostile response can at worst yield fewer / no facts
- * — never an injection or an arbitrary host in a stored IRI. Returns `null`
- * when the requested `qid` is absent (a clean upstream miss).
+ * Builds the neutral {@link WikidataFacts} the enrich operation asserts for
+ * a confirmed, already-fetched item: the **QID self-link** plus the
+ * {@link sameAsFacts}, {@link dateFacts}, and {@link imageFacts} branches.
+ * Each branch is bounded and re-validates the upstream value, so a hostile
+ * response can at worst yield fewer facts — never an injection or an
+ * arbitrary host in a stored IRI. Presence (the `wbgetentities` miss /
+ * `missing`-sentinel case) is handled by the caller, which only calls this
+ * once it has a fetched `WikidataItem` for `qid`.
  */
-export function normaliseFacts(response: WbGetEntitiesResponse, qid: string): WikidataFacts | null {
-  const entity = (response.entities ?? {})[qid];
-  // Absent from the map, or present as Wikidata's `missing` sentinel — either
-  // way the item does not exist upstream, so the caller writes nothing.
-  if (!entity || entity.missing !== undefined) return null;
-  const claims = entity.claims ?? {};
+export function normaliseFacts(item: Wikidata.WikidataItem, qid: string): WikidataFacts {
   const facts: WikidataFact[] = [
     // The QID self-link (the canonical Wikidata correspondence).
     {
@@ -339,9 +244,9 @@ export function normaliseFacts(response: WbGetEntitiesResponse, qid: string): Wi
       mappingKind: "exact",
       notes: null,
     },
-    ...sameAsFacts(claims),
-    ...dateFacts(claims),
-    ...imageFacts(claims),
+    ...sameAsFacts(item),
+    ...dateFacts(item),
+    ...imageFacts(item),
   ];
   return { qid, facts };
 }
