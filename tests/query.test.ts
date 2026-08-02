@@ -17,7 +17,7 @@ import {
   stripToText,
   templateName,
   walk,
-} from "../src/wikitext";
+} from "../src/wikitext/index.ts";
 
 const ada = readFileSync(
   fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),

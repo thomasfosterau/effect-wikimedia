@@ -41,11 +41,11 @@
  * @module index
  */
 
-export * as Action from "./action";
-export * as Commons from "./commons";
-export * as Core from "./core";
-export * as Dumps from "./dumps";
-export * as Rest from "./rest";
-export * as Sparql from "./sparql";
-export * as Wikidata from "./wikidata";
-export * as Wikitext from "./wikitext";
+export * as Action from "./action.ts";
+export * as Commons from "./commons.ts";
+export * as Core from "./core.ts";
+export * as Dumps from "./dumps/index.ts";
+export * as Rest from "./rest.ts";
+export * as Sparql from "./sparql.ts";
+export * as Wikidata from "./wikidata.ts";
+export * as Wikitext from "./wikitext/index.ts";

@@ -34,7 +34,12 @@
 
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { DEFAULT_RETRY_OPTIONS, InvalidRequest, type RetryOptions, WikimediaClient } from "./core";
+import {
+  DEFAULT_RETRY_OPTIONS,
+  InvalidRequest,
+  type RetryOptions,
+  WikimediaClient,
+} from "./core.ts";
 
 /** The default WDQS host — the public Wikidata Query Service SPARQL endpoint. */
 export const WDQS_HOST = "query.wikidata.org";

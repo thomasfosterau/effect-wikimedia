@@ -52,8 +52,8 @@ import {
   type Template,
   type Text,
   type Wikilink,
-} from "./ast";
-import { resolveQuotes } from "./quotes";
+} from "./ast.ts";
+import { resolveQuotes } from "./quotes.ts";
 
 /** Recursion ceiling; deeper nesting degrades to text (fail-soft, no throw). */
 const MAX_DEPTH = 100;

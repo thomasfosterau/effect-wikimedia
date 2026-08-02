@@ -22,7 +22,7 @@ import {
   type RetryOptions,
   toNonNegativeInt,
   WikimediaClient,
-} from "./core";
+} from "./core.ts";
 
 // ── FilePath URL construction ───────────────────────────────────────────
 

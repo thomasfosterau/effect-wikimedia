@@ -27,7 +27,7 @@
  * @module lib/wikitext/quotes
  */
 
-import type { Formatting, Node } from "./ast";
+import type { Formatting, Node } from "./ast.ts";
 
 const SPACE = 0x20;
 const NEWLINE = 0x0a;

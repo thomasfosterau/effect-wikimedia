@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
-import { parse, serialize } from "../src/wikitext";
+import { parse, serialize } from "../src/wikitext/index.ts";
 
 const ada = readFileSync(
   fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),

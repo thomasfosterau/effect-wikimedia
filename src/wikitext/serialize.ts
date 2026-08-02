@@ -16,7 +16,7 @@
  * @module lib/wikitext/serialize
  */
 
-import type { Document, Node, Param } from "./ast";
+import type { Document, Node, Param } from "./ast.ts";
 
 /** Serializes a fragment (a list of nodes) back to wikitext. */
 export function serializeNodes(nodes: readonly Node[]): string {

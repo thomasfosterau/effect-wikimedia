@@ -17,9 +17,9 @@
  * @module lib/wikitext
  */
 
-export * from "./ast";
-export { parse } from "./parse";
-export { serialize, serializeNode, serializeNodes } from "./serialize";
+export * from "./ast.ts";
+export { parse } from "./parse.ts";
+export { serialize, serializeNode, serializeNodes } from "./serialize.ts";
 export {
   type Fragment,
   filter,
@@ -32,4 +32,4 @@ export {
   templateName,
   templateParams,
   walk,
-} from "./query";
+} from "./query.ts";

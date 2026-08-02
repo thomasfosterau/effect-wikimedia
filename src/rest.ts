@@ -27,7 +27,7 @@ import {
   sanitiseText,
   toNonNegativeInt,
   WikimediaClient,
-} from "./core";
+} from "./core.ts";
 
 // ── Page / revision metadata (JSON) ──────────────────────────────────────
 

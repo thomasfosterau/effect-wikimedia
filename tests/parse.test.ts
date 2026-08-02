@@ -17,8 +17,8 @@ import {
   type Tag,
   type Template,
   type Wikilink,
-} from "../src/wikitext";
-import { serializeNodes } from "../src/wikitext";
+} from "../src/wikitext/index.ts";
+import { serializeNodes } from "../src/wikitext/index.ts";
 
 /** The single top-level node of `src`, asserted to be tag `T`. */
 function only<T extends Node["_tag"]>(src: string, tag: T): Extract<Node, { _tag: T }> {

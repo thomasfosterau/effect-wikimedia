@@ -31,7 +31,12 @@
 
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { DEFAULT_RETRY_OPTIONS, InvalidRequest, type RetryOptions, WikimediaClient } from "./core";
+import {
+  DEFAULT_RETRY_OPTIONS,
+  InvalidRequest,
+  type RetryOptions,
+  WikimediaClient,
+} from "./core.ts";
 
 // ── Branded entity ids (Q / P / L) ───────────────────────────────────────
 

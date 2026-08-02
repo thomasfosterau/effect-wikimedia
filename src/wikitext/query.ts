@@ -9,8 +9,8 @@
  * @module lib/wikitext/query
  */
 
-import type { Document, Node, Param, Template } from "./ast";
-import { serializeNodes } from "./serialize";
+import type { Document, Node, Param, Template } from "./ast.ts";
+import { serializeNodes } from "./serialize.ts";
 
 /** A fragment or a whole document — the common input to the query helpers. */
 export type Fragment = Document | readonly Node[];

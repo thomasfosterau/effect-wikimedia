@@ -16,7 +16,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
-import { type Node, parse, serialize, serializeNode, walk } from "../src/wikitext";
+import { type Node, parse, serialize, serializeNode, walk } from "../src/wikitext/index.ts";
 
 const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
 const fixtures = readdirSync(fixturesDir)

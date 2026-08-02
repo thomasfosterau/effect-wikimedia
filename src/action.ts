@@ -30,7 +30,7 @@ import {
   toNonNegativeInt,
   type WikimediaRequest,
   WikimediaClient,
-} from "./core";
+} from "./core.ts";
 
 /** Builds the fixed-path `/w/api.php` request for a given `action` and its params. */
 function actionRequest(

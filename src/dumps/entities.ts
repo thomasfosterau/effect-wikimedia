@@ -33,7 +33,7 @@
  */
 
 import * as Stream from "effect/Stream";
-import { decodeEntity, parsePropertyId, type WikidataItem } from "../wikidata";
+import { decodeEntity, parsePropertyId, type WikidataItem } from "../wikidata.ts";
 
 // ── Record model ─────────────────────────────────────────────────────────
 

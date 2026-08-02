@@ -78,7 +78,7 @@ export {
   stripFraming,
   withClaim,
   withSitelink,
-} from "./entities";
+} from "./entities.ts";
 export {
   classifyTag,
   type Contributor,
@@ -95,7 +95,7 @@ export {
   tokenizeXml,
   type XmlToken,
   XmlPageReader,
-} from "./xml";
+} from "./xml.ts";
 export {
   type Decompressor,
   decompressWith,
@@ -107,4 +107,4 @@ export {
   gunzip,
   gunzipTransform,
   SourceError,
-} from "./sources";
+} from "./sources.ts";

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vite-plus/test";
-import { type Formatting, type Node, parse } from "../src/wikitext";
+import { type Formatting, type Node, parse } from "../src/wikitext/index.ts";
 
 function formatting(src: string): Formatting[] {
   const out: Formatting[] = [];
