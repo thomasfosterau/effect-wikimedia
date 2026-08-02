@@ -18,7 +18,7 @@
  * Persistence is a separate concern, delivered by issue #612: a QID is a
  * stable, identity-level authority reference that belongs on `entity`
  * (per the {@link
- * ../../../docs/decisions/ontology-mappings-and-status-assertions.md
+ * ../../../docs/decisions/ontology.md
  * ontology-mappings decision}). A confirmed QID is persisted through the
  * stable `entity_external_identifier` table (KB-004 — since #864 S5/D5
  * also the biblio pipeline's `openlibrary` / `crossref` provenance home,

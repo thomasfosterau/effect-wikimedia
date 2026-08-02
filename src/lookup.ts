@@ -62,8 +62,8 @@ import {
   normaliseQid,
   type WikidataCandidate,
   type WikidataFacts,
-} from "./candidate";
-import { dedupedQids, hitToCandidate, itemToCandidate, normaliseFacts } from "./normalise";
+} from "./candidate.ts";
+import { dedupedQids, hitToCandidate, itemToCandidate, normaliseFacts } from "./normalise.ts";
 
 /**
  * The fixed Wikidata host every request in this module targets. Passed

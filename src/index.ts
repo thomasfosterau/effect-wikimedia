@@ -1,5 +1,5 @@
 /** @module lib/wikidata */
 
-export * from "./candidate";
-export * from "./lookup";
-export * from "./normalise";
+export * from "./candidate.ts";
+export * from "./lookup.ts";
+export * from "./normalise.ts";

@@ -46,7 +46,7 @@ import {
   type WikidataFact,
   type WikidataFacts,
   wikidataEntityIri,
-} from "./candidate";
+} from "./candidate.ts";
 
 // ── wbsearchentities (label search) ───────────────────────────────────
 
