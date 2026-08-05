@@ -30,6 +30,7 @@ import { Core } from "@thomasfosterau/effect-wikimedia";
 import {
   type ExternalIdentifier,
   InvalidQuery,
+  type LookupError,
   LookupFailed,
   type WikidataCandidate,
   type WikidataFacts,
@@ -76,21 +77,17 @@ function stubClient(routes: Record<string, StubRoute>) {
 
 type Result = readonly WikidataCandidate[];
 
-const withLookup = <E>(
+const withLookup = (
   layer: Layer.Layer<Core.WikimediaClient>,
   use: (lookup: {
-    readonly searchByLabel: (label: string) => Effect.Effect<Result, E>;
-    readonly searchByIdentifier: (id: ExternalIdentifier) => Effect.Effect<Result, E>;
-  }) => Effect.Effect<Result, E>,
-): Effect.Effect<Result, E, never> =>
+    readonly searchByLabel: (label: string) => Effect.Effect<Result, LookupError>;
+    readonly searchByIdentifier: (id: ExternalIdentifier) => Effect.Effect<Result, LookupError>;
+  }) => Effect.Effect<Result, LookupError>,
+): Effect.Effect<Result, LookupError, never> =>
   Effect.gen(function* () {
     const lookup = yield* WikidataLookup;
     return yield* use(lookup);
-  }).pipe(Effect.provide(wikidataLookupClientLayer), Effect.provide(layer)) as Effect.Effect<
-    Result,
-    E,
-    never
-  >;
+  }).pipe(Effect.provide(wikidataLookupClientLayer.pipe(Layer.provide(layer))));
 
 // ── Label search ─────────────────────────────────────────────────────
 
@@ -467,11 +464,7 @@ describe("WikidataLookup.enrich", () => {
     Effect.gen(function* () {
       const lookup = yield* WikidataLookup;
       return yield* lookup.enrich(qid);
-    }).pipe(Effect.provide(wikidataLookupClientLayer), Effect.provide(layer)) as Effect.Effect<
-      WikidataFacts | null,
-      InvalidQuery | LookupFailed,
-      never
-    >;
+    }).pipe(Effect.provide(wikidataLookupClientLayer.pipe(Layer.provide(layer))));
 
   /**
    * Runs {@link enrichEffect} and asserts a non-null result, narrowing the
