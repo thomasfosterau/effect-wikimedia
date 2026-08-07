@@ -6,11 +6,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "scripts": {
-    "check": "tsc -p tsconfig.json",
-    "test:unit": "vp test run tests",
-    "test:coverage": "vp test run tests --coverage"
-  },
   "dependencies": {
     "@thomasfosterau/effect-wikimedia": "workspace:*",
     "effect": "catalog:"
