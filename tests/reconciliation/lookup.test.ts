@@ -26,7 +26,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { Core } from "@thomasfosterau/effect-wikimedia";
+import * as Core from "../../src/core.ts";
 import {
   type ExternalIdentifier,
   InvalidQuery,
@@ -36,8 +36,8 @@ import {
   type WikidataFacts,
   WikidataLookup,
   wikidataLookupClientLayer,
-} from "@thomasfosterau/wikidata";
-import { expectFailureInstanceOf, runTest } from "@test-helpers/effect";
+} from "../../src/reconciliation/index.ts";
+import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
 
 // ── WikimediaClient stub ────────────────────────────────────────────────
 

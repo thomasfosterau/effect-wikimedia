@@ -11,8 +11,8 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
-import { Core, Rest } from "@thomasfosterau/effect-wikimedia";
-import { expectFailureInstanceOf, runTest } from "@test-helpers/effect";
+import { Core, Rest } from "../src/index.ts";
+import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 interface StubRoute {
   readonly status: number;

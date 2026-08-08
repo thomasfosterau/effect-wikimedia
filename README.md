@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-wikimedia
 
-A strongly typed, Effect-idiomatic client family for Wikimedia properties (Wikipedia, Wikidata, Commons, and siblings). One package, **module-per-surface**, designed from day one for extraction to its own repository/npm package — see [the decision doc](../../docs/decisions/effect-wikimedia-as-the-wikimedia-client-toolkit.md).
+A strongly typed, Effect-idiomatic client family for Wikimedia properties (Wikipedia, Wikidata, Commons, and siblings). One package, **module-per-surface**: each namespace is a tree-shakeable slice that imports only `Core`.
 
 Every surface is a namespace on the package's single `"."` barrel (`import { Action, Rest, Commons, Wikidata, Sparql, Core } from "@thomasfosterau/effect-wikimedia"`); importing one namespace never pulls another surface's code into a bundle (`tests/tree-shaking.test.ts` proves this with a real `esbuild` build).
 
@@ -13,7 +13,17 @@ Every surface is a namespace on the package's single `"."` barrel (`import { Act
 - **`Wikidata`** — the typed Wikidata item / claim model: branded `Q`/`P`/`L` ids (`ItemId` / `PropertyId` / `LexemeId`), the full snak `DataValue` union (`wikibase-entityid`, `time`, `globecoordinate`, `quantity`, `monolingualtext`, `string`, `external-id`, and a lenient `unknown` degrade), statements with rank / qualifiers / references, sitelinks, and per-language label / description / alias maps. `getEntities` (batched `wbgetentities`, 50-id chunking) and `searchEntities` (`wbsearchentities`).
 - **`Sparql`** — the Wikidata Query Service (WDQS) SPARQL client: `query` (with a LIMIT-enforcing helper, `hasLimitClause`) decoding SPARQL 1.1 JSON results into typed terms (`uri` / `literal` / `bnode` / `unknown`), and `literalKind` mapping `xsd:*` datatypes back toward the Wikibase datavalue vocabulary.
 
-Later epic slices (#1065-#1066) add `Wikitext` and `Dumps` as further namespaces on the same barrel.
+- **`Wikitext`** — a pure, dependency-free wikitext → typed AST parser, with a round-trip serializer and a query/manipulation surface. The one module that imports nothing, not even `Core`.
+- **`Dumps`** — Wikimedia dump processing as `Stream` pipelines: the Wikidata JSON entity dump decoded through `Wikidata`'s model, MediaWiki XML pages / incrementals via a scoped SAX-style scanner, and Node-only byte sources (file / resumable HTTP range) with pluggable gzip / bz2 decompression stages. The one Node-only entry point; the pipelines themselves stay runtime-agnostic over any `Stream<Uint8Array>`.
+- **`Reconciliation`** — the one _opinionated_ namespace, layered on top of `Action` / `Wikidata`: resolve a label or an external identifier to candidate Wikidata items (**Match**), then pull the selected facts for a confirmed QID (**Enrich**). It carries policy the surface modules deliberately don't — input validators, curated property allowlists, and the candidate/fact shapes. It is persistence-free: Match returns candidates, Enrich returns neutral facts, and storing either is the caller's job.
+
+## Install
+
+```sh
+npm install @thomasfosterau/effect-wikimedia effect
+```
+
+`effect` is a peer dependency — two copies break `Context` / `Layer` / `Schema` identity at runtime.
 
 ## Usage
 
@@ -28,6 +38,21 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 
 Every request goes through `Core.WikimediaClient`, which applies the UA policy and `maxlag` etiquette, and retries a `429`/`503`/in-body maxlag signal automatically. `Core.wikimediaLayer` is the production layer (over the platform `fetch`); tests provide `Core.wikimediaClientLayer` over a stubbed `HttpClient` instead — see `tests/core.test.ts`.
 
-## Testing
+## Development
 
-`vp run test:unit` runs the suite against recorded fixtures (`tests/fixtures/`) with the network stubbed at `FetchHttpClient.Fetch` — there is no live network access anywhere in this package's tests or in CI.
+This repository is managed by [Vite+](https://viteplus.dev) (the `vp` CLI).
+
+```sh
+vp install     # install dependencies
+vp check       # format (Oxfmt), lint (Oxlint), type-check (tsgolint)
+vp run test    # Vitest suite
+vp run build   # tsdown library build into dist/
+```
+
+`vp run test` runs against recorded fixtures (`tests/fixtures/`) with the network stubbed at `FetchHttpClient.Fetch` — there is no live network access anywhere in this package's tests or in CI.
+
+Releases are automated with [Changesets](https://github.com/changesets/changesets) — see [docs/RELEASING.md](docs/RELEASING.md).
+
+## License
+
+[MIT](LICENSE)

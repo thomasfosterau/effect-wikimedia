@@ -12,8 +12,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Stream from "effect/Stream";
-import { Dumps } from "@thomasfosterau/effect-wikimedia";
-import { runTest } from "@test-helpers/effect";
+import { Dumps } from "../../src/index.ts";
+import { runTest } from "../helpers/effect.ts";
 
 const fixtureXml = readFileSync(
   fileURLToPath(new URL("../fixtures/dumps/pages-slice.xml", import.meta.url)),

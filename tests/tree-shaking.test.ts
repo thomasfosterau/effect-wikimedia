@@ -40,9 +40,14 @@ const MARKERS = {
   // one per sub-module (entities / xml / sources). Their presence proves the
   // Dumps surface bundled; their absence proves it did not.
   dumps: ["dumps/not-an-entity", "dumps/malformed-revision", "dumps/source-read-failed"],
+  reconciliation: [
+    "WikidataLookup.searchByLabel",
+    "WikidataLookup.searchByIdentifier",
+    "WikidataLookup.enrich",
+  ],
 } as const;
 
-type Surface = "Action" | "Rest" | "Commons" | "Wikidata" | "Sparql" | "Dumps";
+type Surface = "Action" | "Rest" | "Commons" | "Wikidata" | "Sparql" | "Dumps" | "Reconciliation";
 
 /** Bundles a one-line entry that imports and uses only the given namespace from the package barrel. */
 async function bundleImporting(namespace: Surface): Promise<string> {
@@ -53,6 +58,7 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     Wikidata: `import { Wikidata } from "./index";\nconsole.log(Wikidata.getEntities, Wikidata.searchEntities);\n`,
     Sparql: `import { Sparql } from "./index";\nconsole.log(Sparql.query, Sparql.hasLimitClause);\n`,
     Dumps: `import { Dumps } from "./index";\nconsole.log(Dumps.entityRecords, Dumps.pageRecords, Dumps.incrementalRecords, Dumps.fromFile, Dumps.gunzip);\n`,
+    Reconciliation: `import { Reconciliation } from "./index";\nconsole.log(Reconciliation.WikidataLookup, Reconciliation.wikidataLookupLayer);\n`,
   };
 
   const result = await build({
@@ -89,27 +95,62 @@ const SURFACES: readonly {
   {
     namespace: "Action",
     own: MARKERS.action,
-    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql, MARKERS.dumps],
+    foreign: [
+      MARKERS.rest,
+      MARKERS.commons,
+      MARKERS.wikidata,
+      MARKERS.sparql,
+      MARKERS.dumps,
+      MARKERS.reconciliation,
+    ],
   },
   {
     namespace: "Rest",
     own: MARKERS.rest,
-    foreign: [MARKERS.action, MARKERS.commons, MARKERS.wikidata, MARKERS.sparql, MARKERS.dumps],
+    foreign: [
+      MARKERS.action,
+      MARKERS.commons,
+      MARKERS.wikidata,
+      MARKERS.sparql,
+      MARKERS.dumps,
+      MARKERS.reconciliation,
+    ],
   },
   {
     namespace: "Commons",
     own: MARKERS.commons,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.wikidata, MARKERS.sparql, MARKERS.dumps],
+    foreign: [
+      MARKERS.action,
+      MARKERS.rest,
+      MARKERS.wikidata,
+      MARKERS.sparql,
+      MARKERS.dumps,
+      MARKERS.reconciliation,
+    ],
   },
   {
     namespace: "Wikidata",
     own: MARKERS.wikidata,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.sparql, MARKERS.dumps],
+    foreign: [
+      MARKERS.action,
+      MARKERS.rest,
+      MARKERS.commons,
+      MARKERS.sparql,
+      MARKERS.dumps,
+      MARKERS.reconciliation,
+    ],
   },
   {
     namespace: "Sparql",
     own: MARKERS.sparql,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.wikidata, MARKERS.dumps],
+    foreign: [
+      MARKERS.action,
+      MARKERS.rest,
+      MARKERS.commons,
+      MARKERS.wikidata,
+      MARKERS.dumps,
+      MARKERS.reconciliation,
+    ],
   },
   {
     // Dumps legitimately depends on the Wikidata module (it decodes each dump
@@ -117,7 +158,21 @@ const SURFACES: readonly {
     // the unrelated Action / Rest / Commons / Sparql surfaces are.
     namespace: "Dumps",
     own: MARKERS.dumps,
-    foreign: [MARKERS.action, MARKERS.rest, MARKERS.commons, MARKERS.sparql],
+    foreign: [
+      MARKERS.action,
+      MARKERS.rest,
+      MARKERS.commons,
+      MARKERS.sparql,
+      MARKERS.reconciliation,
+    ],
+  },
+  {
+    // Reconciliation is the one namespace layered *on top* of the raw clients:
+    // it drives Action (label search) and Wikidata (entity fetch) over Core, so
+    // those are not foreign. The surfaces it never touches are.
+    namespace: "Reconciliation",
+    own: MARKERS.reconciliation,
+    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.sparql, MARKERS.dumps],
   },
 ];
 

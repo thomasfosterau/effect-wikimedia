@@ -10,8 +10,8 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
-import { Commons, Core } from "@thomasfosterau/effect-wikimedia";
-import { expectFailureInstanceOf, runTest } from "@test-helpers/effect";
+import { Commons, Core } from "../src/index.ts";
+import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 // ── FilePath URL construction ───────────────────────────────────────────
 

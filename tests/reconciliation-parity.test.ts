@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
-import { Wikidata } from "@thomasfosterau/effect-wikimedia";
+import { Wikidata } from "../src/index.ts";
 
 const fixture = JSON.parse(
   readFileSync(fileURLToPath(new URL("./fixtures/wikidata-q42.json", import.meta.url)), "utf8"),

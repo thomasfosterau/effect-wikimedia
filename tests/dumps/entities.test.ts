@@ -17,8 +17,8 @@ import { fileURLToPath } from "node:url";
 import { createGzip, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Stream from "effect/Stream";
-import { Dumps, Wikidata } from "@thomasfosterau/effect-wikimedia";
-import { runTest } from "@test-helpers/effect";
+import { Dumps, Wikidata } from "../../src/index.ts";
+import { runTest } from "../helpers/effect.ts";
 
 const fixtureNdjson = readFileSync(
   fileURLToPath(new URL("../fixtures/dumps/entities-slice.ndjson", import.meta.url)),

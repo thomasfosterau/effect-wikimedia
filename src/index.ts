@@ -34,9 +34,13 @@
  *   and Node-only byte sources (file / resumable HTTP range) with pluggable
  *   gzip / bz2 decompression stages. The one Node-only entry point; the
  *   pipelines themselves stay runtime-agnostic over any `Stream<Uint8Array>`.
- *
- * Zero website-internal dependencies anywhere in this package — designed
- * from day one for extraction to its own repository/npm package.
+ * - **`Reconciliation`** — the opinionated layer above the raw clients: resolve
+ *   a label or an external identifier to candidate Wikidata items (Match), then
+ *   pull the selected facts for a confirmed QID (Enrich). Unlike the surface
+ *   modules it carries *policy* — input validators, curated property
+ *   allowlists, and the candidate/fact shapes — so it is the one namespace here
+ *   with an opinion about how you should reconcile. Everything below it stays
+ *   neutral.
  *
  * @module index
  */
@@ -45,6 +49,7 @@ export * as Action from "./action.ts";
 export * as Commons from "./commons.ts";
 export * as Core from "./core.ts";
 export * as Dumps from "./dumps/index.ts";
+export * as Reconciliation from "./reconciliation/index.ts";
 export * as Rest from "./rest.ts";
 export * as Sparql from "./sparql.ts";
 export * as Wikidata from "./wikidata.ts";

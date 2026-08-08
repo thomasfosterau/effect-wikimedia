@@ -27,7 +27,8 @@
  * @module lib/server/wikidata/normalise
  */
 
-import type { Action, Wikidata } from "@thomasfosterau/effect-wikimedia";
+import type * as Action from "../action.ts";
+import type * as Wikidata from "../wikidata.ts";
 import {
   DATE_PROPERTIES,
   EXTERNAL_ID_AUTHORITIES,

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          cache: true
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --no-frozen-lockfile
+
+      # npm Trusted Publishing (OIDC) requires npm >= 11.5. Upgrade so
+      # `changeset publish` authenticates to npm via the `id-token` below
+      # instead of a long-lived NPM_TOKEN.
+      - name: Ensure npm supports OIDC trusted publishing
+        run: npm install -g npm@latest
+
+      # This is a pnpm workspace (`packageManager: pnpm` + `workspace:^` deps),
+      # so `changeset publish` shells out to `pnpm publish`. Vite+ uses pnpm
+      # internally but does not expose it on PATH, so install it explicitly
+      # (pinned to the workspace's pnpm version) or the publish fails with
+      # `spawn pnpm ENOENT`.
+      - name: Ensure pnpm is on PATH for changeset publish
+        run: npm install -g pnpm@11.18.0
+
+      - name: Create Release Pull Request or Publish to npm
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: vp run version
+          # Run the release script via `npm run`, NOT `vp run`: npm forwards the
+          # ambient environment to child processes, whereas `vp run` does not
+          # propagate the `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN` variables
+          # that npm needs for OIDC trusted publishing. Without them npm logs
+          # "oidc Skipped because incorrect permissions for id-token" and falls
+          # back to token auth, failing with ENEEDAUTH. The `release` script
+          # still builds with `vp` internally; only the runner changes.
+          publish: npm run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No NPM_TOKEN: publishing authenticates via OIDC trusted publishing
+          # (the `id-token: write` permission above + a trusted publisher
+          # configured for each package on npmjs.com). See docs/RELEASING.md.

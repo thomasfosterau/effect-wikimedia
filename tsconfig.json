@@ -1,7 +1,37 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
   "compilerOptions": {
-    "types": []
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // Sources import siblings with an explicit `.ts` extension (`./core.ts`),
+    // which is what Node's own resolver wants and what keeps the modules
+    // runnable as raw TypeScript. `allowImportingTsExtensions` permits it under
+    // `noEmit`; `rewriteRelativeImportExtensions` rewrites the specifier to
+    // `.js` for anything that does emit.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // `noImplicitReturns` is deliberately off. The Wikitext walker's visitor is
+    // typed `(node: Node) => boolean | void` — returning `false` skips a
+    // subtree and falling off the end means "descend" — so callers are meant to
+    // return on some paths and not others.
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "plugins": [{ "name": "@effect/language-service" }]
   },
-  "include": ["src", "tests"]
+  "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }

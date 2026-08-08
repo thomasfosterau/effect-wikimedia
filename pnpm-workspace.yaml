@@ -1,0 +1,13 @@
+# Single-package repository — no `packages:` list. This file exists only to
+# carry pnpm settings, which pnpm 10+ reads from here rather than `.npmrc`.
+#
+# `effect` is a peerDependency of the published package and a devDependency
+# here, so the repo resolves exactly one copy while consumers bring their own.
+# Two copies break `Context` / `Layer` / `Schema` identity at runtime.
+allowBuilds:
+  # The tree-shaking test (`tests/tree-shaking.test.ts`) runs a real esbuild
+  # bundle, so esbuild's native binary must actually be installed.
+  esbuild: true
+  # Only an optional perf accelerator for msgpackr (pulled in transitively by
+  # the Vite+ toolchain); the pure-JS fallback is used when it isn't built.
+  msgpackr-extract: false

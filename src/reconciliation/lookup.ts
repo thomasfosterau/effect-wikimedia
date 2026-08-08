@@ -49,7 +49,9 @@
  * @module lib/server/wikidata/lookup
  */
 
-import { Action, Core, Wikidata } from "@thomasfosterau/effect-wikimedia";
+import * as Action from "../action.ts";
+import * as Core from "../core.ts";
+import * as Wikidata from "../wikidata.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

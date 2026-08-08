@@ -16,8 +16,8 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
-import { Action, Commons, Core, Rest } from "@thomasfosterau/effect-wikimedia";
-import { runTest } from "@test-helpers/effect";
+import { Action, Commons, Core, Rest } from "../src/index.ts";
+import { runTest } from "./helpers/effect.ts";
 
 const fixturesPath = fileURLToPath(new URL("./fixtures/douglas-adams.json", import.meta.url));
 const fixtures = JSON.parse(readFileSync(fixturesPath, "utf-8")) as {

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          cache: true
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --no-frozen-lockfile
+
+      - name: Check (format, lint, types)
+        run: vp check
+
+      - name: Test
+        run: vp run test
+
+      - name: Build
+        run: vp run build

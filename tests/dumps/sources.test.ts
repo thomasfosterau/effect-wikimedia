@@ -20,8 +20,8 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { Dumps } from "@thomasfosterau/effect-wikimedia";
-import { runTest, runTestExit } from "@test-helpers/effect";
+import { Dumps } from "../../src/index.ts";
+import { runTest, runTestExit } from "../helpers/effect.ts";
 
 const DUMP = '[\n{"type":"item","id":"Q1"},\n{"type":"item","id":"Q2"}\n]\n';
 

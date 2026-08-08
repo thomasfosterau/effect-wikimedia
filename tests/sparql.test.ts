@@ -14,8 +14,8 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
-import { Core, Sparql } from "@thomasfosterau/effect-wikimedia";
-import { expectFailureInstanceOf, runTest } from "@test-helpers/effect";
+import { Core, Sparql } from "../src/index.ts";
+import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 const fixture = JSON.parse(
   readFileSync(fileURLToPath(new URL("./fixtures/wdqs-results.json", import.meta.url)), "utf8"),
