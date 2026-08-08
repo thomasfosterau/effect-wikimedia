@@ -17,9 +17,14 @@ Publishing uses **npm [Trusted Publishing](https://docs.npmjs.com/trusted-publis
    > **First publish of a brand-new package.** npm only lets you add a trusted publisher to a package that **already exists**, so the very first publish (the initial `0.1.0`) can't use OIDC. Bootstrap it once with a short-lived [granular access token](https://docs.npmjs.com/creating-and-viewing-access-tokens):
    >
    > ```sh
+   > # 1. Merge the open "Version Packages" PR first, so `main` carries the real
+   > #    version. A fresh clone of `main` is still at 0.0.0, and publishing
+   > #    that puts a placeholder 0.0.0 on the registry forever.
    > vp install
-   > vp run build
-   > npm publish --access public
+   > vp run build      # `dist/` must exist — `files` ships it, and `exports`
+   >                   # points at it. Publishing without it yields a package
+   >                   # whose every entry point 404s.
+   > pnpm publish --access public --no-git-checks
    > ```
    >
    > Then add the trusted publisher and let OIDC handle every release after. (Tracked upstream in [npm/cli#8544](https://github.com/npm/cli/issues/8544).)
