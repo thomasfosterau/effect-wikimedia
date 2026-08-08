@@ -1,0 +1,51 @@
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/" version="0.11" xml:lang="en">
+  <siteinfo>
+    <sitename>Wikipedia</sitename>
+    <dbname>enwiki</dbname>
+    <namespaces>
+      <namespace key="0" case="first-letter" />
+      <namespace key="14" case="first-letter">Category</namespace>
+    </namespaces>
+  </siteinfo>
+  <page>
+    <title>Douglas Adams</title>
+    <ns>0</ns>
+    <id>8091</id>
+    <revision>
+      <id>100</id>
+      <timestamp>2001-01-21T02:12:21Z</timestamp>
+      <contributor>
+        <username>AxelBoldt</username>
+        <id>2</id>
+      </contributor>
+      <minor />
+      <comment>first version</comment>
+      <model>wikitext</model>
+      <format>text/x-wiki</format>
+      <text xml:space="preserve" bytes="41">'''Douglas Adams''' &lt; check 1 &amp; 2 &gt; 0</text>
+      <sha1>aaa111</sha1>
+    </revision>
+    <revision>
+      <id>101</id>
+      <parentid>100</parentid>
+      <timestamp>2001-02-21T02:12:21Z</timestamp>
+      <contributor>
+        <ip>10.0.0.1</ip>
+      </contributor>
+      <model>wikitext</model>
+      <format>text/x-wiki</format>
+      <text xml:space="preserve">Second revision text.</text>
+      <sha1>bbb222</sha1>
+    </revision>
+  </page>
+  <page>
+    <title>Category:Writers</title>
+    <ns>14</ns>
+    <id>200</id>
+    <revision>
+      <timestamp>2005-01-01T00:00:00Z</timestamp>
+      <model>wikitext</model>
+      <text xml:space="preserve">malformed revision: no id element</text>
+    </revision>
+  </page>
+</mediawiki>

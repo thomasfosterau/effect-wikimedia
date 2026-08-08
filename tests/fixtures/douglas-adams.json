@@ -1,0 +1,61 @@
+{
+  "wikitext": {
+    "query": {
+      "pages": {
+        "42": {
+          "pageid": 42,
+          "ns": 0,
+          "title": "Douglas Adams",
+          "revisions": [
+            {
+              "revid": 1198166957,
+              "parentid": 1197845213,
+              "timestamp": "2024-01-22T09:15:00Z",
+              "slots": {
+                "main": {
+                  "contentmodel": "wikitext",
+                  "contentformat": "text/x-wiki",
+                  "*": "'''Douglas Noel Adams''' (11 March 1952 – 11 May 2001) was an English author, screenwriter, and dramatist. He is best known as the author of ''[[The Hitchhiker's Guide to the Galaxy]]''.\n\n== Life ==\nAdams was born in Cambridge, England.\n\n[[Category:English novelists]]\n[[Category:1952 births]]\n"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "restPageMetadata": {
+    "id": 42,
+    "key": "Douglas_Adams",
+    "title": "Douglas Adams",
+    "content_model": "wikitext",
+    "latest": { "id": 1198166957, "timestamp": "2024-01-22T09:15:00Z" },
+    "license": {
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "Creative Commons Attribution-Share Alike 4.0 International License"
+    },
+    "html_url": "https://en.wikipedia.org/w/rest.php/v1/page/Douglas_Adams/html"
+  },
+  "restParsedHtml": "<!DOCTYPE html><html><body><p id=\"mwAQ\"><b>Douglas Noel Adams</b> (11 March 1952 – 11 May 2001) was an English author, screenwriter, and dramatist.</p><h2 id=\"Life\">Life</h2><p>Adams was born in Cambridge, England.</p></body></html>",
+  "commonsFileInfo": {
+    "query": {
+      "pages": {
+        "555": {
+          "pageid": 555,
+          "ns": 6,
+          "title": "File:Douglas adams portrait cropped.jpg",
+          "imageinfo": [
+            {
+              "url": "https://upload.wikimedia.org/wikipedia/commons/d/d1/Douglas_adams_portrait_cropped.jpg",
+              "descriptionurl": "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait_cropped.jpg",
+              "width": 1200,
+              "height": 1600,
+              "mime": "image/jpeg",
+              "size": 345678
+            }
+          ]
+        }
+      }
+    }
+  }
+}

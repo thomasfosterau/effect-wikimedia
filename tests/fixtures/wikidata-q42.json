@@ -1,0 +1,264 @@
+{
+  "entities": {
+    "Q42": {
+      "type": "item",
+      "id": "Q42",
+      "labels": {
+        "en": { "language": "en", "value": "Douglas Adams" },
+        "de": { "language": "de", "value": "Douglas Adams" }
+      },
+      "descriptions": {
+        "en": {
+          "language": "en",
+          "value": "English science fiction writer and humorist (1952–2001)"
+        }
+      },
+      "aliases": {
+        "en": [
+          { "language": "en", "value": "Douglas Noel Adams" },
+          { "language": "en", "value": "Douglas Noël Adams" }
+        ]
+      },
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P31",
+              "hash": "ad7d38a03cdd40cdc373de0dc4e7b7fcbccb31d9",
+              "datavalue": {
+                "value": { "entity-type": "item", "numeric-id": 5, "id": "Q5" },
+                "type": "wikibase-entityid"
+              },
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "qualifiers": {
+              "P805": [
+                {
+                  "snaktype": "value",
+                  "property": "P805",
+                  "hash": "eed7690a3685dc7a62a579e7222b5e9a367d8192",
+                  "datavalue": {
+                    "value": { "entity-type": "item", "numeric-id": 42395533, "id": "Q42395533" },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ]
+            },
+            "qualifiers-order": ["P805"],
+            "id": "Q42$F078E5B3-F9A8-480E-B7AC-3D86B4599A96",
+            "rank": "preferred"
+          }
+        ],
+        "P569": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P569",
+              "hash": "27f538a50ad110d1e6716c972f5f0ac24ca17430",
+              "datavalue": {
+                "value": {
+                  "time": "+1952-03-11T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "id": "q42$D8404CDA-25E4-4334-AF13-A3290BCD9C0F",
+            "rank": "normal",
+            "references": [
+              {
+                "hash": "355b56329b78db22be549dec34f2570ca61ca056",
+                "snaks": {
+                  "P248": [
+                    {
+                      "snaktype": "value",
+                      "property": "P248",
+                      "hash": "d1d1b10a05a8f3fc5d26bb4aeb6849617ad81fc7",
+                      "datavalue": {
+                        "value": { "entity-type": "item", "numeric-id": 36578, "id": "Q36578" },
+                        "type": "wikibase-entityid"
+                      },
+                      "datatype": "wikibase-item"
+                    }
+                  ]
+                },
+                "snaks-order": ["P248"]
+              }
+            ]
+          }
+        ],
+        "P625": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P625",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "datavalue": {
+                "value": {
+                  "latitude": 52.2053,
+                  "longitude": 0.1218,
+                  "altitude": null,
+                  "precision": 0.0001,
+                  "globe": "http://www.wikidata.org/entity/Q2"
+                },
+                "type": "globecoordinate"
+              },
+              "datatype": "globe-coordinate"
+            },
+            "type": "statement",
+            "id": "Q42$C0FFEE00-0000-0000-0000-000000000001",
+            "rank": "normal"
+          }
+        ],
+        "P2048": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P2048",
+              "hash": "bb30f6a415dca2ba16fc59f4fa2b5b32df39cd7d",
+              "datavalue": {
+                "value": {
+                  "amount": "+1.96",
+                  "unit": "http://www.wikidata.org/entity/Q11573",
+                  "upperBound": "+1.97",
+                  "lowerBound": "+1.95"
+                },
+                "type": "quantity"
+              },
+              "datatype": "quantity"
+            },
+            "type": "statement",
+            "id": "Q42$b0bf3caf-481c-356b-03a2-e61174b8e6da",
+            "rank": "normal"
+          }
+        ],
+        "P1813": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P1813",
+              "hash": "9e6ec901cd53fbf1d5398547e9f37632e592a4a2",
+              "datavalue": {
+                "value": { "text": "Douglas Adams", "language": "en" },
+                "type": "monolingualtext"
+              },
+              "datatype": "monolingualtext"
+            },
+            "type": "statement",
+            "id": "Q42$ba67c870-4aab-5093-a92d-7de40d46c67a",
+            "rank": "normal"
+          }
+        ],
+        "P18": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P18",
+              "hash": "fb7cd07a669a425f896132e0b8cfdb97254b1650",
+              "datavalue": {
+                "value": "Douglas adams portrait cropped.jpg",
+                "type": "string"
+              },
+              "datatype": "commonsMedia"
+            },
+            "type": "statement",
+            "id": "Q42$image-0000-0000-0000-000000000002",
+            "rank": "normal"
+          }
+        ],
+        "P214": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P214",
+              "hash": "33cb2c4a2227c950c19177a4c85fc4e38cacf526",
+              "datavalue": { "value": "113230702", "type": "string" },
+              "datatype": "external-id"
+            },
+            "type": "statement",
+            "id": "Q42$viaf-0000-0000-0000-000000000003",
+            "rank": "normal"
+          }
+        ],
+        "P856": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P856",
+              "hash": "dfa79d1e27a9692c898307e14f1bfadb675c8c40",
+              "datavalue": { "value": "https://douglasadams.com", "type": "string" },
+              "datatype": "url"
+            },
+            "type": "statement",
+            "id": "Q42$url-0000-0000-0000-000000000004",
+            "rank": "normal"
+          }
+        ],
+        "P1477": [
+          {
+            "mainsnak": {
+              "snaktype": "somevalue",
+              "property": "P1477",
+              "hash": "some00000000000000000000000000000000value",
+              "datatype": "monolingualtext"
+            },
+            "type": "statement",
+            "id": "Q42$some-0000-0000-0000-000000000005",
+            "rank": "normal"
+          }
+        ],
+        "P40": [
+          {
+            "mainsnak": {
+              "snaktype": "novalue",
+              "property": "P40",
+              "hash": "no0000000000000000000000000000000000value",
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "id": "Q42$none-0000-0000-0000-000000000006",
+            "rank": "normal"
+          }
+        ],
+        "P9999": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P9999",
+              "hash": "future0000000000000000000000000000000000",
+              "datavalue": {
+                "value": { "some": "shape", "the": "decoder", "does": "not know" },
+                "type": "future-datatype-not-yet-modelled"
+              },
+              "datatype": "future-datatype"
+            },
+            "type": "statement",
+            "id": "Q42$future-0000-0000-0000-000000000007",
+            "rank": "normal"
+          }
+        ]
+      },
+      "sitelinks": {
+        "enwiki": {
+          "site": "enwiki",
+          "title": "Douglas Adams",
+          "badges": ["Q17437798"]
+        },
+        "dewiki": {
+          "site": "dewiki",
+          "title": "Douglas Adams",
+          "badges": []
+        }
+      }
+    }
+  }
+}
