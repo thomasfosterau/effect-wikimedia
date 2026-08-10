@@ -10,10 +10,16 @@ Extension raw: <nowiki>{{not a template}} '''not bold'''</nowiki> after.
 Entities: &amp; &#160; &#x1F600; &notanentity &bad
 Heading-ish but not: == inline == text on the same line.
 === Real heading with surplus ==
-Table markup stays text:
+Table markup, with a nested table and a wikilink pipe in a cell:
 {| class="wikitable"
 |-
 ! Header
-| Cell {{tmpl}} value
+| Cell {{tmpl}} value || [[Foo|Bar]]
+|-
+| nested:
+{|
+| inner
 |}
+|}
+Bare URLs jammed against punctuation and existing link syntax: see (http://example.com/Foo_(bar)), http://example.com., and [http://example.com not-double-linked] http://example.com bare.
 Comment to EOF: <!-- never closed

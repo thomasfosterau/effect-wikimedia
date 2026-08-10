@@ -32,6 +32,11 @@ function childFragments(node: Node): readonly (readonly Node[])[] {
       return [node.target, ...node.segments];
     case "ExternalLink":
       return node.label === undefined ? [] : [node.label];
+    case "Table":
+      return [
+        ...node.captions.map((c) => c.content),
+        ...node.rows.flatMap((r) => r.cells.map((c) => c.content)),
+      ];
     default:
       return [];
   }
@@ -236,10 +241,19 @@ function stripNode(node: Node): string {
     }
     case "ExternalLink":
       return node.label === undefined ? "" : stripNodes(node.label).trim();
+    case "AutoLink":
+      return node.url;
     case "Tag": {
       if (node.name === "br") return "\n";
       if (node.rawContent !== undefined && STRIP_KEEP_RAW.has(node.name)) return node.rawContent;
       return "";
+    }
+    case "Table": {
+      const caption = node.captions.map((c) => stripNodes(c.content)).join(" ");
+      const body = node.rows
+        .map((r) => r.cells.map((c) => stripNodes(c.content)).join(" "))
+        .join("\n");
+      return caption.length > 0 ? `${caption}\n${body}` : body;
     }
   }
 }

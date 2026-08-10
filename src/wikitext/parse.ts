@@ -38,6 +38,7 @@
 
 import {
   type Argument,
+  type AutoLink,
   type Comment,
   type Document,
   EXTENSION_TAGS,
@@ -48,6 +49,10 @@ import {
   type Node,
   type Param,
   type Span,
+  type Table,
+  type TableCaption,
+  type TableCell,
+  type TableRow,
   type Tag,
   type Template,
   type Text,
@@ -65,6 +70,67 @@ const MAX_DEPTH = 100;
  */
 const PROTOCOL_RE =
   /^(?:(?:https?|ftps?|sftp|ssh|svn|git|gopher|ircs?|news|nntp|redis|tel|telnet|urn|worldwind|xmpp|magnet|mailto|bitcoin|geo|sips?|sms):|\/\/)/i;
+
+/**
+ * Protocols recognised for bare (unbracketed) URL autolinking — see
+ * {@link AutoLink}. Deliberately narrower than {@link PROTOCOL_RE}: only
+ * `http`/`https`, matching the scope of issue #1287's deferred autolinking
+ * work.
+ */
+const AUTOLINK_PROTOCOL_RE = /^https?:\/\//i;
+
+/**
+ * A trailing run of these characters is trimmed off an autolinked URL back
+ * into the surrounding text — MediaWiki's `makeFreeExternalLink`. `)` joins
+ * the set only when the URL contains no `(` at all (see {@link AutoLink}).
+ */
+function isAutoLinkTrailSep(c: number, hasParen: boolean): boolean {
+  switch (c) {
+    case 0x2c: // ,
+    case 0x3b: // ;
+    case 0x2e: // .
+    case 0x3a: // :
+    case 0x21: // !
+    case 0x3f: // ?
+      return true;
+    case 0x29: // )
+      return !hasParen;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Common Unicode `\p{Zs}` space separators beyond ASCII space — folded into
+ * the autolink URL-body stop set alongside MediaWiki's `EXT_LINK_URL_CLASS`
+ * ASCII/control exclusions. Not the full Unicode `Zs` category (a handful of
+ * rarely-used code points are omitted); a deliberate, narrow scope cut.
+ */
+const AUTOLINK_EXTRA_SPACE_CODES: ReadonlySet<number> = new Set([
+  0x00a0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+  0x200a, 0x202f, 0x205f, 0x3000,
+]);
+
+/** Characters that end an autolinked URL's body (MediaWiki's `EXT_LINK_URL_CLASS`). */
+function isAutoLinkStop(c: number): boolean {
+  return (
+    c <= 0x20 ||
+    c === 0x7f ||
+    c === 0x5b || // [
+    c === 0x5d || // ]
+    c === 0x3c || // <
+    c === 0x3e || // >
+    c === 0x22 || // "
+    AUTOLINK_EXTRA_SPACE_CODES.has(c)
+  );
+}
+
+/**
+ * Matches a truncated HTML-entity reference at the end of a string
+ * (`&amp`, `&#39`, `&#x27`) — used to avoid splitting a trailing entity when
+ * trimming autolink punctuation lands on its `;`.
+ */
+const ENTITY_TAIL_RE = /&(?:[a-z]+|#x[\da-f]+|#\d+)$/i;
 
 /** Which top-level delimiters terminate the current fragment scan. */
 interface Stop {
@@ -143,7 +209,7 @@ class Parser {
       if (depth < MAX_DEPTH) {
         switch (this.src.charCodeAt(this.pos)) {
           case 0x7b: // {
-            node = this.tryBrace(depth);
+            node = this.tryBrace(depth, block);
             break;
           case 0x5b: // [
             node = this.tryBracket(depth);
@@ -159,6 +225,10 @@ class Parser {
             break;
           case 0x3d: // =
             if (block && this.atLineStart(start)) node = this.tryHeading(depth);
+            break;
+          case 0x68: // h
+          case 0x48: // H
+            node = this.tryAutoLink();
             break;
           default:
             break;
@@ -212,7 +282,17 @@ class Parser {
 
   // ── braces: templates and arguments ─────────────────────────────────
 
-  private tryBrace(depth: number): Node | null {
+  private tryBrace(depth: number, block: boolean): Node | null {
+    // `{|` (a single brace, not a run of two-or-more) at the true start of a
+    // line, at block level, is a table — see `tryTable` / `Table`.
+    if (
+      block &&
+      this.src.charCodeAt(this.pos + 1) === 0x7c && // |
+      this.atLineStart(this.pos)
+    ) {
+      const table = this.tryTable(depth);
+      if (table) return table;
+    }
     const run = this.runOf(0x7b); // {
     if (run >= 3) {
       const arg = this.tryArgument(depth);
@@ -282,6 +362,213 @@ class Parser {
       return { name: first, value };
     }
     return { name: undefined, value: first };
+  }
+
+  // ── tables ────────────────────────────────────────────────────────
+  //
+  // A hand-rolled line-oriented scan over the same mutable cursor as the
+  // rest of the parser, rather than a pre-tokenized line list — consistent
+  // with "the scanner *is* the tokenizer" (see the module doc). Cell/caption
+  // *content* is ordinary wikitext and is parsed by recursing into
+  // `parseFragment` over a narrowed `limit` (the same technique `tryHeading`
+  // uses for a title), so nested constructs — including a nested table —
+  // parse normally. The line-boundary scan that finds where a cell's content
+  // *ends* is purely textual, though: it does not parse the content it's
+  // walking over, only tracks `{|`/`|}` nesting depth so a nested table's own
+  // row/cell lines aren't mistaken for this table's structure (see
+  // `scanTableFiller`). A `<nowiki>`/extension-tag body or other raw region
+  // containing a line that happens to start with a table marker is *not*
+  // shielded from this — a narrow, documented scope cut.
+
+  private tryTable(depth: number): Table | null {
+    const start = this.pos;
+    const key = this.failKey(start, 4);
+    if (this.failed.has(key)) return null;
+    this.pos += 2; // {|
+
+    const openStart = this.pos;
+    this.consumeRestOfLine();
+    this.scanTableFiller();
+    const open = this.src.slice(openStart, this.pos);
+
+    const captions: TableCaption[] = [];
+    const rows: TableRow[] = [];
+    let cells: TableCell[] = [];
+    let rowStart = this.pos;
+    let rowOpen: string | undefined;
+    let rowStarted = false;
+    let closed = false;
+
+    const flushRow = (): void => {
+      if (!rowStarted) return;
+      rows.push({ span: { start: rowStart, end: this.pos }, open: rowOpen, cells });
+      cells = [];
+    };
+
+    while (this.pos < this.limit) {
+      if (this.src.startsWith("|}", this.pos)) {
+        flushRow();
+        this.pos += 2;
+        closed = true;
+        break;
+      }
+      if (this.src.startsWith("|-", this.pos)) {
+        flushRow();
+        rowStart = this.pos;
+        this.pos += 2;
+        const rowOpenStart = this.pos;
+        this.consumeRestOfLine();
+        this.scanTableFiller();
+        rowOpen = this.src.slice(rowOpenStart, this.pos);
+        rowStarted = true;
+        continue;
+      }
+      if (this.src.startsWith("|+", this.pos)) {
+        captions.push(this.parseTableCaption(depth));
+        continue;
+      }
+      const c = this.src.charCodeAt(this.pos);
+      if (c === 0x21 /* ! */ || c === 0x7c /* | */) {
+        if (!rowStarted) {
+          rowStart = this.pos;
+          rowOpen = undefined;
+          rowStarted = true;
+        }
+        this.parseTableLineCells(c === 0x21, depth, cells);
+        continue;
+      }
+      // Unreachable when `scanTableFiller` correctly stops at every marker
+      // line; a defensive bailout (not a throw — fail-soft) in case it doesn't.
+      break;
+    }
+
+    if (!closed) {
+      this.pos = start;
+      this.failed.add(key);
+      return null;
+    }
+    return { _tag: "Table", span: this.span(start), open, captions, rows };
+  }
+
+  /** Advances the cursor to just past the next `\n` (or to `this.limit` if there is none). */
+  private consumeRestOfLine(): void {
+    const nl = this.src.indexOf("\n", this.pos);
+    this.pos = nl === -1 || nl >= this.limit ? this.limit : nl + 1;
+  }
+
+  /**
+   * From a line-start position, advances through whole lines that are not
+   * one of this table's own marker lines (`|}`, `|-`, `|+`, `!`, `|`),
+   * tracking `{|`/`|}` nesting so a nested table's interior is skipped
+   * rather than mistaken for this table's structure. Stops exactly at the
+   * next marker line, or `this.limit`.
+   */
+  private scanTableFiller(): void {
+    let nestDepth = 0;
+    while (this.pos < this.limit) {
+      if (nestDepth === 0 && this.isTableMarkerLine(this.pos)) return;
+      if (this.src.startsWith("{|", this.pos)) nestDepth++;
+      else if (nestDepth > 0 && this.src.startsWith("|}", this.pos)) nestDepth--;
+      this.consumeRestOfLine();
+    }
+  }
+
+  private isTableMarkerLine(pos: number): boolean {
+    if (this.src.startsWith("|}", pos)) return true;
+    if (this.src.startsWith("|-", pos)) return true;
+    if (this.src.startsWith("|+", pos)) return true;
+    const c = this.src.charCodeAt(pos);
+    return c === 0x21 || c === 0x7c;
+  }
+
+  /**
+   * MediaWiki's single-pipe cell/caption attribute rule (`Parser::doTableStuff`):
+   * the first bare `|` found in `[from, to)` splits attributes from content,
+   * *unless* the text before it contains `[[` (a wikilink's own pipe would
+   * otherwise be misread as the separator).
+   */
+  private splitCellAttrs(
+    from: number,
+    to: number,
+  ): { attrs: string | undefined; contentStart: number } {
+    const pipeIdx = this.src.indexOf("|", from);
+    if (pipeIdx === -1 || pipeIdx >= to) return { attrs: undefined, contentStart: from };
+    const before = this.src.slice(from, pipeIdx);
+    if (before.includes("[[")) return { attrs: undefined, contentStart: from };
+    return { attrs: before, contentStart: pipeIdx + 1 };
+  }
+
+  /** Parses `[start, end)` as a bounded wikitext fragment (block-level, so a nested table can open). */
+  private parseBoundedFragment(start: number, end: number, depth: number): Node[] {
+    const savedLimit = this.limit;
+    this.pos = start;
+    this.limit = end;
+    const nodes = this.parseFragment({}, depth + 1, true);
+    this.limit = savedLimit;
+    this.pos = end;
+    return nodes;
+  }
+
+  private parseTableCaption(depth: number): TableCaption {
+    const start = this.pos;
+    this.pos += 2; // |+
+    const lineEnd = this.tableLineEnd(this.pos);
+    const { attrs, contentStart } = this.splitCellAttrs(this.pos, lineEnd);
+    this.pos = lineEnd;
+    this.consumeTrailingNewline();
+    this.scanTableFiller();
+    const content = this.parseBoundedFragment(contentStart, this.pos, depth);
+    return { span: { start, end: this.pos }, attrs, content };
+  }
+
+  /**
+   * Parses every cell opened on the current marker line (`!`/`|`, further
+   * split by `!!`/`||`), extending the last one across any following
+   * non-marker lines, and appends them to `into`. Leaves the cursor at the
+   * next table marker line (or `this.limit`).
+   */
+  // reason: cell/line splitting with attrs detection and multi-line content extension; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
+  // fallow-ignore-next-line complexity
+  private parseTableLineCells(header: boolean, depth: number, into: TableCell[]): void {
+    const sep = header ? "!!" : "||";
+    const lineEnd = this.tableLineEnd(this.pos);
+    let openStart = this.pos;
+    let segStart = this.pos + 1; // past the single marker char
+    let inline = false;
+
+    for (;;) {
+      const sepIdx = this.src.indexOf(sep, segStart);
+      const hasMore = sepIdx !== -1 && sepIdx < lineEnd;
+      const segEnd = hasMore ? sepIdx : lineEnd;
+      const { attrs, contentStart } = this.splitCellAttrs(segStart, segEnd);
+
+      let contentEnd: number;
+      if (hasMore) {
+        contentEnd = segEnd;
+      } else {
+        this.pos = segEnd;
+        this.consumeTrailingNewline();
+        this.scanTableFiller();
+        contentEnd = this.pos;
+      }
+      const content = this.parseBoundedFragment(contentStart, contentEnd, depth);
+      into.push({ span: { start: openStart, end: contentEnd }, header, inline, attrs, content });
+
+      if (!hasMore) return;
+      openStart = sepIdx;
+      segStart = sepIdx + sep.length;
+      inline = true;
+    }
+  }
+
+  /** End of the physical line containing `pos` (exclusive of the newline), bounded by `this.limit`. */
+  private tableLineEnd(pos: number): number {
+    const nl = this.src.indexOf("\n", pos);
+    return nl === -1 || nl >= this.limit ? this.limit : nl;
+  }
+
+  private consumeTrailingNewline(): void {
+    if (this.pos < this.limit && this.src.charCodeAt(this.pos) === 0x0a) this.pos++;
   }
 
   // ── brackets: wikilinks and external links ──────────────────────────
@@ -356,6 +643,37 @@ class Parser {
     this.pos = start;
     this.failed.add(key);
     return null;
+  }
+
+  // ── bare url autolinking ─────────────────────────────────────────────
+
+  // reason: URL body scan plus MediaWiki's trailing-punctuation trim; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
+  // fallow-ignore-next-line complexity
+  private tryAutoLink(): AutoLink | null {
+    const start = this.pos;
+    const protoMatch = AUTOLINK_PROTOCOL_RE.exec(
+      this.src.slice(start, Math.min(start + 8, this.limit)),
+    );
+    if (!protoMatch) return null;
+    const bodyStart = start + protoMatch[0].length;
+
+    let i = bodyStart;
+    while (i < this.limit && !isAutoLinkStop(this.src.charCodeAt(i))) i++;
+    if (i === bodyStart) return null;
+
+    const hasParen = this.src.slice(start, i).includes("(");
+    let end = i;
+    while (end > bodyStart && isAutoLinkTrailSep(this.src.charCodeAt(end - 1), hasParen)) end--;
+    // Don't split a trailing HTML-entity-looking reference by moving its `;`
+    // into the trimmed trail.
+    if (end < i && this.src.charCodeAt(end) === 0x3b /* ; */) {
+      if (ENTITY_TAIL_RE.test(this.src.slice(start, end))) end++;
+    }
+    // A lone protocol with nothing real left after trimming isn't a link.
+    if (end <= bodyStart) return null;
+
+    this.pos = end;
+    return { _tag: "AutoLink", span: this.span(start), url: this.src.slice(start, end) };
   }
 
   // ── angle brackets: comments and tags ───────────────────────────────

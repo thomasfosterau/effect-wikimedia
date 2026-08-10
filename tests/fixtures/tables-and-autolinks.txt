@@ -1,0 +1,38 @@
+Bare urls in prose: see http://example.org/path, and https://example.org/other; also
+(http://en.wikipedia.org/wiki/Foo_(bar)) keeps both parens but (http://example.org) does not.
+A trailing sentence ends at http://example.org. Another ends with a question http://example.org?
+An entity survives intact: http://example.org?x=1&amp;
+A bracketed link is not double-linked: [http://example.org label] but the next one is bare: http://example.org
+A url inside a wikilink target (unusual, but must not crash): [[http://example.org|odd]]
+
+{| class="wikitable" style="text-align:center"
+|+ Example table with a caption
+! Name !! Born
+|-
+| [[Ada Lovelace|Ada]] || 1815
+|-
+! scope="row" | Total
+| colspan="1" | n/a
+|}
+
+A table whose first row has no |- marker, immediate cells with a pipe-bearing wikilink:
+{|
+| [[Foo|Bar]] and '''bold''' and ''italic''
+| plain
+|}
+
+Nested table inside a cell, with the inner table's own row/cell markers:
+{|
+| outer cell one
+{|
+! inner header
+|-
+| inner data with a bare url http://example.org/inner.
+|}
+more outer text
+|-
+| outer cell two
+|}
+
+An unclosed table degrades to plain text: {| class="x"
+| unterminated
