@@ -52,7 +52,9 @@ export type Node =
   | Argument
   | Wikilink
   | ExternalLink
-  | Tag;
+  | AutoLink
+  | Tag
+  | Table;
 
 /** A plain text run. Captures its source slice verbatim. */
 export interface Text {
@@ -180,6 +182,42 @@ export interface ExternalLink {
 }
 
 /**
+ * A bare (unbracketed) `http://`/`https://` URL autolinked in running text —
+ * MediaWiki's `doMagicLinks` "free link" recognition
+ * (`Parser::makeFreeExternalLink`). `url` is the linked text verbatim
+ * (protocol included); trailing punctuation trimmed off the end per the
+ * semantics below is left in the surrounding text, not stored here.
+ *
+ * **Chosen semantics** (matching MediaWiki, narrowed to `http`/`https` —
+ * this package's protocol scope; see {@link PROTOCOL_RE} for the fuller list
+ * honoured by bracketed links):
+ *
+ * - The URL body is the maximal run of characters excluding ASCII
+ *   whitespace/control, `[`, `]`, `<`, `>`, `"`, and the common Unicode space
+ *   separators — MediaWiki's `EXT_LINK_URL_CLASS`.
+ * - A trailing run of `,;.:!?` is trimmed back into the surrounding text.
+ * - A trailing `)` is trimmed too, but *only* when the URL contains no `(`
+ *   anywhere — MediaWiki checks for presence of `(`, not paren balance, so
+ *   `(http://x/Foo_(bar))` keeps *both* trailing parens in the link while
+ *   `(http://x)` does not.
+ * - A trim that would land on a `;` backs off by one character when doing so
+ *   would split an HTML-entity-looking reference (`&amp;`, `&#39;`,
+ *   `&#x27;`) in two, so the entity stays whole.
+ * - If trimming would remove everything after the protocol, there is no real
+ *   URL — the whole thing (protocol included) is left as plain text.
+ *
+ * **Deliberately not implemented**: MediaWiki's separate `&lt;`/`&gt;`/`&nbsp;`
+ * mid-URL truncation (working around HTML-tag-removal artifacts upstream of
+ * its parser) — this parser never removes HTML tags, so those artifacts
+ * cannot arise from wikitext source.
+ */
+export interface AutoLink {
+  readonly _tag: "AutoLink";
+  readonly span: Span;
+  readonly url: string;
+}
+
+/**
  * An HTML-ish tag.
  *
  * Two shapes share this node:
@@ -210,6 +248,97 @@ export interface Tag {
   readonly rawContent: string | undefined;
   /** Verbatim closing tag for an extension tag (`</ref>`), else `undefined`. */
   readonly closeRaw: string | undefined;
+}
+
+/**
+ * A wikitable `{| … |}` (issue #1287's largest vocabulary addition). Modelled
+ * as a block-level construct on the same footing as {@link Heading}: the
+ * `{|` must open at the true start of a source line, and (like headings)
+ * table recognition only applies where the fragment scanner runs with
+ * `block: true` — i.e. not inside a template parameter, wikilink label, or
+ * other inline fragment. A line-start marker (`{|`, `|}`, `|-`, `|+`, `!`,
+ * `|`) is recognised only at column 0 of a physical line — MediaWiki
+ * tolerates leading spaces before these; this parser does not, and such a
+ * line is simply absorbed as ordinary content instead of being recognised as
+ * a marker (a deliberate, documented simplification, not a defect).
+ *
+ * `open` is the verbatim text from `{|` up to the first real row/cell/caption
+ * marker: normally just the attribute text plus its line terminator, but it
+ * also absorbs any blank or stray filler lines before real content begins
+ * (mirroring how {@link Tag.raw} keeps the whole opening tag verbatim rather
+ * than splitting out "the attributes" as their own field). MediaWiki treats a
+ * `|` written into this text as user error ("attribute loss"); this parser
+ * does not special-case it — it is just more text in `open`.
+ */
+export interface Table {
+  readonly _tag: "Table";
+  readonly span: Span;
+  readonly open: string;
+  readonly captions: readonly TableCaption[];
+  readonly rows: readonly TableRow[];
+}
+
+/**
+ * A table caption `|+ … `. Zero or more may occur (MediaWiki only really
+ * gives meaning to one; this vocabulary does not privilege a particular
+ * occurrence and keeps every `|+` line encountered, so round-trip never
+ * depends on picking "the real one").
+ *
+ * `attrs` / `content` follow the single-pipe rule shared with
+ * {@link TableCell}: the first bare `|` on the caption's opening line splits
+ * attributes from content, *unless* the text before it contains `[[` (a
+ * wikilink's own pipe would otherwise be misread as the separator) — see
+ * {@link TableCell.attrs}. `content` extends across any following lines that
+ * aren't themselves a table marker, so a caption's text can span paragraphs.
+ */
+export interface TableCaption {
+  readonly span: Span;
+  readonly attrs: string | undefined;
+  readonly content: readonly Node[];
+}
+
+/**
+ * One table row. Rows are separated by `|-`; the table's very first row
+ * needs no explicit marker (`open` is `undefined` for that implicit row —
+ * distinct from an explicit `|-` with no attribute text, which is `""`).
+ *
+ * `open`, when present, is the verbatim text from just after `|-` through
+ * the start of the row's first cell (or the next marker) — attribute text
+ * plus its line terminator, and any filler lines, mirroring
+ * {@link Table.open}.
+ */
+export interface TableRow {
+  readonly span: Span;
+  readonly open: string | undefined;
+  readonly cells: readonly TableCell[];
+}
+
+/**
+ * One table cell — a header (`!`) or data (`|`) cell.
+ *
+ * `inline` distinguishes a cell that continues its row's opening line via
+ * `!!`/`||` from one that opens on its own line via a fresh `!`/`|` (both are
+ * cells of the *same* row; only the marker differs, and round-trip needs to
+ * know which was written). Mixing header and data cells via `!!`/`||` on one
+ * line is not specially recognised: a header line is split only on `!!` and
+ * a data line only on `||`, matching the documented common usage — a stray
+ * `||` in a `!`-opened line is just literal text within that cell's content,
+ * not a type change.
+ *
+ * `attrs` / `content`: MediaWiki's single-pipe rule (`Parser::doTableStuff`)
+ * splits the cell's opening-line text at the first bare `|` into attributes
+ * and content — *unless* the text before that `|` contains `[[`, in which
+ * case the whole thing is content and `attrs` is `undefined`. This is the
+ * documented guard against a wikilink's own pipe (`[[Foo|Bar]]`) being
+ * misread as the attribute separator. `content` extends across any following
+ * lines that aren't themselves a table marker (multi-line cell content).
+ */
+export interface TableCell {
+  readonly span: Span;
+  readonly header: boolean;
+  readonly inline: boolean;
+  readonly attrs: string | undefined;
+  readonly content: readonly Node[];
 }
 
 /**

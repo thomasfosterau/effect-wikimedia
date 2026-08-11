@@ -16,7 +16,7 @@
  * @module lib/wikitext/serialize
  */
 
-import type { Document, Node, Param } from "./ast.ts";
+import type { Document, Node, Param, TableCaption, TableCell, TableRow } from "./ast.ts";
 
 /** Serializes a fragment (a list of nodes) back to wikitext. */
 export function serializeNodes(nodes: readonly Node[]): string {
@@ -50,11 +50,32 @@ export function serializeNode(node: Node): string {
         .join("")}]]`;
     case "ExternalLink":
       return `[${node.url}${node.label === undefined ? "" : serializeNodes(node.label)}]`;
+    case "AutoLink":
+      return node.url;
     case "Tag":
       // A marker tag is just its verbatim text; an extension tag adds its
       // captured raw body and closing tag (both absent when open-only).
       return node.raw + (node.rawContent ?? "") + (node.closeRaw ?? "");
+    case "Table":
+      return `{|${node.open}${node.captions.map(serializeCaption).join("")}${node.rows
+        .map(serializeRow)
+        .join("")}|}`;
   }
+}
+
+function serializeCaption(caption: TableCaption): string {
+  return `|+${caption.attrs === undefined ? "" : `${caption.attrs}|`}${serializeNodes(caption.content)}`;
+}
+
+function serializeRow(row: TableRow): string {
+  const marker = row.open === undefined ? "" : `|-${row.open}`;
+  return marker + row.cells.map(serializeCell).join("");
+}
+
+function serializeCell(cell: TableCell): string {
+  const marker = cell.inline ? (cell.header ? "!!" : "||") : cell.header ? "!" : "|";
+  const attrs = cell.attrs === undefined ? "" : `${cell.attrs}|`;
+  return marker + attrs + serializeNodes(cell.content);
 }
 
 /** Serializes a document (its top-level fragment). */

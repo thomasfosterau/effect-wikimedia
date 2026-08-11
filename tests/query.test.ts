@@ -120,4 +120,32 @@ describe("strip to plain text", () => {
     );
     expect(stripToText(doc)).toBe("The Analytical Engine was a proposed machine.");
   });
+
+  it("renders a bare autolinked url as its own text", () => {
+    const doc = parse("See http://example.org for more.");
+    expect(stripToText(doc)).toBe("See http://example.org for more.");
+  });
+
+  it("joins table cell text with spaces between cells and newlines between rows", () => {
+    // Best-effort, not cleaned up: stripToText leaves whitespace as-is, so
+    // each cell's own trailing newline shows through the join too.
+    const doc = parse("{|\n|+ Cap\n! A !! B\n|-\n| 1 || 2\n|}");
+    expect(stripToText(doc)).toBe(" Cap\n\n A   B\n\n 1   2\n");
+  });
+});
+
+describe("tables and autolinks reachable via walk/filter (issue #1287)", () => {
+  it("finds an AutoLink node at any depth", () => {
+    const doc = parse("'''bold''' http://example.org more");
+    expect(filter(doc, (n) => n._tag === "AutoLink")).toHaveLength(1);
+  });
+
+  it("descends into table captions and cell content", () => {
+    const doc = parse(
+      "{|\n|+ has a [[Caption Link]]\n| has [[Cell Link]] and http://example.org\n|}",
+    );
+    const links = filter(doc, (n) => n._tag === "Wikilink");
+    expect(links).toHaveLength(2);
+    expect(filter(doc, (n) => n._tag === "AutoLink")).toHaveLength(1);
+  });
 });
