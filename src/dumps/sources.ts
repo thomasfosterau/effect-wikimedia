@@ -41,7 +41,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 // ── Error & etiquette ────────────────────────────────────────────────────
 
 /** A failure reading or decompressing a dump source. */
-export class SourceError extends Schema.TaggedErrorClass<SourceError>()("SourceError", {
+export class SourceError extends Schema.TaggedError<SourceError>()("SourceError", {
   description: Schema.String,
 }) {}
 

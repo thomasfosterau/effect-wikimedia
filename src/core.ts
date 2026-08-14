@@ -71,13 +71,13 @@ export const DEFAULT_MAXLAG_SECONDS = 5;
 // ── Typed error family ───────────────────────────────────────────────────
 
 /** A bad input the caller supplied (host or path segment) — fix the input, don't retry. */
-export class InvalidRequest extends Schema.TaggedErrorClass<InvalidRequest>()("InvalidRequest", {
+export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {
   kind: Schema.String,
   value: Schema.String,
 }) {}
 
 /** An upstream transport / decode failure (network, non-2xx, malformed body). */
-export class RequestFailed extends Schema.TaggedErrorClass<RequestFailed>()("RequestFailed", {
+export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestFailed", {
   description: Schema.String,
 }) {}
 
@@ -88,7 +88,7 @@ export class RequestFailed extends Schema.TaggedErrorClass<RequestFailed>()("Req
  * this automatically; it only escapes to the caller once retries are
  * exhausted.
  */
-export class RateLimited extends Schema.TaggedErrorClass<RateLimited>()("RateLimited", {
+export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
   retryAfterSeconds: Schema.Finite,
 }) {}
 
