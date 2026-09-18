@@ -1,9 +1,69 @@
-# Single-package repository — no `packages:` list. This file exists only to
-# carry pnpm settings, which pnpm 10+ reads from here rather than `.npmrc`.
+# Single-package repository — the library lives at the repo root, so there is
+# no `packages:` list. This file carries the pnpm settings (pnpm 10+ reads them
+# from here rather than `.npmrc`) and the dependency catalog.
 #
-# `effect` is a peerDependency of the published package and a devDependency
-# here, so the repo resolves exactly one copy while consumers bring their own.
-# Two copies break `Context` / `Layer` / `Schema` identity at runtime.
+# EVERY external dependency version lives in the catalog below; package.json
+# references only `catalog:` (dev) and `catalog:peers` (the published peer
+# range). `catalogMode: strict` makes `pnpm add` enforce that at add time and
+# `pnpm install` reject a non-catalog specifier. After editing the catalog,
+# ALWAYS run `pnpm install` and commit the regenerated pnpm-lock.yaml — a stale
+# lockfile fails CI at once (`pnpm install --frozen-lockfile`).
+#
+# The shape (strict catalog, `catalogs: peers`, singleton overrides, release
+# age) is the shared library standard, copied from
+# `thomasfosterau/effect-drizzle-ext`.
+catalogMode: strict
+
+catalog:
+  "@changesets/cli": ^3.0.3
+  "@effect/language-service": ^0.87.0
+  "@types/node": ^26.1.2
+  # `effect` is a peerDependency of the published package and a devDependency
+  # here, so the repo resolves exactly one copy while consumers bring their
+  # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
+  #
+  # Deliberately NOT yet on the shared library floor (`>=4.0.0-rc.112`): that
+  # bump is its own issue (#7, with the API-diff notes), because `beta.107`
+  # → `rc.112` is a breaking peer-range change for consumers.
+  effect: 4.0.0-beta.107
+  # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
+  esbuild: ^0.28.1
+  typescript: ^5.9.3
+  # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
+  # the same release under its aliased core package, and `vitest` must match
+  # vite-plus's exact pin because the `vitest: "catalog:"` override below
+  # forces every resolution to the catalog singleton. Bump the three together.
+  vite-plus: 0.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.0
+  vitest: 4.1.11
+
+# Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
+# strict catalog mode still governs them while they stay ranges (an exact
+# `4.0.0-beta.107` peer would reject a consumer on a newer prerelease).
+# `pnpm publish` (which `changeset publish` runs) replaces `catalog:peers`
+# with these ranges in the published manifest.
+catalogs:
+  peers:
+    effect: ">=4.0.0-beta.104"
+
+overrides:
+  # `effect` MUST be a singleton (see the catalog comment): force every
+  # resolution to the catalog version so a hoisting reshuffle cannot introduce
+  # a second copy.
+  effect: "catalog:"
+  vite: "catalog:"
+  vitest: "catalog:"
+# vitest declares a peer on `vite` by its public version range, which the
+# aliased `@voidzero-dev/vite-plus-core` package cannot satisfy by name even
+# though it is the same release; `pnpm install` would warn on every run.
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"
+
 allowBuilds:
   # The tree-shaking test (`tests/tree-shaking.test.ts`) runs a real esbuild
   # bundle, so esbuild's native binary must actually be installed.
@@ -11,3 +71,11 @@ allowBuilds:
   # Only an optional perf accelerator for msgpackr (pulled in transitively by
   # the Vite+ toolchain); the pure-JS fallback is used when it isn't built.
   msgpackr-extract: false
+
+# Supply-chain delay (owner's policy, gardeneria #1149): hold newly published
+# versions for 1 day (unit: MINUTES) before pnpm will install them. Mirrored by
+# `cooldown` in .github/dependabot.yml.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
+  - "@thomasfosterau/*"

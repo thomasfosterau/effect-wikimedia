@@ -43,11 +43,13 @@ Every request goes through `Core.WikimediaClient`, which applies the UA policy a
 This repository is managed by [Vite+](https://viteplus.dev) (the `vp` CLI).
 
 ```sh
-vp install     # install dependencies
-vp check       # format (Oxfmt), lint (Oxlint), type-check (tsgolint)
-vp run test    # Vitest suite
-vp run build   # tsdown library build into dist/
+pnpm install --frozen-lockfile   # install dependencies exactly as CI does
+vp check                         # format (Oxfmt), lint (Oxlint), type-check (tsgolint)
+vp run test                      # Vitest suite
+vp run build                     # tsdown library build into dist/
 ```
+
+Dependency versions live in the strict catalog in `pnpm-workspace.yaml`; `package.json` only references `catalog:`. Conventions for humans and agents are in [AGENTS.md](AGENTS.md).
 
 `vp run test` runs against recorded fixtures (`tests/fixtures/`) with the network stubbed at `FetchHttpClient.Fetch` — there is no live network access anywhere in this package's tests or in CI.
 

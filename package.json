@@ -51,17 +51,18 @@
     "release": "vp run build && changeset publish"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.8",
-    "@effect/language-service": "^0.87.0",
-    "@types/node": "^26.1.2",
-    "effect": "4.0.0-beta.107",
-    "esbuild": "^0.28.1",
-    "typescript": "^5.9.3",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.5",
-    "vite-plus": "0.2.5"
+    "@changesets/cli": "catalog:",
+    "@effect/language-service": "catalog:",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "esbuild": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-beta.104"
+    "effect": "catalog:peers"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
