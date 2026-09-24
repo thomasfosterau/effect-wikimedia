@@ -1,62 +1,74 @@
 name: Release
 
+# Changesets release flow (copied from `thomasfosterau/effect-jsonapi`, the
+# release-pipeline standard): on every push to `main`, changesets/action
+# either opens/updates the "Version Packages" PR (while unreleased changesets
+# exist) or, once that PR has merged and no changesets remain, publishes to
+# npm and tags the release. See docs/RELEASING.md.
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency:
+  group: release-${{ github.ref }}
+
+# No permissions by default; the release job opts into exactly what it needs.
+permissions: {}
 
 jobs:
   release:
-    name: Release
+    name: Version or publish
+    # Never run on forks (they have neither the environment nor the trusted
+    # publisher binding, so a fork cannot publish on your behalf).
+    if: github.repository == 'thomasfosterau/effect-wikimedia'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Requires manual approval via a protected GitHub Environment named
+    # "release". See docs/RELEASING.md for the one-time setup.
+    environment: release
     permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
+      contents: write # push the version branch, the release tag and the GitHub release
+      pull-requests: write # open/update the "Version Packages" PR
+      id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout
+        # The Changesets action pushes the version branch, so it needs the
+        # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN).
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          cache: true
-          run-install: false
+      - uses: ./.github/actions/setup
 
-      - name: Install dependencies
-        run: vp install --no-frozen-lockfile
-
-      # npm Trusted Publishing (OIDC) requires npm >= 11.5. Upgrade so
-      # `changeset publish` authenticates to npm via the `id-token` below
-      # instead of a long-lived NPM_TOKEN.
-      - name: Ensure npm supports OIDC trusted publishing
+      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1. `changeset
+      # publish` runs `pnpm publish` (this is a pnpm workspace), and pnpm
+      # shells out to the `npm` on PATH for the publish itself, so upgrading
+      # npm is what makes it authenticate via the `id-token` permission above
+      # instead of a long-lived NPM_TOKEN. `pnpm publish` also rewrites the
+      # `catalog:` / `catalog:peers` specifiers into real ranges, which a bare
+      # `npm publish` would not.
+      - name: Upgrade npm (OIDC trusted publishing)
         run: npm install -g npm@latest
 
-      # This is a pnpm workspace (`packageManager: pnpm` + `workspace:^` deps),
-      # so `changeset publish` shells out to `pnpm publish`. Vite+ uses pnpm
-      # internally but does not expose it on PATH, so install it explicitly
-      # (pinned to the workspace's pnpm version) or the publish fails with
-      # `spawn pnpm ENOENT`.
-      - name: Ensure pnpm is on PATH for changeset publish
-        run: npm install -g pnpm@11.18.0
-
-      - name: Create Release Pull Request or Publish to npm
-        id: changesets
-        uses: changesets/action@v1
+      # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
+      # devDependencies) and renamed its inputs from v1's `version` / `publish`
+      # / `commit` / `title`. The action parses the "New tag:" output of
+      # `changeset publish`, pushes the tag and creates the GitHub release.
+      - name: Create release PR or publish to npm
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          version: vp run version
-          # Run the release script via `npm run`, NOT `vp run`: npm forwards the
-          # ambient environment to child processes, whereas `vp run` does not
-          # propagate the `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN` variables
-          # that npm needs for OIDC trusted publishing. Without them npm logs
-          # "oidc Skipped because incorrect permissions for id-token" and falls
-          # back to token auth, failing with ENEEDAUTH. The `release` script
-          # still builds with `vp` internally; only the runner changes.
-          publish: npm run release
+          version-script: pnpm run version
+          # `pnpm run`, NOT `vp run`: pnpm forwards the ambient environment to
+          # child processes, whereas `vp run` does not propagate the
+          # `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN` variables npm needs for
+          # OIDC. Without them npm logs "oidc Skipped because incorrect
+          # permissions for id-token", falls back to token auth and fails with
+          # ENEEDAUTH. The `release` script still builds with `vp` internally.
+          publish-script: pnpm run release
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NPM_TOKEN: publishing authenticates via OIDC trusted publishing
           # (the `id-token: write` permission above + a trusted publisher
-          # configured for each package on npmjs.com). See docs/RELEASING.md.
+          # configured for the package on npmjs.com). Provenance is attached.
+          NPM_CONFIG_PROVENANCE: "true"

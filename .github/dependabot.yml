@@ -1,0 +1,74 @@
+# Dependabot version-update configuration (a subset of the
+# `thomasfosterau/effect-drizzle-ext` one, the shared library standard).
+#
+# `groups` collect dependencies that MUST move together: the Effect 4 release
+# line is a lockstep-versioned singleton set; the vitest toolchain is pinned to
+# vite-plus's exact versions (see the catalog in pnpm-workspace.yaml).
+#
+# `vite` is an npm alias of `@voidzero-dev/vite-plus-core` and `vitest` must
+# match vite-plus's exact pin, so their *version* updates are ignored (bump
+# the three together by editing the catalog) while SECURITY updates stay
+# enabled: each ignore is scoped to the `version-update:semver-*` update types;
+# a bare `dependency-name` ignore would block security updates too.
+#
+# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge`, so Dependabot
+# never proposes a version pnpm's own supply-chain gate would reject.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+    cooldown:
+      default-days: 1
+      exclude:
+        - "@thomasfosterau/*"
+    groups:
+      effect:
+        patterns:
+          - "effect"
+          - "@effect/*"
+      vitest-toolchain:
+        patterns:
+          - "vitest"
+          - "vite-plus"
+    ignore:
+      - dependency-name: "vite"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vitest"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vite-plus"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

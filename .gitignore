@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 
 # Vite+ / task cache
 .vp/
+
+# Claude Code: per-user overrides and agent worktrees.
+.claude/settings.local.json
+.claude/worktrees/

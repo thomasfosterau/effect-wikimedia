@@ -1,33 +1,48 @@
 name: CI
 
+# ONE job, ONE required check (copied in shape from
+# `thomasfosterau/effect-drizzle-ext`, the Vite+ library standard). The
+# repo's task graph lives in vite.config.ts, not in GitHub Actions `needs:`.
+
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# No permissions by default; the single job grants only read access.
+permissions: {}
 
 jobs:
-  build:
+  ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          cache: true
-          run-install: false
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: vp install --no-frozen-lockfile
+      - uses: ./.github/actions/setup
 
-      - name: Check (format, lint, types)
+      # `vp run` tasks (`test`, `build`) are content-addressed (`run.cache` in
+      # vite.config.ts); restoring the cache lets an unchanged task replay.
+      - name: Restore the Vite+ task cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.vite/task-cache
+          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            vp-task-v1-${{ runner.os }}-
+
+      - name: Format, lint and type-check
         run: vp check
 
       - name: Test
@@ -35,3 +50,6 @@ jobs:
 
       - name: Build
         run: vp run build
+
+      - name: Audit
+        run: pnpm audit --audit-level high
