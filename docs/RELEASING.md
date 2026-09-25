@@ -8,6 +8,8 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 2. **Version Packages PR (automatic).** On every push to `main`, the Release workflow runs `pnpm run version` (`changeset version && vp fmt`): it consumes the pending changesets, bumps `package.json`, and writes `CHANGELOG.md` on the `changeset-release/main` branch, then opens (or updates) a **"chore: version packages"** PR. Review it like any other PR.
 
+   Changesets v3 formats the changelogs it writes with whatever formatter it detects, and it detects the `oxfmt` shim that Vite+ installs whenever `node_modules/oxfmt` exists (a hoisted install, as in the other library repositories); that shim only serves editors and exits non-zero when run directly. So `.changeset/config.json` sets `"format": false` and the `version` script formats with `vp fmt` itself.
+
 3. **Publish (automatic on merge).** Merging that PR triggers the workflow's publish step, `pnpm run release` (`vp run build && changeset publish`). `changeset publish` runs `pnpm publish`, which rewrites the `catalog:peers` peer range into the real one and hands the publish to the npm CLI, which authenticates via OIDC (the job's `id-token: write` permission plus the trusted publisher below) and attaches provenance. The action then pushes the `v*` tag and creates the GitHub release.
 
 The job runs in the protected `release` environment, so every run on `main` — the version PR and the publish alike — pauses for the environment's required reviewer to approve it.
