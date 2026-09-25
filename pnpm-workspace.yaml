@@ -25,7 +25,7 @@ catalog:
   # Deliberately NOT yet on the shared library floor (`>=4.0.0-rc.112`): that
   # bump is its own issue (#7, with the API-diff notes), because `beta.107`
   # → `rc.112` is a breaking peer-range change for consumers.
-  effect: 4.0.0-beta.107
+  effect: 4.0.0-rc.117
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
   typescript: ^5.9.3
