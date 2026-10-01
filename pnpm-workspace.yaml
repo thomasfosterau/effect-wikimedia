@@ -27,7 +27,7 @@ catalog:
   effect: 4.0.0-rc.118
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
-  typescript: ^5.9.3
+  typescript: ^7.0.2
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override below
