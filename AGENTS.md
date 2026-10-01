@@ -56,9 +56,9 @@ Never guess at Effect patterns — check the guide first.
 
 ## Effect v4
 
-This package targets **Effect v4 (beta)**: a single `effect` package pinned in the catalog to a `4.0.0-beta.x` version, as a peer dependency.
+This package targets **Effect v4 (release candidate)**: a single `effect` package, a peer dependency, pinned in the catalog to exactly `4.0.0-rc.118` (the published peer floor is `>=4.0.0-rc.118`).
 
-- `@effect/platform` does not exist in v4 — HTTP modules live under `effect/unstable/http/*`, and `FileSystem`/`Path` under `effect/*`.
+- `@effect/platform` does not exist in v4 — HTTP modules live under `effect/http/*` (the `effect/unstable/*` paths were removed in `rc.118`; `HttpApi` is `effect/http-api/*`), and `FileSystem`/`Path` under `effect/*`.
 - The v3 → v4 migration maps live in `~/.local/share/effect-solutions/effect/migration/` (start with `v3-to-v4.md`).
 - The peer floor (`catalogs.peers.effect`) is a published contract: raising it is a breaking change for consumers and gets its own issue and changeset, never a drive-by bump.
 
