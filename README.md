@@ -20,7 +20,7 @@ Every surface is a namespace on the package's single `"."` barrel (`import { Act
 ## Install
 
 ```sh
-npm install @thomasfosterau/effect-wikimedia effect
+npm install @thomasfosterau/effect-wikimedia effect@rc
 ```
 
 `effect` is a peer dependency — two copies break `Context` / `Layer` / `Schema` identity at runtime.

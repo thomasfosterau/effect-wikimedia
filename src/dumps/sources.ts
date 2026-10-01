@@ -36,7 +36,7 @@ import { createGunzip } from "node:zlib";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 
 // ── Error & etiquette ────────────────────────────────────────────────────
 

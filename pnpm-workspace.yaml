@@ -22,10 +22,9 @@ catalog:
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
   #
-  # Deliberately NOT yet on the shared library floor (`>=4.0.0-rc.112`): that
-  # bump is its own issue (#7, with the API-diff notes), because `beta.107`
-  # → `rc.112` is a breaking peer-range change for consumers.
-  effect: 4.0.0-rc.117
+  # Exactly the shared library floor (`4.0.0-rc.118`, website#2015 / website#2059),
+  # so CI tests the lowest version the published peer range admits.
+  effect: 4.0.0-rc.118
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
   typescript: ^5.9.3
@@ -39,12 +38,12 @@ catalog:
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.0-beta.107` peer would reject a consumer on a newer prerelease).
+# `4.0.0-rc.118` peer would reject a consumer on a newer prerelease).
 # `pnpm publish` (which `changeset publish` runs) replaces `catalog:peers`
 # with these ranges in the published manifest.
 catalogs:
   peers:
-    effect: ">=4.0.0-beta.104"
+    effect: ">=4.0.0-rc.118"
 
 overrides:
   # `effect` MUST be a singleton (see the catalog comment): force every
