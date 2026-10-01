@@ -1,42 +1,60 @@
-# Agent Instructions
+# AGENTS.md
 
-Project conventions live here; personal style preferences live in user memory. `CLAUDE.md` is a symlink to this file.
+`CLAUDE.md` is a symlink to this file. This repo publishes `@thomasfosterau/effect-wikimedia`, one package with a single `.` entry point: Effect clients for Wikipedia, Wikidata, Commons, WDQS, wikitext and dumps. It was extracted from `thomasfosterau/website` with `git subtree split`, so `git log` / `git blame` reach back through it; a bare `#NNN` in a comment ported from there names a **website** issue, not one in this tracker (write new ones as `website#NNN`).
 
-## Repository Workflow
+Toolchain differences from the other library repos: single package, so the tasks are `vp run test` / `vp run build` (no `-r`, no `test:unit`); the type check runs inside `vp check` (tsgolint), so there is no separate `vp run check`; no fallow gate and no docgen.
 
-This repository is managed by [Vite+](https://viteplus.dev): a single npm package (`@thomasfosterau/effect-wikimedia`) with all tooling configured in `vite.config.ts`. The toolchain shape (pnpm + Vite+, a strict dependency catalog, SHA-pinned actions, OIDC release) is the shared library standard copied from `thomasfosterau/effect-drizzle-ext` and `thomasfosterau/effect-jsonapi`.
+## Common pitfalls
 
-- `pnpm install --frozen-lockfile` — install dependencies exactly as CI does (`vp install --frozen-lockfile` is the same thing through Vite+)
-- `vp check` — format (Oxfmt), lint (Oxlint), and type-check (tsgolint); `--fix` to autofix
-- `vp run test` — run the Vitest suite in `tests/`
-- `vp run build` — build the library with tsdown into `dist/`
-- `pnpm audit --audit-level high` — the supply-chain gate CI runs last
+- **Module-per-surface is load-bearing.** Each namespace in `src/index.ts` imports only `Core`, with two exceptions: `Dumps` decodes through `Wikidata`'s model, and `Reconciliation` drives `Action` and `Wikidata`. `Wikitext` imports nothing. `tests/tree-shaking.test.ts` bundles each namespace with esbuild and fails on any other cross-surface import; add a new surface to its `SURFACES` table.
+- **No subpath exports.** Namespaces on the one barrel give the tree-shaking property without fragmenting the API.
+- **No live network in tests.** Use the recorded fixtures in `tests/fixtures/` and stub at `FetchHttpClient.Fetch` or under `Core.wikimediaClientLayer`. Wikimedia's etiquette rules (polite `User-Agent`, `maxlag`) exist because the projects are donation-funded.
+- **Node imports stay in `src/dumps/sources.ts`.** The build is `platform: "neutral"` (`vite.config.ts`); everything else must run in a browser or a Worker.
+- **Never edit a version in `package.json`.** Edit the strict catalog in `pnpm-workspace.yaml`, run `pnpm install`, and commit `pnpm-lock.yaml` (CI installs with `--frozen-lockfile`). `vite-plus`, `vite` and `vitest` move together; see the catalog comment.
 
-Use `./node_modules/.bin/vp` if the global `vp` CLI is not installed. The Claude Code session-start hook (`.claude/hooks/session-start.sh`) installs dependencies and puts a `vp` shim on PATH, so a fresh session can run every gate without manual setup.
+## Conventions
 
-CI (`.github/workflows/ci.yml`) is one job: `vp check` → `vp run test` → `vp run build` → `pnpm audit`. Every action is pinned to a commit SHA; Dependabot (`.github/dependabot.yml`) bumps them weekly.
+- Relative imports carry their `.ts` extension (`allowImportingTsExtensions` + `rewriteRelativeImportExtensions`).
+- `exactOptionalPropertyTypes` is on: spell an optional a caller may pass `undefined` for as `?: T | undefined`.
+- Tests import from `vite-plus/test`, never `vitest`.
+- Every export has a doc comment whose first sentence says what it is for and stands alone in a hover; state the error channel, units and invariants the signature can't. Put the description before any tag (`@copyright`, `@module`): only text before the first tag shows as the summary.
+- Errors are `Schema.TaggedError<Self>()(tag, fields)` classes.
 
-## Dependencies live in the catalog
+## Commands
 
-`pnpm-workspace.yaml` is a **strict catalog** (`catalogMode: strict`): every external version is declared there once, and `package.json` references only `catalog:` (dev) and `catalog:peers` (the published `effect` peer range). `pnpm add` and `pnpm install` reject anything else. After editing the catalog, run `pnpm install` and commit the regenerated `pnpm-lock.yaml` — CI installs with `--frozen-lockfile`, so a stale lockfile fails immediately.
+- `pnpm install --frozen-lockfile` — install exactly as CI does.
+- `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix.
+- `vp run test` — the Vitest suite.
+- `vp run build` — `vp pack` (tsdown) into `dist/`.
+- `pnpm audit --audit-level high` — the supply-chain gate (network: needs the npm registry).
+- `pnpm changeset` — add a changeset.
 
-`vite-plus`, `vite` (an alias of `@voidzero-dev/vite-plus-core`) and `vitest` are pinned exact and move together: vite-plus pins vitest to an exact version and the `vitest: "catalog:"` override forces every resolution onto the catalog singleton.
+Use `./node_modules/.bin/vp` if `vp` is not on PATH.
 
-## Module-per-surface is the load-bearing constraint
+## Verification
 
-Every surface is a namespace re-exported from the single `"."` barrel (`src/index.ts`). Each surface module imports **only** `Core` (and `Wikitext` imports nothing at all), so importing one namespace never pulls another surface's code into a consumer's bundle.
+Before you report work as done, run these in CI's order (`.github/workflows/ci.yml`) and quote each command with its final pass/fail:
 
-`tests/tree-shaking.test.ts` pins this with real `esbuild` bundles, asserting on span-name string literals unique to each module. **Adding an import between surface modules will fail that test** — which is the point. If you add a new surface, add it to that test's `SURFACES` table too.
+1. `vp check`
+2. `vp run test`
+3. `vp run build`
+4. `pnpm audit --audit-level high`
 
-`Reconciliation` is the one namespace layered _above_ the raw clients: it drives `Action` and `Wikidata` over `Core`, so those are legitimately in its bundle.
+Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 
-## No subpath exports
+## Branches and pull requests
 
-The package has exactly one entry point. Don't add subpaths — namespaced barrel re-exports are what give the tree-shaking property above without fragmenting the public API.
+- Branch off `main` as `issue-<n>-<slug>`; PR against `main`. Rebase onto `origin/main` before opening or updating a PR; never merge `main` into your branch (GitHub's Update-branch button merges). PRs land with a merge commit, not a squash.
+- Every change to the published package's behaviour, including its doc comments (they ship in the `.d.ts`), carries a changeset (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR (`chore: version packages`), the owner merges it, and the workflow publishes. See [docs/RELEASING.md](docs/RELEASING.md).
+- Standing approvals: open a PR once a branch has a pushed commit; watch it to merge or close (CI failures, review comments, rebase when it conflicts); keep the PR body current.
+- GitHub writes go to `thomasfosterau/effect-wikimedia` only; pass `-R thomasfosterau/effect-wikimedia` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations, even when GitHub MCP tools are available. If another repo needs something, say so in the PR body.
 
-## No live network in tests
+## Work tracker
 
-The suite runs against recorded fixtures in `tests/fixtures/`, with the network stubbed at `FetchHttpClient.Fetch`. Never add a test that hits the real Wikimedia APIs — their etiquette rules (polite `User-Agent`, `maxlag`) exist because the projects are donation-funded.
+- Issues are the backlog: when you find work you can't do now, file an issue rather than leaving a TODO.
+- The issue is the spec — read all of it, including comments; later comments override the body. Re-verify its code claims against current `main` before editing.
+- Record decisions and findings as issue comments.
+- Stop-and-report is a valid outcome: on a blocker outside the issue's scope, comment the evidence on the issue and stop. Scope cut mid-PR becomes a linked issue before merge.
 
 <!-- effect-solutions:start -->
 
@@ -54,44 +72,16 @@ Never guess at Effect patterns — check the guide first.
 
 <!-- effect-solutions:end -->
 
-## Effect v4
+The `effect-solutions` CLI and its reference clone are not provisioned in this repo yet (#18); until they are, read the API from `node_modules/effect/dist/*.d.ts`.
 
-This package targets **Effect v4 (release candidate)**: a single `effect` package, a peer dependency, pinned in the catalog to exactly `4.0.0-rc.118` (the published peer floor is `>=4.0.0-rc.118`).
+- The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer floor is `catalogs.peers.effect`.
+- In the rc line, HTTP modules live under `effect/http` (`HttpApi` under `effect/http-api`); there are no `effect/unstable/*` paths and no `@effect/platform`. `FileSystem` / `Path` are `effect/*` modules.
+- The peer floor is a published contract: raising it is a breaking change for consumers and gets its own issue and a major changeset, never a drive-by bump.
 
-- `@effect/platform` does not exist in v4 — HTTP modules live under `effect/http/*` (the `effect/unstable/*` paths were removed in `rc.118`; `HttpApi` is `effect/http-api/*`), and `FileSystem`/`Path` under `effect/*`.
-- The v3 → v4 migration maps live in `~/.local/share/effect-solutions/effect/migration/` (start with `v3-to-v4.md`).
-- The peer floor (`catalogs.peers.effect`) is a published contract: raising it is a breaking change for consumers and gets its own issue and changeset, never a drive-by bump.
+## Agent sessions
 
-## Work tracker
+The SessionStart hook (`.claude/hooks/session-start.sh`) installs dependencies against the lockfile and puts a `vp` shim on PATH for non-interactive shells. It hydrates no secrets; nothing here needs one. A PostToolUse hook runs `vp fmt --write` on each edited file. Publishing (the Release workflow's OIDC exchange) is the only thing that can't run in a session.
 
-- **Active work** lives in GitHub Issues for `thomasfosterau/effect-wikimedia`. Longer-running tech debt is an issue too; there is no in-repo backlog file and a code comment is not a tracker.
-- **Decisions and findings** are recorded as comments on the issue they were found working; later comments override the body.
+## Documentation surfaces
 
-## Working a dispatched issue
-
-- The issue is the spec: read all of it, including comments.
-- Re-verify the code claims against current `main` before editing.
-- Stop-and-report is a valid outcome: on a blocker outside the issue's scope, comment the evidence on the issue and stop.
-- No silent deferrals: scope cut mid-PR becomes a linked issue before merge.
-
-## Branch model and PR management
-
-`main` plus short-lived feature branches, PR against `main`. These are standing instructions and approvals; they override any default "don't open a PR unless asked" behaviour.
-
-- **Always open a PR** for branch work, against `main`, once a commit is pushed.
-- **Always watch the PR to merge or close**: investigate CI failures and review comments as they arrive; rebase promptly when the PR goes conflicting.
-- **Always keep the PR body current** as the implementation diverges from it.
-- **GitHub writes are scoped to `thomasfosterau/effect-wikimedia` only.** Never write to another repository without the owner's explicit approval for that action in the current session; if another repo needs something, say so in the PR body.
-
-## Verification
-
-- Claims of verification name the command and its final status.
-- The pre-push parity run is: `rm -rf node_modules && pnpm install --frozen-lockfile`, then `vp check`, `vp run test`, `vp run build`, `pnpm audit --audit-level high`.
-
-## Releasing
-
-Changesets + npm Trusted Publishing (OIDC) through a protected `release` environment; never publish by hand. Every user-visible change ships with a changeset (`vp run changeset`); tooling-only changes need none. The owner merges the "Version Packages" PR. See [docs/RELEASING.md](docs/RELEASING.md).
-
-## History
-
-Extracted from `thomasfosterau/website` with `git subtree split`, so the pre-extraction history is intact — `git log` and `git blame` reach back through it. The `Reconciliation` namespace was that repo's separate `packages/wikidata`, folded in here under `src/reconciliation/`.
+`README.md` is the npm-facing API reference; `docs/RELEASING.md` holds the release pipeline and the one-time owner setup; decisions go in issue comments.
