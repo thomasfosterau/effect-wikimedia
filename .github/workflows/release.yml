@@ -45,9 +45,11 @@ jobs:
       # npm is what makes it authenticate via the `id-token` permission above
       # instead of a long-lived NPM_TOKEN. `pnpm publish` also rewrites the
       # `catalog:` / `catalog:peers` specifiers into real ranges, which a bare
-      # `npm publish` would not.
+      # `npm publish` would not. Pinned to a major rather than `@latest`
+      # because this job holds `id-token: write`: a new npm major is a reviewed
+      # bump here, not something the publish job picks up on its own.
       - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
       # devDependencies) and renamed its inputs from v1's `version` / `publish`
