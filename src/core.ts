@@ -1,16 +1,13 @@
 /**
- * @copyright Thomas Foster
- *
  * Shared client core for `@thomasfosterau/effect-wikimedia`: the
- * `HttpClient`-based service every surface module (`Action`, `Rest`,
- * `Commons`) builds on, plus the cross-cutting etiquette Wikimedia's API
- * usage guidelines ask of every caller.
+ * `HttpClient`-based service every HTTP surface module (`Action`, `Rest`,
+ * `Commons`, `Wikidata`, `Sparql`) builds on, plus the cross-cutting
+ * etiquette Wikimedia's API usage guidelines ask of every caller.
  *
- * Generalises `packages/wikidata/src/lookup.ts`'s `HttpClient`-layer split
- * (injectable test layer + `FetchHttpClient` production layer), polite-UA,
- * and lenient-decode discipline from one fixed Wikidata endpoint to any
- * `*.wikipedia.org` / `wikidata.org` / `*.wikimedia.org` host — the host is
- * a **parameter** of every request, never a constant baked into the module.
+ * The `HttpClient` layer is split into an injectable test layer and a
+ * `FetchHttpClient` production layer, and it serves any `*.wikipedia.org` /
+ * `wikidata.org` / `*.wikimedia.org` host — the host is a **parameter** of
+ * every request, never a constant baked into the module.
  *
  * Etiquette this module owns so no surface module has to reimplement it:
  * - a polite `User-Agent` identifying the caller, applied to every request;
@@ -21,18 +18,14 @@
  *   bounded number of attempts, rather than either hammering the API or
  *   failing on the first transient signal.
  *
- * Untrusted-response discipline (mirrors wikidata/biblio): every host and
+ * Untrusted-response discipline: every host and
  * path segment a caller supplies is validated before it reaches a URL
  * (SSRF / injection guard — see {@link normaliseWikimediaHost} /
  * {@link normaliseTitle}); responses decode through the lenient
  * `Unknown`-heavy schemas each surface module defines, never trusted
  * structurally until a pure normaliser has checked every field.
  *
- * Zero website-internal dependencies: this module (and the package as a
- * whole) imports only `effect`, so it can be extracted to its own
- * repository/npm package with no source changes — see
- * `docs/decisions/effect-wikimedia-as-the-wikimedia-client-toolkit.md`.
- *
+ * @copyright Thomas Foster
  * @module core
  */
 
@@ -314,8 +307,8 @@ function describeHttpError(error: HttpClientError.HttpClientError): string {
 }
 
 /**
- * Shared client contract every surface module (`Action`, `Rest`, `Commons`)
- * depends on. `getJson` decodes a JSON body through a caller-supplied
+ * Shared client contract every HTTP surface module (`Action`, `Rest`,
+ * `Commons`, `Wikidata`, `Sparql`) depends on. `getJson` decodes a JSON body through a caller-supplied
  * lenient schema; `getText` reads a raw text body (the REST/Parsoid HTML
  * endpoints return `text/html`, not JSON). Both apply the UA policy, the
  * `maxlag` parameter, and {@link withMaxlagRetry} automatically — callers

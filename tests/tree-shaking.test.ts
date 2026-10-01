@@ -78,7 +78,7 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     // `effect` is the package's only dependency; excluding it keeps the
     // check focused on this package's own module boundaries (and keeps the
     // bundle fast — effect is large). `node:*` builtins are external too — the
-    // Dumps sources module is the sanctioned Node-only entry point.
+    // Dumps sources module is the one Node-only module.
     external: ["effect", "effect/*", "node:*"],
   });
   const output = result.outputFiles?.[0]?.text;
@@ -154,7 +154,7 @@ const SURFACES: readonly {
   },
   {
     // Dumps legitimately depends on the Wikidata module (it decodes each dump
-    // line through W2's item model), so Wikidata is *not* foreign here — only
+    // line through `Wikidata`'s item model), so Wikidata is *not* foreign here — only
     // the unrelated Action / Rest / Commons / Sparql surfaces are.
     namespace: "Dumps",
     own: MARKERS.dumps,

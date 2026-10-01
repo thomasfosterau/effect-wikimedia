@@ -1,15 +1,12 @@
 /**
- * @copyright Thomas Foster
- *
  * The **Commons** surface: Wikimedia Commons file info and stable
- * `Special:FilePath` URL construction. Subsumes the `normaliseCommonsImage`
- * logic previously duplicated in `packages/wikidata/src/candidate.ts` —
- * that package will depend on this one instead (issue #1067).
+ * `Special:FilePath` URL construction.
  *
  * Imports only {@link "./core"} — never `Action` or `Rest` — so a consumer
  * that imports only `Commons` from the package barrel never pulls those
  * modules' code into a bundle.
  *
+ * @copyright Thomas Foster
  * @module commons
  */
 

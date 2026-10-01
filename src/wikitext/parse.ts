@@ -1,12 +1,10 @@
 /**
- * @copyright Thomas Foster
- *
- * The wikitext parser (issue #1065): raw wikitext in, a typed {@link Document}
+ * The wikitext parser (website#1065): raw wikitext in, a typed {@link Document}
  * out. Fail-soft by construction — every helper either consumes a
  * well-formed construct or leaves the cursor untouched so its opening
  * delimiter degrades to {@link Text}. The parser therefore *never throws*
  * and *always tiles* its input (see the invariants in
- * {@link module:lib/wikitext/ast}), which is what makes the round-trip and
+ * `./ast.ts`), which is what makes the round-trip and
  * fuzz guarantees hold.
  *
  * ## Design notes (the decisions the issue left open)
@@ -23,7 +21,7 @@
  *   serializer is the exact inverse of whatever the parser chose.
  * - **Bold/italic.** Apostrophe runs become flat {@link Formatting} marker
  *   nodes carrying their literal apostrophes; the bold/italic *role* is
- *   resolved per line by {@link module:lib/wikitext/quotes} (MediaWiki's
+ *   resolved per line by `./quotes.ts` (MediaWiki's
  *   apostrophe-jungle algorithm). Marker nodes — rather than balanced
  *   open/close subtrees — keep round-trip trivial on the pathological input
  *   that apostrophes routinely produce.
@@ -33,7 +31,8 @@
  * - **Recursion is depth-bounded** ({@link MAX_DEPTH}) so adversarial deep
  *   nesting degrades to text instead of overflowing the stack.
  *
- * @module lib/wikitext/parse
+ * @copyright Thomas Foster
+ * @module wikitext/parse
  */
 
 import {
@@ -74,7 +73,7 @@ const PROTOCOL_RE =
 /**
  * Protocols recognised for bare (unbracketed) URL autolinking — see
  * {@link AutoLink}. Deliberately narrower than {@link PROTOCOL_RE}: only
- * `http`/`https`, matching the scope of issue #1287's deferred autolinking
+ * `http`/`https`, matching the scope of website#1287's deferred autolinking
  * work.
  */
 const AUTOLINK_PROTOCOL_RE = /^https?:\/\//i;

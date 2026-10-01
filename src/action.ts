@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * The **Action** surface: MediaWiki's `action=query` / `action=parse`
  * endpoints (`/w/api.php`) — page wikitext, page metadata, search, and the
  * `parse` endpoint's typed sections / links / categories / templates.
@@ -9,13 +7,14 @@
  * that imports only `Action` from the package barrel never pulls those
  * modules' code into a bundle.
  *
- * Untrusted-response discipline (mirrors wikidata): every schema below is
+ * Untrusted-response discipline: every schema below is
  * deliberately lenient (fields optional, values left `Unknown` where their
  * shape varies) so a partial or unexpected payload decodes rather than
  * throwing; the normalisers next to each schema then extract and sanitise
  * only the fields this module trusts. A hostile or malformed response can
  * at worst yield fewer / no results, never an injection.
  *
+ * @copyright Thomas Foster
  * @module action
  */
 

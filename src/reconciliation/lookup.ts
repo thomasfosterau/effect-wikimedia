@@ -1,52 +1,28 @@
 /**
+ * The Wikidata reconciliation service: **Match** (`searchByLabel`,
+ * `searchByIdentifier` → candidate items) and **Enrich** (`enrich` → the
+ * selected facts for a confirmed QID).
+ *
+ * Match resolves a label and/or external identifiers to candidate Wikidata
+ * items ({@link WikidataCandidate}: QID + label + description, plus
+ * `instance of` where cheap) for a reviewer to disambiguate. Enrich pulls the
+ * selected facts for a **confirmed** QID — the QID self-link, `sameAs`
+ * external identifiers, dates, and images ({@link WikidataFacts}).
+ *
+ * Runs over this package's `Action` and `Wikidata` modules through
+ * `Core.WikimediaClient`: provide {@link wikidataLookupLayer} in production,
+ * or {@link wikidataLookupClientLayer} over a stub client in tests.
+ * Persistence-free: storing a chosen QID or the returned facts is the
+ * caller's job.
+ *
+ * Every input (label, property id, identifier value) is validated before it
+ * reaches a request, and every field read off a response is re-validated
+ * against this namespace's allowlists (see `./normalise.ts`); an empty
+ * upstream result is an empty list, and transport or decode faults fail with
+ * {@link LookupFailed}.
+ *
  * @copyright Thomas Foster
- *
- * Wikidata reconciliation lookup service (KB-011, issues #575 / #613) —
- * the **Match** and **Enrich** steps.
- *
- * `searchByLabel` / `searchByIdentifier` resolve an Entity's label and/or
- * external identifiers to candidate Wikidata items ({@link WikidataCandidate}:
- * QID + label + description, plus `instance of` where cheap) for the owner
- * to disambiguate (Match, #575). `enrich` then pulls the selected facts for
- * a **confirmed** QID — the QID self-link, `sameAs` external identifiers,
- * dates, and images ({@link WikidataFacts}) — for the operation layer to
- * stamp as provenance-marked mapping assertions (Enrich, #613).
- *
- * Runs over `@thomasfosterau/effect-wikimedia`'s `Wikidata` / `Action`
- * modules — the general Wikimedia client toolkit — via its injectable
- * `Core.WikimediaClient` service: tests provide a stub client under
- * {@link wikidataLookupClientLayer}, production provides
- * {@link wikidataLookupLayer} over the general package's `Core.wikimediaLayer`
- * (which is itself backed by the global `fetch`). This module (issue #1067)
- * no longer owns any HTTP plumbing or wire decode — that lives in
- * effect-wikimedia, which types the wire honestly and decodes leniently.
- * What stays here is site policy: the {@link WikidataLookup} service
- * contract, the input validators, the curated allowlists, and the
- * candidate/fact shapes feeding `entity_mapping` (see `./candidate` and
- * `./normalise`).
- *
- * The lookup service itself is **persistence-free**: Match returns
- * candidates and Enrich returns neutral facts; storing a chosen QID (on the
- * stable `entity_external_identifier` table) and asserting enriched facts
- * (on the versioned `entity_mapping` table) are the operation layer's job
- * (`apps/api/src/operations/entities.ts`).
- *
- * Untrusted-data discipline (mirrors the biblio lookup service):
- * - inputs (label, property id, identifier value) are validated /
- *   normalised before being handed to effect-wikimedia, so a caller-supplied
- *   value can never escape its intended position (SSRF / injection guard —
- *   see `normaliseLabelQuery` / `normalisePropertyId` / `normaliseExternalIdValue`);
- * - effect-wikimedia targets a fixed, allowlisted Wikidata host over
- *   `https`, with all variable parts percent-encoded, never interpolated
- *   into a path;
- * - responses come back through effect-wikimedia's typed `WikidataItem` /
- *   `SearchHit` model; this layer's normalisers ({@link module:lib/server/wikidata/normalise})
- *   still re-validate every field they read against this site's policy
- *   before returning it;
- * - an empty upstream result decodes to an empty candidate list (not an
- *   error); transport / decode faults land on the typed {@link LookupError}.
- *
- * @module lib/server/wikidata/lookup
+ * @module reconciliation/lookup
  */
 
 import * as Action from "../action.ts";
@@ -69,9 +45,9 @@ import { dedupedQids, hitToCandidate, itemToCandidate, normaliseFacts } from "./
 
 /**
  * The fixed Wikidata host every request in this module targets. Passed
- * explicitly to each effect-wikimedia call (that package's host is always a
- * parameter, never a constant it bakes in) — pinning it here is this site's
- * choice, not the general package's.
+ * explicitly to each `Wikidata` / `Action` call (their host is always a
+ * parameter, never a constant they bake in) — pinning it here is this
+ * namespace's choice, not the surface modules'.
  */
 const WIKIDATA_HOST = "www.wikidata.org";
 
@@ -92,13 +68,7 @@ export class LookupFailed extends Schema.TaggedError<LookupFailed>()("LookupFail
   description: Schema.String,
 }) {}
 
-/**
- * The typed error channel for a Wikidata lookup. Public error-channel type of
- * the service contract, retained for the deferred reconciliation HTTP/Form
- * surface (#575); has no in-tree consumer yet, and shares its name with
- * biblio/lookup.ts's distinct `LookupError` — both are covered by
- * `ignoreExports` in .fallowrc.json (separate bounded contexts).
- */
+/** The typed error channel of every {@link WikidataLookup} method. */
 export type LookupError = InvalidQuery | LookupFailed;
 
 /** An external identifier to reconcile against: a Wikidata property + value. */
@@ -129,7 +99,7 @@ export class WikidataLookup extends Context.Service<
     /**
      * Fetch the selected enrichment facts (QID self-link, `sameAs`
      * external identifiers, dates, images) for a **confirmed** QID, ready
-     * to assert as provenance-marked mappings (#613). Returns `null` when
+     * to store as provenance-marked mappings. Returns `null` when
      * the item is absent upstream; fails `InvalidQuery` for a non-QID input.
      */
     readonly enrich: (qid: string) => Effect.Effect<WikidataFacts | null, LookupError>;
@@ -259,9 +229,9 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
  * {@link WikidataLookup} layer over whatever `Core.WikimediaClient` is in
  * context. The production graph supplies {@link Core.wikimediaLayer} (see
  * {@link wikidataLookupLayer}); a test supplies a stub `Core.WikimediaClient`
- * directly under the same slot (see `tests/lookup.test.ts` — stubbing at
- * this layer rather than at `FetchHttpClient` keeps this suite decoupled
- * from effect-wikimedia's own URL-building / wire-decode tests). Kept
+ * directly under the same slot (see `tests/reconciliation/lookup.test.ts` —
+ * stubbing at this layer rather than at `FetchHttpClient` keeps that suite
+ * decoupled from the surface modules' own URL-building / wire-decode tests). Kept
  * separate from {@link wikidataLookupLayer} so tests can inject their own
  * client without bundling the global fetch.
  */
@@ -269,11 +239,8 @@ export const wikidataLookupClientLayer: Layer.Layer<WikidataLookup, never, Core.
   Layer.effect(WikidataLookup)(makeWikidataLookup());
 
 /**
- * Production {@link WikidataLookup} layer, backed by effect-wikimedia's
- * `Core.wikimediaLayer` (the Worker global fetch via `FetchHttpClient`).
- * Provided by the deferred reconciliation HTTP / Form surface that triggers
- * a Match (filed back to #575); this slice ships the layer and exercises
- * the service through {@link wikidataLookupClientLayer}.
+ * Production {@link WikidataLookup} layer, backed by `Core.wikimediaLayer`
+ * (the global `fetch` via `FetchHttpClient`).
  */
 export const wikidataLookupLayer: Layer.Layer<WikidataLookup> = wikidataLookupClientLayer.pipe(
   Layer.provide(Core.wikimediaLayer),

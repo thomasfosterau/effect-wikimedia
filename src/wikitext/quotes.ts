@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * Bold/italic resolution — MediaWiki's "apostrophe jungle" (`Parser::doQuotes`).
  *
  * The scanner emits every run of two-or-more apostrophes as a flat
@@ -24,7 +22,8 @@
  * over the *source* line. The literal apostrophes are always preserved, so
  * this only affects the semantic annotation, never the round-trip.
  *
- * @module lib/wikitext/quotes
+ * @copyright Thomas Foster
+ * @module wikitext/quotes
  */
 
 import type { Formatting, Node } from "./ast.ts";

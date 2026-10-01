@@ -1,12 +1,10 @@
 /**
- * @copyright Thomas Foster
- *
  * The **Wikidata** surface: a fully typed Wikidata item / claim model plus
  * the `wbgetentities` (batched entity fetch) and `wbsearchentities` (label
  * search) endpoints of the Wikibase Action API (`/w/api.php`).
  *
- * Where `packages/wikidata` decodes leniently and narrows only the handful
- * of fields reconciliation needs, this module exposes the honest thing: a
+ * Rather than narrowing only the handful of fields reconciliation needs,
+ * this module exposes the honest thing: a
  * discriminated `DataValue` union covering every Wikibase datavalue kind
  * (`wikibase-entityid`, `time`, `globecoordinate`, `quantity`,
  * `monolingualtext`, `string`, `external-id`), branded `Q`/`P`/`L` ids,
@@ -26,6 +24,7 @@
  * a consumer that imports only `Wikidata` from the package barrel never
  * pulls those modules' code into a bundle.
  *
+ * @copyright Thomas Foster
  * @module wikidata
  */
 

@@ -1,8 +1,6 @@
 /**
- * @copyright Thomas Foster
- *
- * The typed AST vocabulary for the {@link module:lib/wikitext} parser
- * (issue #1065). Wikitext in, this tree out — no network, no template
+ * The typed AST vocabulary for the `Wikitext` parser
+ * (website#1065). Wikitext in, this tree out — no network, no template
  * expansion, no HTML rendering.
  *
  * Two invariants hold for every freshly-parsed tree and are the bedrock of
@@ -21,9 +19,10 @@
  * The parser is **fail-soft**: malformed markup degrades to {@link Text}
  * (or an open-only tag / unclosed comment) rather than raising — wikitext
  * in the wild is never clean, and a parser that throws is useless on a
- * dump. See {@link module:lib/wikitext/parse}.
+ * dump. See `./parse.ts`.
  *
- * @module lib/wikitext/ast
+ * @copyright Thomas Foster
+ * @module wikitext/ast
  */
 
 /** A half-open source range in UTF-16 code-unit offsets: `[start, end)`. */
@@ -92,7 +91,7 @@ export interface HtmlEntity {
  * {@link leadingLiterals} counts apostrophes MediaWiki treats as literal
  * text prefixing the markup (a run of four is `'` + `'''`).
  *
- * See {@link module:lib/wikitext/quotes}.
+ * See `./quotes.ts`.
  */
 export interface Formatting {
   readonly _tag: "Formatting";
@@ -251,7 +250,7 @@ export interface Tag {
 }
 
 /**
- * A wikitable `{| … |}` (issue #1287's largest vocabulary addition). Modelled
+ * A wikitable `{| … |}` (website#1287's largest vocabulary addition). Modelled
  * as a block-level construct on the same footing as {@link Heading}: the
  * `{|` must open at the true start of a source line, and (like headings)
  * table recognition only applies where the fragment scanner runs with

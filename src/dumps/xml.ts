@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * **XML pages dump** pipeline — streaming decode of the MediaWiki XML export
  * format (`pages-articles`, `pages-meta-history`, and the daily
  * `add/changes` incrementals, which share the identical schema) into a
@@ -47,6 +45,7 @@
  * Runtime-agnostic: imports only `effect`. The byte source / decompression
  * live in {@link "./sources"}.
  *
+ * @copyright Thomas Foster
  * @module dumps/xml
  */
 
@@ -79,7 +78,7 @@ export interface Revision {
   readonly comment: string | null;
   readonly model: string | null;
   readonly format: string | null;
-  /** The revision's wikitext (entity-decoded). Composes with W3's parser downstream. */
+  /** The revision's wikitext (entity-decoded). Composes with the `Wikitext` parser downstream. */
   readonly text: string | null;
   readonly sha1: string | null;
   readonly minor: boolean;

@@ -1,12 +1,11 @@
 /**
- * @copyright Thomas Foster
- *
  * The query / manipulation surface over a parsed {@link Document}: node
  * visitors and filters, template extraction (name + parameters), and a
  * strip-to-plain-text projection. All read-only and pure; edits are made by
- * rebuilding nodes and re-{@link module:lib/wikitext/serialize | serializing}.
+ * rebuilding nodes and re-serializing (`./serialize.ts`).
  *
- * @module lib/wikitext/query
+ * @copyright Thomas Foster
+ * @module wikitext/query
  */
 
 import type { Document, Node, Param, Template } from "./ast.ts";

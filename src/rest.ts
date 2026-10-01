@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * The **Rest** surface: the Core REST API / Parsoid endpoints
  * (`/w/rest.php/v1/...`) — typed page and revision metadata, and parsed
  * HTML for a title or revision.
@@ -14,6 +12,7 @@
  * nothing to validate beyond the transport-level checks {@link "./core"}
  * already applies (status, UA, maxlag/retry).
  *
+ * @copyright Thomas Foster
  * @module rest
  */
 

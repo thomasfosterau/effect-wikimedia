@@ -1,35 +1,15 @@
 /**
- * @copyright Thomas Foster
- *
- * Neutral candidate-match shape and untrusted-input helpers for the
- * Wikidata reconciliation lookup service (KB-011, issue #575). This
- * package's policy layer over `@thomasfosterau/effect-wikimedia` (#1067) —
- * the general package types and decodes the Wikidata wire; this module
- * defines what *this site* trusts and stores.
+ * The candidate and fact shapes, field bounds, input validators and curated
+ * property allowlists of the reconciliation namespace. Pure: no network.
  *
  * A {@link WikidataCandidate} is the provider-neutral match the lookup
- * service ({@link module:lib/server/wikidata/lookup}) normalises
- * effect-wikimedia's typed `Wikidata.WikidataItem` / `SearchHit` values
- * into ({@link module:lib/server/wikidata/normalise}). This slice is the
- * **Match** step only: it resolves an Entity's label and/or external
- * identifiers to candidate QIDs for the owner to disambiguate. It
- * deliberately does **not** persist anything.
+ * service (`./lookup.ts`) normalises the `Wikidata` / `Action` results into
+ * (`./normalise.ts`), for a reviewer to disambiguate; a {@link WikidataFacts}
+ * is what Enrich returns for a confirmed QID. Nothing here persists anything:
+ * storing a chosen QID or the facts is the caller's job.
  *
- * Persistence is a separate concern, delivered by issue #612: a QID is a
- * stable, identity-level authority reference that belongs on `entity`
- * (per the {@link
- * ../../../docs/decisions/ontology.md
- * ontology-mappings decision}). A confirmed QID is persisted through the
- * stable `entity_external_identifier` table (KB-004 — since #864 S5/D5
- * also the biblio pipeline's `openlibrary` / `crossref` provenance home,
- * one row per authority) via `updateEntity`'s `externalIdentifiers` input
- * — see {@link module:lib/server/operations/entities}. This module
- * remains the Match step only and still persists nothing itself.
- *
- * Everything in this module is pure: input validation and the candidate
- * shape are unit-testable without a database or network.
- *
- * @module lib/server/wikidata/candidate
+ * @copyright Thomas Foster
+ * @module reconciliation/candidate
  */
 
 /**
@@ -46,7 +26,7 @@ export interface WikidataCandidate {
   readonly description: string | null;
   /**
    * `instance of` (P31) target QIDs, where cheaply available — these help
-   * the owner tell a person from a film from a concept during review.
+   * a reviewer tell a person from a film from a concept.
    * Empty when the lookup path didn't fetch claims (label search doesn't).
    */
   readonly instanceOf: readonly string[];
@@ -169,13 +149,12 @@ export function normaliseExternalIdValue(raw: string): string | null {
   return trimmed;
 }
 
-// ── Enrich: neutral fact shape + extraction helpers (#613) ─────────────
+// ── Enrich: neutral fact shape + extraction helpers (website#613) ──────
 
 /**
- * A single fact pulled from a confirmed Wikidata item, in the neutral
- * shape the ingest operation stamps onto `entity_mapping` as a
- * provenance-marked assertion. `externalIri` is the dedup key (the
- * correspondence target); `authority` + `externalId` name the source
+ * A single fact pulled from a confirmed Wikidata item, in a neutral shape
+ * a consumer can store as a provenance-marked mapping. `externalIri` (with
+ * `mappingKind`) is the natural dedup key (the correspondence target); `authority` + `externalId` name the source
  * scheme and its value; `notes` carries the human-readable fact label
  * (e.g. `"date of birth"`) for facts that aren't ontology correspondences.
  * Every string is already validated / clamped — consumers treat them as
@@ -186,7 +165,7 @@ export interface WikidataFact {
   readonly authority: string;
   /** The identifier / value in that scheme, if any (a VIAF number, a date). */
   readonly externalId: string | null;
-  /** The correspondence target IRI — the `(mapping_kind, external_iri)` dedup key. */
+  /** The correspondence target IRI; with {@link WikidataFact.mappingKind}, the natural dedup key. */
   readonly externalIri: string;
   /** `exact` for identity links (the QID, a `sameAs`); `equivalent` for facts (dates, images). */
   readonly mappingKind: "exact" | "equivalent";
