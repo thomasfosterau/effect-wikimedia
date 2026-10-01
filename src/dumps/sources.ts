@@ -1,8 +1,6 @@
 /// <reference types="node" />
 /**
- * @copyright Thomas Foster
- *
- * **Dump sources & decompression** — the one Node-only entry point in
+ * **Dump sources & decompression** — the only Node-only exports in
  * `@thomasfosterau/effect-wikimedia`. A dump is ultimately a
  * `Stream<Uint8Array>`; this module supplies that byte stream from a local
  * file or a resumable HTTP range download, and the pluggable decompression
@@ -11,8 +9,8 @@
  *
  * **Why Node-only, and why it is quarantined here.** Streaming a
  * multi-gigabyte compressed dump wants `node:fs` / `node:zlib` / `node:stream`
- * — capabilities a Worker / browser build does not have. The issue sanctions
- * a Node-only entry *for this module*; the rest of the package (including the
+ * — capabilities a Worker / browser build does not have. Node imports are
+ * confined to this module; the rest of the package (including the
  * {@link "./entities"} and {@link "./xml"} pipelines themselves) stays
  * runtime-agnostic, so a consumer that brings its **own** `Stream<Uint8Array>`
  * never pulls these Node imports.
@@ -26,6 +24,7 @@
  * or {@link decompressWith}. No bzip2 code, and no bzip2 dependency, ships
  * here.
  *
+ * @copyright Thomas Foster
  * @module dumps/sources
  */
 

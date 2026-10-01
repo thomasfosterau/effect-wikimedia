@@ -34,8 +34,8 @@ export default defineConfig({
     dts: true,
     sourcemap: true,
     deps: {
-      // Node builtins are imported only by `src/dumps/sources.ts`, the
-      // sanctioned Node-only entry point.
+      // Node builtins are imported only by `src/dumps/sources.ts`, the one
+      // Node-only module.
       neverBundle: [/^node:/],
     },
   },

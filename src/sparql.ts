@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * The **Sparql** surface: a typed client for the Wikidata Query Service
  * (WDQS) SPARQL endpoint (`query.wikidata.org/sparql`).
  *
@@ -29,6 +27,7 @@
  * `Wikidata` — so a consumer that imports only `Sparql` from the package
  * barrel never pulls those modules' code into a bundle.
  *
+ * @copyright Thomas Foster
  * @module sparql
  */
 

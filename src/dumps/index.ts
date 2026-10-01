@@ -1,13 +1,11 @@
 /**
- * @copyright Thomas Foster
- *
  * The **Dumps** surface: Wikimedia dump processing as Effect {@link Stream}
  * pipelines — constant-memory, backpressured, interruptible, typed. Three
  * dump families, one namespace:
  *
  * - **Wikidata JSON entity dumps** ({@link "./entities"}) — the `.json.gz` /
  *   `.json.bz2` entity dump as a stream of typed
- *   {@link "../wikidata".WikidataItem}s, decoded through W2's model, lenient
+ *   {@link "../wikidata".WikidataItem}s, decoded through `Wikidata`'s model, lenient
  *   per line. Filter combinators {@link byType} / {@link withClaim} /
  *   {@link withSitelink}.
  * - **XML pages dumps** ({@link "./xml"}) — `pages-articles` /
@@ -60,6 +58,7 @@
  * Nothing above holds more than one entity in memory at a time; cancelling the
  * `Effect` tears the file read (and any decompression) down immediately.
  *
+ * @copyright Thomas Foster
  * @module dumps
  */
 

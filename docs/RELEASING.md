@@ -4,13 +4,13 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 ## How a release happens
 
-1. **Land changesets.** Every change that should appear in the changelog ships with a changeset — a markdown file in `.changeset/` created by `vp run changeset` (pick a bump type). Changes that don't affect the published package (docs, CI, tooling) need no changeset. Preview what is pending with `vp exec changeset status`.
+1. **Land changesets.** Every change that should appear in the changelog ships with a changeset — a markdown file in `.changeset/` created by `pnpm changeset` (pick a bump type). Changes that don't affect the published package (docs, CI, tooling) need no changeset. Preview what is pending with `vp exec changeset status`.
 
 2. **Version Packages PR (automatic).** On every push to `main`, the Release workflow runs `pnpm run version` (`changeset version && vp fmt`): it consumes the pending changesets, bumps `package.json`, and writes `CHANGELOG.md` on the `changeset-release/main` branch, then opens (or updates) a **"chore: version packages"** PR. Review it like any other PR.
 
    Changesets v3 formats the changelogs it writes with whatever formatter it detects, and it detects the `oxfmt` shim that Vite+ installs whenever `node_modules/oxfmt` exists (a hoisted install, as in the other library repositories); that shim only serves editors and exits non-zero when run directly. So `.changeset/config.json` sets `"format": false` and the `version` script formats with `vp fmt` itself.
 
-3. **Publish (automatic on merge).** Merging that PR triggers the workflow's publish step, `pnpm run release` (`vp run build && changeset publish`). `changeset publish` runs `pnpm publish`, which rewrites the `catalog:peers` peer range into the real one and hands the publish to the npm CLI, which authenticates via OIDC (the job's `id-token: write` permission plus the trusted publisher below) and leaves provenance to npm (attached only when allowed, never forced: an explicit request fails from a private repository). The action then pushes the `v*` tag and creates the GitHub release.
+3. **Publish (automatic on merge).** Merging that PR triggers the workflow's publish step, `pnpm run release` (`vp run build && changeset publish`). `changeset publish` runs `pnpm publish`, which rewrites the `catalog:peers` peer range into the real one and, under pnpm 11, authenticates via npm trusted publishing (OIDC) itself (the job's `id-token: write` permission plus the trusted publisher below). Nothing requests provenance: an explicit request fails from a private repository. The action then pushes the `v*` tag and creates the GitHub release.
 
 The job runs in the protected `release` environment, so every run on `main` — the version PR and the publish alike — pauses for the environment's required reviewer to approve it.
 
@@ -27,8 +27,6 @@ The job runs in the protected `release` environment, so every run on `main` — 
    - Environment: `release`
 
    The Environment field must match the workflow's `environment:` — a publisher configured without one (as this package's originally was) still matches, but pinning it means only an approved run of this workflow can publish.
-
-   > **First publish of a brand-new package.** npm only lets you add a trusted publisher to a package that **already exists**, so the very first publish can't use OIDC. This package is already published, so this note only matters if it is ever republished under a new name: bootstrap once with a short-lived [granular access token](https://docs.npmjs.com/creating-and-viewing-access-tokens) — `vp install && vp run build && pnpm publish --access public --no-git-checks` — then add the trusted publisher and let OIDC handle every release after. (Tracked upstream in [npm/cli#8544](https://github.com/npm/cli/issues/8544).)
 
 4. **Protect `main`.** Require pull requests and passing CI before merge, and disallow direct pushes, so a release can only be triggered by merging the reviewed version PR.
 

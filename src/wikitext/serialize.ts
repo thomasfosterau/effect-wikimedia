@@ -1,19 +1,18 @@
 /**
- * @copyright Thomas Foster
+ * AST → wikitext serializer — the exact inverse of `./parse.ts`.
  *
- * AST → wikitext serializer — the exact inverse of {@link module:lib/wikitext/parse}.
- *
- * The round-trip contract (issue #1065): for an unmodified tree,
+ * The round-trip contract (website#1065): for an unmodified tree,
  * `serialize(parse(source)) === source`, byte-for-byte. This holds by
  * construction — every node reproduces its literal delimiters verbatim and
  * its child fragments tile the inner range exactly (see the invariants in
- * {@link module:lib/wikitext/ast}) — and is checked span-by-span across the
+ * `./ast.ts`) — and is checked span-by-span across the
  * corpus in the tests. Because serialization reconstructs from node fields
  * rather than replaying the source slice, edits to a node (renamed
  * template, changed parameter value) serialize to the *new* text while
  * their unmodified siblings stay byte-identical.
  *
- * @module lib/wikitext/serialize
+ * @copyright Thomas Foster
+ * @module wikitext/serialize
  */
 
 import type { Document, Node, Param, TableCaption, TableCell, TableRow } from "./ast.ts";

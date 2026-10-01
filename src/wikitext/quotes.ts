@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * Bold/italic resolution — MediaWiki's "apostrophe jungle" (`Parser::doQuotes`).
  *
  * The scanner emits every run of two-or-more apostrophes as a flat
@@ -24,7 +22,8 @@
  * over the *source* line. The literal apostrophes are always preserved, so
  * this only affects the semantic annotation, never the round-trip.
  *
- * @module lib/wikitext/quotes
+ * @copyright Thomas Foster
+ * @module wikitext/quotes
  */
 
 import type { Formatting, Node } from "./ast.ts";
@@ -94,7 +93,6 @@ export function resolveQuotes(nodes: Node[], src: string): Node[] {
 }
 
 // reason: MediaWiki's per-line doQuotes resolution (run normalisation + odd-bold heuristic); CRAP is estimate-inflated because the audit runs without unit coverage — covered by quotes.test.ts.
-// fallow-ignore-next-line complexity
 function resolveLine(
   tokens: readonly Formatting[],
   src: string,

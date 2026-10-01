@@ -39,15 +39,15 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1. `changeset
-      # publish` runs `pnpm publish` (this is a pnpm workspace), and pnpm
-      # shells out to the `npm` on PATH for the publish itself, so upgrading
-      # npm is what makes it authenticate via the `id-token` permission above
-      # instead of a long-lived NPM_TOKEN. `pnpm publish` also rewrites the
-      # `catalog:` / `catalog:peers` specifiers into real ranges, which a bare
-      # `npm publish` would not.
+      # `changeset publish` runs `pnpm publish`, which rewrites the
+      # `catalog:` / `catalog:peers` specifiers into real ranges and, under
+      # pnpm 11 (`packageManager`), performs the npm trusted-publishing (OIDC)
+      # exchange itself via the `id-token` permission above. This upgrade
+      # predates that and may now be redundant (#22). It is pinned to a major
+      # rather than `@latest` because this job holds `id-token: write`: a new
+      # npm major is a reviewed bump here, not something the job picks up.
       - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
       # devDependencies) and renamed its inputs from v1's `version` / `publish`

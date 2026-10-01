@@ -1,12 +1,11 @@
 /**
- * @copyright Thomas Foster
- *
  * The query / manipulation surface over a parsed {@link Document}: node
  * visitors and filters, template extraction (name + parameters), and a
  * strip-to-plain-text projection. All read-only and pure; edits are made by
- * rebuilding nodes and re-{@link module:lib/wikitext/serialize | serializing}.
+ * rebuilding nodes and re-serializing (`./serialize.ts`).
  *
- * @module lib/wikitext/query
+ * @copyright Thomas Foster
+ * @module wikitext/query
  */
 
 import type { Document, Node, Param, Template } from "./ast.ts";
@@ -174,7 +173,6 @@ const NAMED_ENTITIES: Readonly<Record<string, string>> = {
 };
 
 // reason: named + numeric (decimal/hex) entity decode with range guards; CRAP is estimate-inflated because the audit runs without unit coverage — covered by query.test.ts.
-// fallow-ignore-next-line complexity
 function decodeEntity(raw: string): string {
   const body = raw.slice(1, -1); // strip & and ;
   if (body.charCodeAt(0) === 0x23) {
@@ -220,7 +218,6 @@ function stripNodes(nodes: readonly Node[]): string {
 }
 
 // reason: per-node-type strip dispatch (a full node switch); CRAP is estimate-inflated because the audit runs without unit coverage — covered by query.test.ts.
-// fallow-ignore-next-line complexity
 function stripNode(node: Node): string {
   switch (node._tag) {
     case "Text":

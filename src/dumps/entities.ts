@@ -1,6 +1,4 @@
 /**
- * @copyright Thomas Foster
- *
  * **Entity JSON dump** pipeline — the core of the {@link "./index" | Dumps}
  * surface. A Wikidata entity dump (`.json.bz2` / `.json.gz`) is a single
  * top-level JSON array printed one entity per line:
@@ -19,7 +17,7 @@
  * stream into a constant-memory {@link Stream} of typed
  * {@link "../wikidata".WikidataItem} records: decode bytes → text → lines,
  * strip the array framing per line, `JSON.parse` and decode each entity
- * through W2's model. **Lenient by construction** — a line that fails to
+ * through `Wikidata`'s model. **Lenient by construction** — a line that fails to
  * parse or is not a valid entity becomes a typed {@link DumpLineError}
  * *element*, never a stream failure, so one corrupt line in a 100M-line dump
  * does not tear the pipeline down.
@@ -29,6 +27,7 @@
  * decompression stages live in {@link "./sources"} (Node-only); this module
  * operates on whatever `Stream<Uint8Array>` it is handed.
  *
+ * @copyright Thomas Foster
  * @module dumps/entities
  */
 

@@ -1,30 +1,16 @@
 /**
+ * Maps typed `Wikidata` / `Action` results onto {@link WikidataCandidate}s and
+ * {@link WikidataFacts}, re-validating every field against the bounds and
+ * allowlists in `./candidate.ts`. Pure: no network.
+ *
+ * The `Wikidata` module already types the wire; this module decides which
+ * fields become a {@link WikidataCandidate} and which claims become a
+ * {@link WikidataFact}. Field bounds, the curated `EXTERNAL_ID_AUTHORITIES`
+ * allowlist and the injection-guard character classes are applied here,
+ * because a typed value is not yet a trusted one.
+ *
  * @copyright Thomas Foster
- *
- * Reconciliation shaping policy for the Wikidata lookup service (KB-011,
- * issue #575 / #613; shrunk to a policy layer over `@thomasfosterau/effect-wikimedia`
- * in #1067). `@thomasfosterau/effect-wikimedia`'s `Wikidata` module now owns
- * the HTTP plumbing and the lenient wire decode — a fully typed
- * `WikidataItem` / `DataValue` union, honest at the type, lenient at the
- * wire (see {@link module:@thomasfosterau/effect-wikimedia/wikidata}). This
- * module is what is left once that's gone: **this site's** reconciliation
- * policy — which fields become a {@link WikidataCandidate}, which claims
- * become a {@link WikidataFact} — expressed over that typed surface.
- *
- * Untrusted-data discipline still applies at this layer, even though the
- * general package already typed the wire: every value this module reads off
- * a `WikidataItem` is re-validated / re-bounded by this package's own
- * policy validators ({@link module:lib/server/wikidata/candidate}) before
- * it is returned or built into a `WikidataFact`/`WikidataCandidate` — field
- * bounds, the curated `EXTERNAL_ID_AUTHORITIES` allowlist, and the
- * injection-guard character classes are this layer's job, not the general
- * package's (it types the shape; it doesn't know this site's policy).
- *
- * These functions are pure and unit-tested against typed fixtures (no
- * network, no HTTP stub) — only `Wikidata.WikidataItem` / `SearchHit` /
- * `SearchResult` values in, `WikidataCandidate` / `WikidataFacts` values out.
- *
- * @module lib/server/wikidata/normalise
+ * @module reconciliation/normalise
  */
 
 import type * as Action from "../action.ts";
@@ -129,7 +115,7 @@ export function itemToCandidate(
   ];
 }
 
-// ── wbgetentities → enrich facts (#613) ─────────────────────────────────
+// ── wbgetentities → enrich facts (website#613) ──────────────────────────
 
 /** The values of every `value`-kind statement on `property`, in claim order. */
 function statementValues(
@@ -199,11 +185,10 @@ function dateFacts(item: Wikidata.WikidataItem): WikidataFact[] {
 /**
  * Image facts ({@link IMAGE_PROPERTIES}) — `equivalent` mappings to the
  * Commons `Special:FilePath` URL built by {@link normaliseCommonsImage}.
- * Deliberately keeps this package's own filename → URL policy rather than
- * effect-wikimedia's `Commons.filePathUrl` — that helper canonicalises
- * spaces to underscores (MediaWiki's canonical title form), which would
- * change the `externalIri` this layer has always stored for existing
- * `entity_mapping` rows; see the PR description for the trade-off.
+ * Deliberately keeps this namespace's own filename → URL policy rather than
+ * `Commons.filePathUrl` — that helper canonicalises spaces to underscores
+ * (MediaWiki's canonical title form), which would change the `externalIri`
+ * of facts a consumer has already stored.
  */
 function imageFacts(item: Wikidata.WikidataItem): WikidataFact[] {
   const out: WikidataFact[] = [];
