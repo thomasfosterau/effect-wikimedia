@@ -173,7 +173,6 @@ const NAMED_ENTITIES: Readonly<Record<string, string>> = {
 };
 
 // reason: named + numeric (decimal/hex) entity decode with range guards; CRAP is estimate-inflated because the audit runs without unit coverage — covered by query.test.ts.
-// fallow-ignore-next-line complexity
 function decodeEntity(raw: string): string {
   const body = raw.slice(1, -1); // strip & and ;
   if (body.charCodeAt(0) === 0x23) {
@@ -219,7 +218,6 @@ function stripNodes(nodes: readonly Node[]): string {
 }
 
 // reason: per-node-type strip dispatch (a full node switch); CRAP is estimate-inflated because the audit runs without unit coverage — covered by query.test.ts.
-// fallow-ignore-next-line complexity
 function stripNode(node: Node): string {
   switch (node._tag) {
     case "Text":

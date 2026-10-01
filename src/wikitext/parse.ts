@@ -7,7 +7,7 @@
  * `./ast.ts`), which is what makes the round-trip and
  * fuzz guarantees hold.
  *
- * ## Design notes (the decisions the issue left open)
+ * ## Design notes (the decisions website#1065 left open)
  *
  * - **Tokenizer granularity.** There is no discrete pre-tokenization pass:
  *   the scanner *is* the tokenizer, reading the source character by
@@ -192,7 +192,6 @@ class Parser {
    * recognition (document level only); `depth` bounds recursion.
    */
   // reason: the scanner's central char-dispatch loop; CRAP is estimate-inflated because the audit runs without unit coverage — this is exercised by the parse/roundtrip suites.
-  // fallow-ignore-next-line complexity
   parseFragment(stop: Stop, depth: number, block: boolean): Node[] {
     const nodes: Node[] = [];
     let textStart = this.pos;
@@ -254,7 +253,6 @@ class Parser {
   }
 
   // reason: delimiter-stop dispatch over a fixed char set; CRAP is estimate-inflated because the audit runs without unit coverage — covered by the parse/roundtrip suites.
-  // fallow-ignore-next-line complexity
   private atStop(stop: Stop): boolean {
     switch (this.src.charCodeAt(this.pos)) {
       case 0x7c: // |
@@ -527,7 +525,6 @@ class Parser {
    * next table marker line (or `this.limit`).
    */
   // reason: cell/line splitting with attrs detection and multi-line content extension; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
-  // fallow-ignore-next-line complexity
   private parseTableLineCells(header: boolean, depth: number, into: TableCell[]): void {
     const sep = header ? "!!" : "||";
     const lineEnd = this.tableLineEnd(this.pos);
@@ -602,7 +599,6 @@ class Parser {
   }
 
   // reason: URL scan plus fail-soft cursor reset; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
-  // fallow-ignore-next-line complexity
   private tryExternalLink(depth: number): ExternalLink | null {
     const start = this.pos;
     const key = this.failKey(start, 3);
@@ -647,7 +643,6 @@ class Parser {
   // ── bare url autolinking ─────────────────────────────────────────────
 
   // reason: URL body scan plus MediaWiki's trailing-punctuation trim; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
-  // fallow-ignore-next-line complexity
   private tryAutoLink(): AutoLink | null {
     const start = this.pos;
     const protoMatch = AUTOLINK_PROTOCOL_RE.exec(
@@ -697,7 +692,6 @@ class Parser {
   }
 
   // reason: tag name / attribute / extension-body scan with several fail-soft exits; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
-  // fallow-ignore-next-line complexity
   private tryTag(_depth: number): Tag | null {
     const start = this.pos;
     let i = start + 1;
@@ -790,7 +784,6 @@ class Parser {
   // ── entities ────────────────────────────────────────────────────────
 
   // reason: named / decimal / hex entity scan; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
-  // fallow-ignore-next-line complexity
   private tryEntity(): HtmlEntity | null {
     const start = this.pos;
     let i = start + 1;

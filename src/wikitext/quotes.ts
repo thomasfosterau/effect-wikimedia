@@ -93,7 +93,6 @@ export function resolveQuotes(nodes: Node[], src: string): Node[] {
 }
 
 // reason: MediaWiki's per-line doQuotes resolution (run normalisation + odd-bold heuristic); CRAP is estimate-inflated because the audit runs without unit coverage — covered by quotes.test.ts.
-// fallow-ignore-next-line complexity
 function resolveLine(
   tokens: readonly Formatting[],
   src: string,

@@ -154,8 +154,8 @@ export function normaliseExternalIdValue(raw: string): string | null {
 /**
  * A single fact pulled from a confirmed Wikidata item, in a neutral shape
  * a consumer can store as a provenance-marked mapping. `externalIri` (with
- * `mappingKind`) is the natural dedup key (the correspondence target); `authority` + `externalId` name the source
- * scheme and its value; `notes` carries the human-readable fact label
+ * `mappingKind`) is the natural dedup key (the correspondence target);
+ * `authority` + `externalId` name the source scheme and its value; `notes` carries the human-readable fact label
  * (e.g. `"date of birth"`) for facts that aren't ontology correspondences.
  * Every string is already validated / clamped — consumers treat them as
  * trusted application values.

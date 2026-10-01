@@ -308,8 +308,8 @@ function describeHttpError(error: HttpClientError.HttpClientError): string {
 
 /**
  * Shared client contract every HTTP surface module (`Action`, `Rest`,
- * `Commons`, `Wikidata`, `Sparql`) depends on. `getJson` decodes a JSON body through a caller-supplied
- * lenient schema; `getText` reads a raw text body (the REST/Parsoid HTML
+ * `Commons`, `Wikidata`, `Sparql`) depends on. `getJson` decodes a JSON body
+ * through a caller-supplied lenient schema; `getText` reads a raw text body (the REST/Parsoid HTML
  * endpoints return `text/html`, not JSON). Both apply the UA policy, the
  * `maxlag` parameter, and {@link withMaxlagRetry} automatically — callers
  * never see a transient maxlag/rate-limit signal unless retries exhaust.
