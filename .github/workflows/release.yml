@@ -70,5 +70,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NPM_TOKEN: publishing authenticates via OIDC trusted publishing
           # (the `id-token: write` permission above + a trusted publisher
-          # configured for the package on npmjs.com). Provenance is attached.
-          NPM_CONFIG_PROVENANCE: "true"
+          # configured for the package on npmjs.com).
+          # Don't force provenance; npm attaches it itself when allowed, and an
+          # explicit request fails from a private repository.
