@@ -44,7 +44,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 
 ## Branches and pull requests
 
-- Branch off `main` as `issue-<n>-<slug>`; PR against `main`. Rebase onto `origin/main` before opening or updating a PR; never merge `main` into your branch (GitHub's Update-branch button merges). PRs land with a merge commit, not a squash.
+- Branch off `main` as `issue-<n>-<slug>`; PR against `main`; squash-merge. Rebase onto `origin/main` before opening or updating a PR; never merge `main` into your branch (GitHub's Update-branch button merges).
 - Every change to the published package's behaviour, including its doc comments (they ship in the `.d.ts`), carries a changeset (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR (`chore: version packages`), the owner merges it, and the workflow publishes. See [docs/RELEASING.md](docs/RELEASING.md).
 - Standing approvals: open a PR once a branch has a pushed commit; watch it to merge or close (CI failures, review comments, rebase when it conflicts); keep the PR body current.
 - GitHub writes go to `thomasfosterau/effect-wikimedia` only; pass `-R thomasfosterau/effect-wikimedia` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations, even when GitHub MCP tools are available. If another repo needs something, say so in the PR body.
@@ -55,6 +55,8 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 - The issue is the spec — read all of it, including comments; later comments override the body. Re-verify its code claims against current `main` before editing.
 - Record decisions and findings as issue comments.
 - Stop-and-report is a valid outcome: on a blocker outside the issue's scope, comment the evidence on the issue and stop. Scope cut mid-PR becomes a linked issue before merge.
+
+## Effect
 
 <!-- effect-solutions:start -->
 
@@ -80,7 +82,7 @@ The `effect-solutions` CLI and its reference clone are not provisioned in this r
 
 ## Agent sessions
 
-The SessionStart hook (`.claude/hooks/session-start.sh`) installs dependencies against the lockfile and puts a `vp` shim on PATH for non-interactive shells. It hydrates no secrets; nothing here needs one. A PostToolUse hook runs `vp fmt --write` on each edited file. Publishing (the Release workflow's OIDC exchange) is the only thing that can't run in a session.
+The SessionStart hook (`.claude/hooks/session-start.sh`) installs dependencies against the lockfile and puts a `vp` shim on PATH for non-interactive shells. It hydrates no secrets; nothing here needs one. A PostToolUse hook runs `vp fmt --write` on each edited file. Publishing (the Release workflow's OIDC exchange) is the only thing that can't run in a session; the audit needs the npm registry.
 
 ## Documentation surfaces
 
