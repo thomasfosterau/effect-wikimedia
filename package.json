@@ -45,7 +45,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "prepare": "effect-language-service patch",
+    "prepare": "effect-tsgo patch --typescript",
     "changeset": "changeset",
     "version": "changeset version && vp fmt",
     "release": "vp run build && changeset publish"
@@ -53,7 +53,9 @@
   "devDependencies": {
     "@changesets/cli": "catalog:",
     "@effect/language-service": "catalog:",
+    "@effect/tsgo": "catalog:",
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
     "effect": "catalog:",
     "esbuild": "catalog:",
     "typescript": "catalog:",

@@ -8,6 +8,8 @@
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    // TypeScript 6+ no longer auto-includes every `@types/*` package.
+    "types": ["node"],
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "esModuleInterop": true,
