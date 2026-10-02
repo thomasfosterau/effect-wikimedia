@@ -33,9 +33,10 @@ catalog:
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
   #
-  # Exactly the shared library floor (`4.0.0-rc.118`, website#2015 / website#2059),
-  # so CI tests the lowest version the published peer range admits.
-  effect: 4.0.0-rc.118
+  # The stable 4.0.0 release (website#2059). The published peer floor in
+  # `catalogs.peers` stays at `>=4.0.0-rc.118`, which admits 4.0.0; CI therefore
+  # tests 4.0.0, not the floor itself.
+  effect: 4.0.0
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
