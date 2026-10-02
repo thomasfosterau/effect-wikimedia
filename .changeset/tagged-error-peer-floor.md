@@ -6,4 +6,4 @@ Migrate off the removed `Schema.TaggedErrorClass` API to `Schema.TaggedError`, w
 
 This is a breaking change: `peerDependencies.effect` moves from `^4.0.0-beta.102` to `>=4.0.0-beta.104`. Consumers pinned to `effect@<=4.0.0-beta.103` must upgrade `effect` before taking this release.
 
-This change was previously published as 1.0.0 in error; that version is being unpublished or deprecated, and the change ships here as 0.3.0, the next version after 0.2.0.
+This change was first published as 1.0.0 in error. That version is withdrawn, and the change ships here as 0.3.0, the next version after 0.2.0.
