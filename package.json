@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-wikimedia",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "A strongly typed, Effect-idiomatic client family for Wikimedia properties — Wikipedia, Wikidata, Commons, WDQS, wikitext, and dumps.",
   "keywords": [
     "commons",

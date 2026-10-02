@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-wikimedia": major
+"@thomasfosterau/effect-wikimedia": minor
 ---
 
 Raise the Effect floor to the shared library floor: requires `effect@>=4.0.0-rc.118`; import paths moved from `effect/unstable/*` to `effect/*`.
