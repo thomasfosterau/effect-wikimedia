@@ -27,7 +27,7 @@ catalog:
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping either.
   # Only the TypeScript binary is patched (no `--oxlint`): this repo does not
   # run the Effect oxlint preset, so `vite-plus` is not tied to its oxlint.
-  "@effect/tsgo": 0.46.1
+  "@effect/tsgo": 0.47.2
   "@types/node": ^26.1.2
   # `effect` is a peerDependency of the published package and a devDependency
   # here, so the repo resolves exactly one copy while consumers bring their
@@ -52,8 +52,8 @@ catalog:
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override below
   # forces every resolution to the catalog singleton. Bump the three together.
-  vite-plus: 0.3.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.0
+  vite-plus: 0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
