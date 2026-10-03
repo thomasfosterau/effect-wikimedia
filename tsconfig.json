@@ -32,7 +32,21 @@
     // return on some paths and not others.
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
-    "plugins": [{ "name": "@effect/language-service" }]
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        // A "warning" fails the patched native `tsc` by default; this flag
+        // keeps Effect warnings visible but non-blocking, as in the sibling
+        // library repos.
+        "ignoreEffectWarningsInTscExitCode": true,
+        "diagnosticSeverity": {
+          // Effect 4 marks much of `effect/http` `@stability unstable`, so as
+          // a warning this fires on every HTTP client use and drowns the
+          // warnings that matter. Owner decision (#26): a suggestion.
+          "unstableApiUsage": "suggestion"
+        }
+      }
+    ]
   },
   "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
   "exclude": ["node_modules", "dist"]
