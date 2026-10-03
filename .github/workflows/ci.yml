@@ -45,6 +45,14 @@ jobs:
       - name: Format, lint and type-check
         run: vp check
 
+      # `vp check` type-checks with tsgolint, which reports no Effect
+      # diagnostics. `prepare` patches the native `tsc` (`@typescript/native`)
+      # with `effect-tsgo`, so this step is the one that fails on an Effect
+      # `error` diagnostic; warnings and suggestions don't affect its exit
+      # code (`ignoreEffectWarningsInTscExitCode` in tsconfig.json) (#31).
+      - name: Effect diagnostics
+        run: tsc -p tsconfig.json
+
       - name: Test
         run: vp run test
 
