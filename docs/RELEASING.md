@@ -6,19 +6,19 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 1. **Land changesets.** Every change that should appear in the changelog ships with a changeset — a markdown file in `.changeset/` created by `pnpm changeset` (pick a bump type). Changes that don't affect the published package (docs, CI, tooling) need no changeset. Preview what is pending with `vp exec changeset status`.
 
-2. **Version Packages PR (automatic).** On every push to `main`, the Release workflow runs `pnpm run version` (`changeset version && vp fmt`): it consumes the pending changesets, bumps `package.json`, and writes `CHANGELOG.md` on the `changeset-release/main` branch, then opens (or updates) a **"chore: version packages"** PR. Review it like any other PR.
+2. **Version Packages PR (automatic).** On every push to `trunk`, the Release workflow runs `pnpm run version` (`changeset version && vp fmt`): it consumes the pending changesets, bumps `package.json`, and writes `CHANGELOG.md` on the `changeset-release/trunk` branch, then opens (or updates) a **"chore: version packages"** PR. Review it like any other PR.
 
    Changesets v3 formats the changelogs it writes with whatever formatter it detects, and it detects the `oxfmt` shim that Vite+ installs whenever `node_modules/oxfmt` exists (a hoisted install, as in the other library repositories); that shim only serves editors and exits non-zero when run directly. So `.changeset/config.json` sets `"format": false` and the `version` script formats with `vp fmt` itself.
 
 3. **Publish (automatic on merge).** Merging that PR triggers the workflow's publish step, `pnpm run release` (`vp run build && changeset publish`). `changeset publish` runs `pnpm publish`, which rewrites the `catalog:peers` peer range into the real one and, under pnpm 11, authenticates via npm trusted publishing (OIDC) itself (the job's `id-token: write` permission plus the trusted publisher below). Nothing requests provenance: an explicit request fails from a private repository. The action then pushes the `v*` tag and creates the GitHub release.
 
-The job runs in the protected `release` environment, so every run on `main` — the version PR and the publish alike — pauses for the environment's required reviewer to approve it.
+The job runs in the protected `release` environment, so every run on `trunk` — the version PR and the publish alike — pauses for the environment's required reviewer to approve it.
 
 ## One-time repository setup
 
-1. **Allow the Action to open the release PR.** _Settings → Actions → General → Workflow permissions →_ enable **"Allow GitHub Actions to create and approve pull requests."** Without this, the workflow runs `changeset version` and pushes the `changeset-release/main` branch successfully, but fails at the final step with `GitHub Actions is not permitted to create or approve pull requests`, so no version PR is opened.
+1. **Allow the Action to open the release PR.** _Settings → Actions → General → Workflow permissions →_ enable **"Allow GitHub Actions to create and approve pull requests."** Without this, the workflow runs `changeset version` and pushes the `changeset-release/trunk` branch successfully, but fails at the final step with `GitHub Actions is not permitted to create or approve pull requests`, so no version PR is opened.
 
-2. **Create and protect the `release` environment.** _Settings → Environments → New environment → `release`_ → enable **Required reviewers** (yourself) and restrict deployment branches to `main`, so publishing pauses for manual approval. (GitHub auto-creates the environment, unprotected, the first time the workflow references it; the protection is the point.)
+2. **Create and protect the `release` environment.** _Settings → Environments → New environment → `release`_ → enable **Required reviewers** (yourself) and restrict deployment branches to `trunk`, so publishing pauses for manual approval. (GitHub auto-creates the environment, unprotected, the first time the workflow references it; the protection is the point.)
 
 3. **Configure the trusted publisher on npmjs.com.** On `@thomasfosterau/effect-wikimedia`, go to _Settings → Trusted Publisher_ and add a GitHub Actions publisher:
    - Organization or user: `thomasfosterau`
@@ -28,11 +28,11 @@ The job runs in the protected `release` environment, so every run on `main` — 
 
    The Environment field must match the workflow's `environment:` — a publisher configured without one (as this package's originally was) still matches, but pinning it means only an approved run of this workflow can publish.
 
-4. **Protect `main`.** Require pull requests and passing CI before merge, and disallow direct pushes, so a release can only be triggered by merging the reviewed version PR.
+4. **Protect `trunk`.** Require pull requests and passing CI before merge, and disallow direct pushes, so a release can only be triggered by merging the reviewed version PR.
 
 ## Manual fallback
 
-If the workflow can't open the PR (e.g. setting #1 above is still off), the `changeset-release/main` branch is still pushed with the correct version bump — open the version PR from that branch by hand. You can also run the version step locally:
+If the workflow can't open the PR (e.g. setting #1 above is still off), the `changeset-release/trunk` branch is still pushed with the correct version bump — open the version PR from that branch by hand. You can also run the version step locally:
 
 ```sh
 pnpm run version       # apply pending changesets -> bump + CHANGELOG

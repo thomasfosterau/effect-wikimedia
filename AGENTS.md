@@ -46,7 +46,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 
 ## Branches and pull requests
 
-- Branch off `main` as `issue-<n>-<slug>`; PR against `main`; squash-merge. Rebase onto `origin/main` before opening or updating a PR; never merge `main` into your branch (GitHub's Update-branch button merges).
+- Branch off `trunk` as `issue-<n>-<slug>`; PR against `trunk`; squash-merge. Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges).
 - Every change to the published package's behaviour, including its doc comments (they ship in the `.d.ts`), carries a changeset (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR (`chore: version packages`), the owner merges it, and the workflow publishes. See [docs/RELEASING.md](docs/RELEASING.md).
 - Standing approvals: open a PR once a branch has a pushed commit; watch it to merge or close (CI failures, review comments, rebase when it conflicts); keep the PR body current.
 - GitHub writes go to `thomasfosterau/effect-wikimedia` only; pass `-R thomasfosterau/effect-wikimedia` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations, even when GitHub MCP tools are available. If another repo needs something, say so in the PR body.
@@ -54,7 +54,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 ## Work tracker
 
 - Issues are the backlog: when you find work you can't do now, file an issue rather than leaving a TODO.
-- The issue is the spec — read all of it, including comments; later comments override the body. Re-verify its code claims against current `main` before editing.
+- The issue is the spec — read all of it, including comments; later comments override the body. Re-verify its code claims against current `trunk` before editing.
 - Record decisions and findings as issue comments.
 - Stop-and-report is a valid outcome: on a blocker outside the issue's scope, comment the evidence on the issue and stop. Scope cut mid-PR becomes a linked issue before merge.
 
