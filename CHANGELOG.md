@@ -1,5 +1,24 @@
 # @thomasfosterau/effect-wikimedia
 
+## 0.3.0
+
+### Minor Changes
+
+- 1fc2b7a: Raise the Effect floor to the shared library floor: requires `effect@>=4.0.0-rc.118`; import paths moved from `effect/unstable/*` to `effect/*`.
+
+  `peerDependencies.effect` moves from `>=4.0.0-beta.104` to `>=4.0.0-rc.118`, and the package's own imports of `effect/unstable/http` now read `effect/http`. Consumers on any `beta` or earlier `rc` build must upgrade `effect` to `4.0.0-rc.118` or later before taking this release; the previous release's published output imports `effect/unstable/*`, which no longer exists in `rc.118`. No public API of this package changes.
+
+- 5cb985c: Migrate off the removed `Schema.TaggedErrorClass` API to `Schema.TaggedError`, which was renamed in effect `4.0.0-beta.104`. `TaggedErrorClass` no longer exists at `beta.104` and later, so importing this package under a current `effect` version previously threw at module load.
+
+  This is a breaking change: `peerDependencies.effect` moves from `^4.0.0-beta.102` to `>=4.0.0-beta.104`. Consumers pinned to `effect@<=4.0.0-beta.103` must upgrade `effect` before taking this release.
+
+  This change was first published as 1.0.0 in error. That version is withdrawn, and the change ships here as 0.3.0, the next version after 0.2.0.
+
+### Patch Changes
+
+- 40df6e1: Rewrite the doc comments ported from the website app so they describe this package: module headers lead with their description, `@module` names match the source layout, and links to files that don't exist here are gone.
+- d524895: Tested against effect 4.0.0; the peer floor is unchanged (`>=4.0.0-rc.118`). No source or public type changes.
+
 ## 0.2.0
 
 ### Minor Changes
