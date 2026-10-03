@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. This repo publishes `@thomasfosterau/effect-wikimedia`, one package with a single `.` entry point: Effect clients for Wikipedia, Wikidata, Commons, WDQS, wikitext and dumps. It was extracted from `thomasfosterau/website` with `git subtree split`, so `git log` / `git blame` reach back through it; a bare `#NNN` in a comment ported from there names a **website** issue, not one in this tracker (write new ones as `website#NNN`).
 
-Toolchain differences from the other library repos: single package, so the tasks are `vp run test` / `vp run build` (no `-r`, no `test:unit`); the type check runs inside `vp check` (tsgolint), so there is no separate `vp run check`; no fallow gate and no docgen.
+Toolchain differences from the other library repos: single package, so the tasks are `vp run test` / `vp run build` (no `-r`, no `test:unit`); the type check runs inside `vp check` (tsgolint), so there is no separate `vp run check`, and the patched native `tsc -p tsconfig.json` is the Effect-diagnostics gate; no fallow gate and no docgen.
 
 ## Common pitfalls
 
@@ -24,21 +24,23 @@ Toolchain differences from the other library repos: single package, so the tasks
 
 - `pnpm install --frozen-lockfile` — install exactly as CI does.
 - `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix.
+- `tsc -p tsconfig.json` — Effect diagnostics: the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these.
 - `vp run test` — the Vitest suite.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
 - `pnpm audit --audit-level high` — the supply-chain gate (network: needs the npm registry).
 - `pnpm changeset` — add a changeset.
 
-Use `./node_modules/.bin/vp` if `vp` is not on PATH.
+Use `./node_modules/.bin/vp` if `vp` is not on PATH. Run `tsc` as `./node_modules/.bin/tsc` unless `node_modules/.bin` leads PATH (as CI arranges): a global `tsc` is not the patched one and reports no Effect diagnostics.
 
 ## Verification
 
 Before you report work as done, run these in CI's order (`.github/workflows/ci.yml`) and quote each command with its final pass/fail:
 
 1. `vp check`
-2. `vp run test`
-3. `vp run build`
-4. `pnpm audit --audit-level high`
+2. `tsc -p tsconfig.json`
+3. `vp run test`
+4. `vp run build`
+5. `pnpm audit --audit-level high`
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 
