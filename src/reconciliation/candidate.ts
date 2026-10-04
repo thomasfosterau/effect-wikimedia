@@ -37,8 +37,8 @@ export interface WikidataCandidate {
 /**
  * Upper bound, in UTF-16 code units, on a candidate's label or description
  * as `WikidataLookup` returns it: 2000, against the 4000 of
- * `Core.MAX_TEXT_FIELD_LENGTH`, which bounds the general-purpose clients
- * (`Action`, `Rest`). The barrel exports both names, so qualify them by
+ * `Core.MAX_TEXT_FIELD_LENGTH`, which bounds the `Action` and `Rest`
+ * clients (`Wikidata` applies its own 4000 bound). The barrel exports both names, so qualify them by
  * namespace when you use both. The clamp keeps a hostile or malformed
  * response from pushing an unbounded blob through the service (defence in
  * depth).
