@@ -39,16 +39,13 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # `changeset publish` runs `pnpm publish`, which rewrites the
-      # `catalog:` / `catalog:peers` specifiers into real ranges and, under
-      # pnpm 11 (`packageManager`), performs the npm trusted-publishing (OIDC)
-      # exchange itself via the `id-token` permission above. This upgrade
-      # predates that and may now be redundant (#22). It is pinned to a major
-      # rather than `@latest` because this job holds `id-token: write`: a new
-      # npm major is a reviewed bump here, not something the job picks up.
-      - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@11
-
+      # `changeset publish` runs `pnpm publish` (changesets detects pnpm from
+      # `packageManager`), which rewrites the `catalog:` / `catalog:peers`
+      # specifiers into real ranges and, being pnpm 11's native publish,
+      # performs the npm trusted-publishing (OIDC) exchange itself via the
+      # `id-token` permission above. No npm CLI is involved, so the job does
+      # not upgrade the npm that ships with Node (#22).
+      #
       # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
       # devDependencies) and renamed its inputs from v1's `version` / `publish`
       # / `commit` / `title`. The action parses the "New tag:" output of
@@ -58,11 +55,12 @@ jobs:
         with:
           version-script: pnpm run version
           # `pnpm run`, NOT `vp run`: pnpm forwards the ambient environment to
-          # child processes, whereas `vp run` does not propagate the
-          # `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN` variables npm needs for
-          # OIDC. Without them npm logs "oidc Skipped because incorrect
-          # permissions for id-token", falls back to token auth and fails with
-          # ENEEDAUTH. The `release` script still builds with `vp` internally.
+          # child processes, whereas `vp run` filters it and drops
+          # `ACTIONS_ID_TOKEN_REQUEST_URL`, which `pnpm publish` needs to fetch
+          # the OIDC ID token. Without it pnpm logs "Skipped OIDC: Incorrect
+          # permissions for idToken within GitHub Workflows", publishes
+          # unauthenticated and fails with ERR_PNPM_FAILED_TO_PUBLISH. The
+          # `release` script still builds with `vp` internally.
           publish-script: pnpm run release
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
@@ -71,5 +69,5 @@ jobs:
           # No NPM_TOKEN: publishing authenticates via OIDC trusted publishing
           # (the `id-token: write` permission above + a trusted publisher
           # configured for the package on npmjs.com).
-          # Don't force provenance; npm attaches it itself when allowed, and an
+          # Don't force provenance; pnpm attaches it itself when allowed, and an
           # explicit request fails from a private repository.
