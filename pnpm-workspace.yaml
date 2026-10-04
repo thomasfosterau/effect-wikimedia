@@ -37,6 +37,18 @@ catalog:
   # `catalogs.peers` stays at `>=4.0.0-rc.118`, which admits 4.0.0; CI therefore
   # tests 4.0.0, not the floor itself.
   effect: 4.0.0
+  # The Effect best-practice guides AGENTS.md points agents at (#18). The
+  # tarball bundles a self-contained, Bun-compiled binary for each of
+  # darwin/linux x arm64/x64 (~118 MB download, ~326 MB unpacked, all four
+  # land in the store); `bin.js` spawns the host's. Run it as
+  # `node node_modules/effect-solutions/bin.js`: its `#!/usr/bin/env bun`
+  # shebang makes pnpm's `.bin` shim (so `vp exec` / `pnpm exec`) require Bun
+  # on PATH, but `bin.js` itself is plain Node-compatible ESM. Its declared
+  # `effect` / `@effect/platform-bun` dependencies go unused at runtime (the
+  # binary embeds its own), so the `effect` override below retargeting them
+  # to the catalog singleton is harmless. Pinned exact, so a bump that
+  # re-downloads ~118 MB is a deliberate catalog change.
+  effect-solutions: 0.5.3
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
