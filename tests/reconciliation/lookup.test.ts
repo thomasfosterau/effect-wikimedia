@@ -89,6 +89,16 @@ const withLookup = (
     return yield* use(lookup);
   }).pipe(Effect.provide(wikidataLookupClientLayer.pipe(Layer.provide(layer))));
 
+// ── Service key ──────────────────────────────────────────────────────
+
+describe("WikidataLookup", () => {
+  it("is keyed in the package's namespace, like Core.WikimediaClient", () => {
+    // The key is public: a consumer providing the service by raw key string
+    // depends on it, so changing it is a breaking change (#19).
+    expect(WikidataLookup.key).toBe("effect-wikimedia/WikidataLookup");
+  });
+});
+
 // ── Label search ─────────────────────────────────────────────────────
 
 describe("WikidataLookup.searchByLabel", () => {

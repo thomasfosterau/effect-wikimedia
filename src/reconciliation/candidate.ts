@@ -35,10 +35,13 @@ export interface WikidataCandidate {
 // ── Field bounds ──────────────────────────────────────────────────────
 
 /**
- * Upper bound on any single free-text field copied from an untrusted
- * Wikidata response. Labels and descriptions are clamped to this before
- * being returned so a hostile or malformed response can't push an
- * unbounded blob through the service (defence in depth).
+ * Upper bound, in UTF-16 code units, on a candidate's label or description
+ * as `WikidataLookup` returns it: 2000, against the 4000 of
+ * `Core.MAX_TEXT_FIELD_LENGTH`, which bounds the general-purpose clients
+ * (`Action`, `Rest`). The barrel exports both names, so qualify them by
+ * namespace when you use both. The clamp keeps a hostile or malformed
+ * response from pushing an unbounded blob through the service (defence in
+ * depth).
  */
 export const MAX_TEXT_FIELD_LENGTH = 2000;
 
@@ -56,9 +59,14 @@ export const MAX_INSTANCE_OF = 10;
 export const MAX_LABEL_QUERY_LENGTH = 300;
 
 /**
- * Trims, collapses, and length-clamps an untrusted free-text value.
- * Returns `null` for empty / whitespace-only input so callers can map
+ * Cleans an untrusted free-text value for a reconciliation candidate: trims
+ * it, collapses each internal whitespace run to one space, and clamps it to
+ * {@link MAX_TEXT_FIELD_LENGTH} (2000) code units. Returns `null` for a
+ * non-string or an empty / whitespace-only string, so callers can map
  * "nothing usable" to an absent field rather than an empty string.
+ *
+ * Differs from the same-named `Core.sanitiseText`, which only trims, keeps
+ * internal whitespace and clamps to `Core.MAX_TEXT_FIELD_LENGTH` (4000).
  */
 export function sanitiseText(value: unknown): string | null {
   if (typeof value !== "string") return null;
