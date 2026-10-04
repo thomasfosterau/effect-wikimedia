@@ -10,8 +10,9 @@
  * every request, never a constant baked into the module.
  *
  * Etiquette this module owns so no surface module has to reimplement it:
- * - a polite `User-Agent` applied to every request: the caller's own, set
- *   through {@link UserAgent}, or this package's neutral {@link USER_AGENT};
+ * - a polite `User-Agent` set on every request: the caller's own, set
+ *   through {@link UserAgent}, or this package's neutral {@link USER_AGENT}
+ *   (a browser may drop it; see {@link UserAgent});
  * - the `maxlag` query parameter (bots/scripts are asked to send it so a
  *   lagged replica can decline cheaply rather than serving stale data);
  * - `Retry-After` / `maxlag`-error backoff — a lagged or rate-limited
@@ -53,12 +54,18 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } 
 export const USER_AGENT = "effect-wikimedia (+https://github.com/thomasfosterau/effect-wikimedia)";
 
 /**
- * The `User-Agent` header value every request this package makes sends;
+ * The `User-Agent` header value this package sets on every request;
  * defaults to {@link USER_AGENT}. Provide your own, with your contact details,
  * as Wikimedia's User-Agent policy asks
  * (https://meta.wikimedia.org/wiki/User-Agent_policy) — for example
  * `"my-bot/1.2 (https://example.org/my-bot; bot@example.org) effect-wikimedia"`.
- * The value is sent verbatim.
+ *
+ * Node sends the value verbatim. A browser may not: the Fetch standard lets
+ * a page set `User-Agent`, but Chromium-based browsers silently drop it and
+ * send their own, so Wikimedia never sees this value. Wikimedia asks
+ * browser clients to identify themselves with an `Api-User-Agent` header
+ * instead (https://www.mediawiki.org/wiki/API:Etiquette), which this package
+ * does not send.
  *
  * {@link WikimediaClient} reads it once, when its layer is built;
  * `Dumps.fromHttpRange` reads it from the program's context when the stream
@@ -466,16 +473,17 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
  * {@link WikimediaClient} layer over whatever `HttpClient` is in context.
  * The production graph supplies `FetchHttpClient` (see
  * {@link wikimediaLayer}); a test supplies a stubbed fetch under the same
- * `FetchHttpClient` slot. Sends the {@link UserAgent} in context when the
- * layer is built ({@link USER_AGENT} if none is provided).
+ * `FetchHttpClient` slot. Sets the `User-Agent` header to the
+ * {@link UserAgent} in context when the layer is built ({@link USER_AGENT}
+ * if none is provided).
  */
 export const wikimediaClientLayer: Layer.Layer<WikimediaClient, never, HttpClient.HttpClient> =
   Layer.effect(WikimediaClient)(makeWikimediaClient());
 
 /**
  * Production {@link WikimediaClient} layer, backed by the global `fetch` via
- * `FetchHttpClient`. Sends the {@link UserAgent} in context when the layer is
- * built; set yours with
+ * `FetchHttpClient`. Sets the `User-Agent` header to the {@link UserAgent} in
+ * context when the layer is built; set yours with
  * `Core.wikimediaLayer.pipe(Layer.provideMerge(Layer.succeed(Core.UserAgent, ua)))`
  * (see {@link UserAgent} for which form reaches `Dumps.fromHttpRange` too).
  */

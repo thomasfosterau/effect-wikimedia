@@ -27,7 +27,7 @@ Every `Action`, `Rest`, `Commons`, `Wikidata` and `Sparql` request goes through 
 
 ### User-Agent
 
-Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sends `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://github.com/thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference; the value is sent verbatim:
+Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sets the `User-Agent` header to `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://github.com/thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference; in Node the value is sent verbatim:
 
 ```ts
 import * as Layer from "effect/Layer";
@@ -40,6 +40,8 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
   ),
 );
 ```
+
+In a browser, the browser decides. The Fetch standard lets a page set `User-Agent`, but Chromium-based browsers silently drop it and send their own, so Wikimedia doesn't see yours. Wikimedia's [API etiquette](https://www.mediawiki.org/wiki/API:Etiquette#The_User-Agent_header) asks browser clients to send an `Api-User-Agent` header instead, which this package doesn't send.
 
 `Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it from the program's context when the stream runs, or takes a `userAgent` option that wins over it. Merging the reference into the layer with `Layer.provideMerge`, as above, reaches both (`Dumps.fromHttpRange` also needs an `HttpClient`, such as `FetchHttpClient.layer`, which `Core.wikimediaLayer` doesn't expose). So does `Effect.provideService(Core.UserAgent, userAgent)` placed outside the `Effect.provide` that builds the layer. `Layer.provide` reaches the client only. A `provideService` the layer build doesn't see reaches the dump download only: one applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer.
 
