@@ -104,7 +104,7 @@ export class WikidataLookup extends Context.Service<
      */
     readonly enrich: (qid: string) => Effect.Effect<WikidataFacts | null, LookupError>;
   }
->()("@app/WikidataLookup") {}
+>()("effect-wikimedia/WikidataLookup") {}
 
 /**
  * Maps effect-wikimedia's typed error channel onto this service's
