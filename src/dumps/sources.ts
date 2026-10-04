@@ -36,6 +36,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/http";
+import { UserAgent } from "../core.ts";
 
 // ── Error & etiquette ────────────────────────────────────────────────────
 
@@ -43,10 +44,6 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 export class SourceError extends Schema.TaggedError<SourceError>()("SourceError", {
   description: Schema.String,
 }) {}
-
-/** Polite UA for HTTP range downloads (mirrors {@link "../core".USER_AGENT}). */
-const USER_AGENT =
-  "effect-wikimedia/0.0.0 (+https://github.com/thomasfosterau/website; mailto:me@thomasfoster.au)";
 
 const describe = (reason: unknown): string =>
   reason instanceof Error ? reason.message : String(reason);
@@ -176,6 +173,14 @@ export interface FromHttpRangeOptions {
   readonly startByte?: number;
   /** Extra attempts after a mid-stream transport failure, each resuming from the last received byte. Defaults to `3`. */
   readonly maxResumes?: number;
+  /**
+   * The `User-Agent` header to send on every range request, verbatim.
+   * Defaults to the `Core.UserAgent` reference in context when the stream
+   * runs, which itself defaults to `Core.USER_AGENT`. Set it, or that
+   * reference, to your own UA with your contact details, as Wikimedia's
+   * User-Agent policy asks (https://meta.wikimedia.org/wiki/User-Agent_policy).
+   */
+  readonly userAgent?: string | undefined;
 }
 
 const DEFAULT_MAX_RESUMES = 3;
@@ -184,12 +189,14 @@ const DEFAULT_MAX_RESUMES = 3;
 const rangeRequest = (
   url: string,
   offset: number,
+  userAgent: string | undefined,
 ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> =>
   Stream.unwrap(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
+      const ua = userAgent ?? (yield* UserAgent);
       const request = HttpClientRequest.get(url).pipe(
-        HttpClientRequest.setHeaders({ range: `bytes=${offset}-`, "user-agent": USER_AGENT }),
+        HttpClientRequest.setHeaders({ range: `bytes=${offset}-`, "user-agent": ua }),
       );
       const response = yield* client
         .execute(request)
@@ -218,7 +225,8 @@ const rangeRequest = (
  *
  * Compose {@link gunzip} (or an injected bzip2 stage via {@link decompressWith})
  * downstream to decompress. Requires an {@link HttpClient.HttpClient} in
- * context.
+ * context. Sends the `userAgent` option, else the `Core.UserAgent` reference
+ * (see {@link FromHttpRangeOptions.userAgent}).
  */
 export const fromHttpRange = (
   url: string,
@@ -230,7 +238,7 @@ export const fromHttpRange = (
     resumesLeft: number,
   ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> => {
     let received = offset;
-    return rangeRequest(url, offset).pipe(
+    return rangeRequest(url, offset, options?.userAgent).pipe(
       Stream.tap((chunk) => Effect.sync(() => (received += chunk.length))),
       // Resume only on a transport SourceError — never on interruption, which
       // must propagate and tear the download down (see the interruption test).
