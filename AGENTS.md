@@ -66,9 +66,9 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 
 **IMPORTANT:** Always consult effect-solutions before writing Effect code.
 
-1. Run `effect-solutions list` to see available guides
-2. Run `effect-solutions show <topic>...` for relevant patterns (supports multiple topics)
-3. Search `~/.local/share/effect-solutions/effect` for real implementations
+1. Run `node node_modules/effect-solutions/bin.js list` to see available guides
+2. Run `node node_modules/effect-solutions/bin.js show <topic>...` for relevant patterns (supports multiple topics)
+3. Search `node_modules/effect/src` for real implementations (signatures are in `node_modules/effect/dist/*.d.ts`)
 
 Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
 
@@ -76,8 +76,8 @@ Never guess at Effect patterns — check the guide first.
 
 <!-- effect-solutions:end -->
 
-The `effect-solutions` CLI and its reference clone are not provisioned in this repo yet (#18); until they are, read the API from `node_modules/effect/dist/*.d.ts`.
-
+- `effect-solutions` is a catalog devDependency. Call `bin.js` through `node`, not `vp exec effect-solutions` or `pnpm exec`: its `bun` shebang makes pnpm's `.bin` shim need Bun on PATH, while `bin.js` runs under Node and execs the bundled binary for the host (macOS and Linux, arm64 and x64 only).
+- Services in this library are keyed `"effect-wikimedia/<Name>"` (e.g. `"effect-wikimedia/Client"`), not the guides' app-style `"@app/<Name>"` (that slip is #19).
 - The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer floor is `catalogs.peers.effect`.
 - In the rc line, HTTP modules live under `effect/http` (`HttpApi` under `effect/http-api`); there are no `effect/unstable/*` paths and no `@effect/platform`. `FileSystem` / `Path` are `effect/*` modules.
 - The peer floor is a published contract: raising it is a breaking change for consumers and gets its own issue and a major changeset, never a drive-by bump.

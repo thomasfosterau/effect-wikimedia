@@ -57,6 +57,7 @@
     "@types/node": "catalog:",
     "@typescript/native": "catalog:",
     "effect": "catalog:",
+    "effect-solutions": "catalog:",
     "esbuild": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
