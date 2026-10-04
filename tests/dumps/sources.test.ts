@@ -20,7 +20,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/http";
-import { Dumps } from "../../src/index.ts";
+import { Core, Dumps } from "../../src/index.ts";
 import { runTest, runTestExit } from "../helpers/effect.ts";
 
 const DUMP = '[\n{"type":"item","id":"Q1"},\n{"type":"item","id":"Q2"}\n]\n';
@@ -119,11 +119,13 @@ const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 /** A fetch stub over `Range` requests; `onCall` decides each response. */
 const stubFetch = (onCall: (call: number, start: number) => Response) => {
   const ranges: string[] = [];
+  const userAgents: (string | null)[] = [];
   let call = 0;
   const fetch: typeof globalThis.fetch = (input, init) => {
     const request = new Request(input, init);
     const range = request.headers.get("range") ?? "";
     ranges.push(range);
+    userAgents.push(request.headers.get("user-agent"));
     const start = Number(/bytes=(\d+)-/.exec(range)?.[1] ?? "0");
     call += 1;
     return Promise.resolve(onCall(call, start));
@@ -131,7 +133,7 @@ const stubFetch = (onCall: (call: number, start: number) => Response) => {
   const layer = FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
   );
-  return { ranges, layer };
+  return { ranges, userAgents, layer };
 };
 
 const collectRange = (
@@ -174,6 +176,51 @@ describe("fromHttpRange", () => {
     const bytes = await collectRange(layer);
     expect(decodeUtf8(bytes)).toBe(ALPHABET);
     expect(ranges).toEqual(["bytes=0-", "bytes=10-"]);
+  });
+
+  it("sends the package's default User-Agent when the caller sets none", async () => {
+    const { userAgents, layer } = stubFetch(() => new Response("abc", { status: 206 }));
+    await collectRange(layer);
+    expect(userAgents).toEqual([Core.USER_AGENT]);
+  });
+
+  it("sends the Core.UserAgent reference's value when one is provided", async () => {
+    const userAgent = "my-bot/1.2 (bot@example.org)";
+    const { userAgents, layer } = stubFetch(() => new Response("abc", { status: 206 }));
+    await runTest(
+      Stream.runCollect(Dumps.fromHttpRange("https://dumps.example.org/x.gz")).pipe(
+        Effect.provide(layer),
+        Effect.provideService(Core.UserAgent, userAgent),
+      ),
+    );
+    expect(userAgents).toEqual([userAgent]);
+  });
+
+  it("sends the userAgent option, over the reference, on every resumed request", async () => {
+    const userAgent = "my-dump-loader/2.0 (bot@example.org)";
+    const encoder = new TextEncoder();
+    const { userAgents, layer } = stubFetch((call, start) => {
+      if (call === 1) {
+        let pulls = 0;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulls += 1;
+            if (pulls === 1) controller.enqueue(encoder.encode(ALPHABET.slice(0, 10)));
+            else controller.error(new Error("connection reset"));
+          },
+        });
+        return new Response(body, { status: 206 });
+      }
+      return new Response(encoder.encode(ALPHABET.slice(start)), { status: 206 });
+    });
+    const bytes = await runTest(
+      Stream.runCollect(Dumps.fromHttpRange("https://dumps.example.org/x.gz", { userAgent })).pipe(
+        Effect.provide(layer),
+        Effect.provideService(Core.UserAgent, "ignored/0 (reference loses to the option)"),
+      ),
+    );
+    expect(decodeUtf8(bytes)).toBe(ALPHABET);
+    expect(userAgents).toEqual([userAgent, userAgent]);
   });
 
   it("fails once resumes are exhausted", async () => {

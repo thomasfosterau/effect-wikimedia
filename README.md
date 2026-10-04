@@ -25,9 +25,25 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 
 Every `Action`, `Rest`, `Commons`, `Wikidata` and `Sparql` request goes through `Core.WikimediaClient`, which applies the UA policy and `maxlag` etiquette, and retries a `429`/`503`/in-body maxlag signal automatically. `Core.wikimediaLayer` is the production layer (over the platform `fetch`); in tests, provide `Core.wikimediaClientLayer` over a stubbed `HttpClient` instead.
 
+### User-Agent
+
+Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sends `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://github.com/thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference; the value is sent verbatim:
+
+```ts
+import * as Layer from "effect/Layer";
+
+const userAgent = "my-bot/1.2 (https://example.org/my-bot; bot@example.org) effect-wikimedia";
+
+const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
+  Effect.provide(Core.wikimediaLayer.pipe(Layer.provide(Layer.succeed(Core.UserAgent, userAgent)))),
+);
+```
+
+`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it when the stream runs, or takes a `userAgent` option that wins over it; `Effect.provideService(Core.UserAgent, userAgent)` around the whole program covers both.
+
 ## API
 
-- **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), and the polite-`User-Agent` / `maxlag` / retry-after etiquette every other module builds on.
+- **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), and the `maxlag` / retry-after etiquette every other module builds on.
 - **`Action`** — the Action API (`/w/api.php`): `getWikitext`, `getPageMetadata`, `search`, `parsePage` (sections/links/categories/templates).
 - **`Rest`** — the Core REST API / Parsoid surface (`/w/rest.php/v1/...`): `getPageMetadata`, `getRevisionMetadata`, `getParsedHtml`, `getRevisionHtml`.
 - **`Commons`** — `filePathUrl` (`Special:FilePath` URL construction, with optional thumbnail width) and `getFileInfo`.
