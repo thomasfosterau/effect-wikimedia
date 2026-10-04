@@ -62,9 +62,12 @@ export const USER_AGENT = "effect-wikimedia (+https://github.com/thomasfosterau/
  *
  * {@link WikimediaClient} reads it once, when its layer is built, so provide
  * it to that layer (`Layer.provide(Layer.succeed(Core.UserAgent, ua))`) or
- * around the program that builds it (`Effect.provideService(Core.UserAgent, ua)`).
- * `Dumps.fromHttpRange` reads it when the stream runs, unless its own
- * `userAgent` option is set.
+ * outside the `Effect.provide` that builds it. A `provideService` that the
+ * layer build doesn't see — one applied inside `Effect.provide(layer)`, or per
+ * run on a `ManagedRuntime` made from the layer — leaves the client on the
+ * default while `Dumps.fromHttpRange` picks it up; providing it to the layer
+ * avoids that. `Dumps.fromHttpRange` reads it when the stream runs, unless
+ * its own `userAgent` option is set.
  */
 export const UserAgent: Context.Reference<string> = Context.Reference<string>(
   "effect-wikimedia/UserAgent",

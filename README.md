@@ -39,7 +39,7 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 );
 ```
 
-`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it when the stream runs, or takes a `userAgent` option that wins over it; `Effect.provideService(Core.UserAgent, userAgent)` around the whole program covers both.
+`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it when the stream runs, or takes a `userAgent` option that wins over it. `Effect.provideService(Core.UserAgent, userAgent)` covers both only when it sits outside the `Effect.provide` that builds the layer. Applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer, it reaches `Dumps.fromHttpRange` but not the already-built client, which keeps the default. Providing it to the layer, as above, avoids the split.
 
 ## API
 
