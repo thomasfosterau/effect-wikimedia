@@ -41,7 +41,7 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 );
 ```
 
-`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it from the program's context when the stream runs, or takes a `userAgent` option that wins over it. Merging the reference into the layer with `Layer.provideMerge`, as above, reaches both. So does `Effect.provideService(Core.UserAgent, userAgent)` placed outside the `Effect.provide` that builds the layer. `Layer.provide` reaches the client only. A `provideService` the layer build doesn't see reaches the dump download only: one applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer.
+`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it from the program's context when the stream runs, or takes a `userAgent` option that wins over it. Merging the reference into the layer with `Layer.provideMerge`, as above, reaches both (`Dumps.fromHttpRange` also needs an `HttpClient`, such as `FetchHttpClient.layer`, which `Core.wikimediaLayer` doesn't expose). So does `Effect.provideService(Core.UserAgent, userAgent)` placed outside the `Effect.provide` that builds the layer. `Layer.provide` reaches the client only. A `provideService` the layer build doesn't see reaches the dump download only: one applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer.
 
 ## API
 
