@@ -40,10 +40,10 @@ jobs:
       - uses: ./.github/actions/setup
 
       # `changeset publish` runs `pnpm publish` (changesets detects pnpm from
-      # `packageManager`), which rewrites the `catalog:` / `catalog:peers`
-      # specifiers into real ranges and, being pnpm 11's native publish,
-      # performs the npm trusted-publishing (OIDC) exchange itself via the
-      # `id-token` permission above. No npm CLI is involved, so the job does
+      # `pnpm-lock.yaml` and `packageManager`), which rewrites the `catalog:` /
+      # `catalog:peers` specifiers into real ranges and, being pnpm 11's native
+      # publish, performs the npm trusted-publishing (OIDC) exchange itself via
+      # the `id-token` permission above. No npm CLI is involved, so the job does
       # not upgrade the npm that ships with Node (#22).
       #
       # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
@@ -57,10 +57,11 @@ jobs:
           # `pnpm run`, NOT `vp run`: pnpm forwards the ambient environment to
           # child processes, whereas `vp run` filters it and drops
           # `ACTIONS_ID_TOKEN_REQUEST_URL`, which `pnpm publish` needs to fetch
-          # the OIDC ID token. Without it pnpm logs "Skipped OIDC: Incorrect
-          # permissions for idToken within GitHub Workflows", publishes
-          # unauthenticated and fails with ERR_PNPM_FAILED_TO_PUBLISH. The
-          # `release` script still builds with `vp` internally.
+          # the OIDC ID token. Without it pnpm warns "Skipped OIDC:
+          # ERR_PNPM_ID_TOKEN_GITHUB_WORKFLOW_INCORRECT_PERMISSIONS: ...",
+          # publishes unauthenticated, and the registry rejects the upload
+          # with an HTTP error (E401 / E403 / E404). The `release` script
+          # still builds with `vp` internally.
           publish-script: pnpm run release
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
