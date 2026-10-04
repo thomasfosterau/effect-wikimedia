@@ -223,6 +223,55 @@ describe("fromHttpRange", () => {
     expect(userAgents).toEqual([userAgent, userAgent]);
   });
 
+  // One program that uses both the client and a dump download: where the
+  // reference is provided decides which of the two sees it.
+  const bothUserAgents = (
+    provideUserAgent: (
+      layer: typeof Core.wikimediaClientLayer,
+    ) => Layer.Layer<Core.WikimediaClient, never, HttpClient.HttpClient>,
+  ) => {
+    const userAgents: { client?: string | null; dumps?: string | null } = {};
+    const fetch: typeof globalThis.fetch = (input, init) => {
+      const request = new Request(input, init);
+      const ua = request.headers.get("user-agent");
+      if (request.url.startsWith("https://dumps.example.org/")) {
+        userAgents.dumps = ua;
+        return Promise.resolve(new Response("abc", { status: 206 }));
+      }
+      userAgents.client = ua;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const http = FetchHttpClient.layer.pipe(
+      Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
+    );
+    const program = Effect.gen(function* () {
+      const client = yield* Core.WikimediaClient;
+      yield* client.getText({ host: "en.wikipedia.org", path: "/w/api.php", params: {} });
+      yield* Stream.runCollect(Dumps.fromHttpRange("https://dumps.example.org/x.gz"));
+    });
+    return runTest(
+      program.pipe(
+        Effect.provide(provideUserAgent(Core.wikimediaClientLayer).pipe(Layer.provideMerge(http))),
+      ),
+    ).then(() => userAgents);
+  };
+
+  it("sends a Core.UserAgent given with Layer.provideMerge from both the client and the dump download", async () => {
+    const userAgent = "my-bot/1.2 (bot@example.org)";
+    const sent = await bothUserAgents((layer) =>
+      layer.pipe(Layer.provideMerge(Layer.succeed(Core.UserAgent, userAgent))),
+    );
+    expect(sent).toEqual({ client: userAgent, dumps: userAgent });
+  });
+
+  it("sends a Core.UserAgent given with Layer.provide from the client only", async () => {
+    const userAgent = "my-bot/1.2 (bot@example.org)";
+    const sent = await bothUserAgents((layer) =>
+      layer.pipe(Layer.provide(Layer.succeed(Core.UserAgent, userAgent))),
+    );
+    expect(sent).toEqual({ client: userAgent, dumps: Core.USER_AGENT });
+  });
+
   it("fails once resumes are exhausted", async () => {
     const { layer } = stubFetch(
       () =>

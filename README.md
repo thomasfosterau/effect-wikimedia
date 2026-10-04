@@ -35,11 +35,13 @@ import * as Layer from "effect/Layer";
 const userAgent = "my-bot/1.2 (https://example.org/my-bot; bot@example.org) effect-wikimedia";
 
 const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
-  Effect.provide(Core.wikimediaLayer.pipe(Layer.provide(Layer.succeed(Core.UserAgent, userAgent)))),
+  Effect.provide(
+    Core.wikimediaLayer.pipe(Layer.provideMerge(Layer.succeed(Core.UserAgent, userAgent))),
+  ),
 );
 ```
 
-`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it when the stream runs, or takes a `userAgent` option that wins over it. `Effect.provideService(Core.UserAgent, userAgent)` covers both only when it sits outside the `Effect.provide` that builds the layer. Applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer, it reaches `Dumps.fromHttpRange` but not the already-built client, which keeps the default. Providing it to the layer, as above, avoids the split.
+`Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it from the program's context when the stream runs, or takes a `userAgent` option that wins over it. Merging the reference into the layer with `Layer.provideMerge`, as above, reaches both (`Dumps.fromHttpRange` also needs an `HttpClient`, such as `FetchHttpClient.layer`, which `Core.wikimediaLayer` doesn't expose). So does `Effect.provideService(Core.UserAgent, userAgent)` placed outside the `Effect.provide` that builds the layer. `Layer.provide` reaches the client only. A `provideService` the layer build doesn't see reaches the dump download only: one applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer.
 
 ## API
 

@@ -60,14 +60,16 @@ export const USER_AGENT = "effect-wikimedia (+https://github.com/thomasfosterau/
  * `"my-bot/1.2 (https://example.org/my-bot; bot@example.org) effect-wikimedia"`.
  * The value is sent verbatim.
  *
- * {@link WikimediaClient} reads it once, when its layer is built, so provide
- * it to that layer (`Layer.provide(Layer.succeed(Core.UserAgent, ua))`) or
- * outside the `Effect.provide` that builds it. A `provideService` that the
- * layer build doesn't see — one applied inside `Effect.provide(layer)`, or per
- * run on a `ManagedRuntime` made from the layer — leaves the client on the
- * default while `Dumps.fromHttpRange` picks it up; providing it to the layer
- * avoids that. `Dumps.fromHttpRange` reads it when the stream runs, unless
- * its own `userAgent` option is set.
+ * {@link WikimediaClient} reads it once, when its layer is built;
+ * `Dumps.fromHttpRange` reads it from the program's context when the stream
+ * runs, unless its own `userAgent` option is set. To reach both from one
+ * place, merge it into the layer
+ * (`Layer.provideMerge(Layer.succeed(Core.UserAgent, ua))`) or provide it
+ * outside the `Effect.provide` that builds the layer
+ * (`Effect.provideService(Core.UserAgent, ua)`). `Layer.provide` reaches the
+ * client only. A `provideService` the layer build doesn't see (one inside
+ * `Effect.provide(layer)`, or per run on a `ManagedRuntime` made from the
+ * layer) reaches the dump download only.
  */
 export const UserAgent: Context.Reference<string> = Context.Reference<string>(
   "effect-wikimedia/UserAgent",
@@ -474,7 +476,8 @@ export const wikimediaClientLayer: Layer.Layer<WikimediaClient, never, HttpClien
  * Production {@link WikimediaClient} layer, backed by the global `fetch` via
  * `FetchHttpClient`. Sends the {@link UserAgent} in context when the layer is
  * built; set yours with
- * `Core.wikimediaLayer.pipe(Layer.provide(Layer.succeed(Core.UserAgent, ua)))`.
+ * `Core.wikimediaLayer.pipe(Layer.provideMerge(Layer.succeed(Core.UserAgent, ua)))`
+ * (see {@link UserAgent} for which form reaches `Dumps.fromHttpRange` too).
  */
 export const wikimediaLayer: Layer.Layer<WikimediaClient> = wikimediaClientLayer.pipe(
   Layer.provide(FetchHttpClient.layer),
