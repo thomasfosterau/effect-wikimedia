@@ -44,7 +44,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } 
 // ── Identity & etiquette constants ──────────────────────────────────────
 
 /**
- * The default `User-Agent` sent when the caller sets none through
+ * The default `User-Agent` this package sets when the caller sets none through
  * {@link UserAgent}: it names this package and its repository, and no
  * consumer. Wikimedia's User-Agent policy
  * (https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to
