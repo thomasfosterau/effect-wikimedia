@@ -2,6 +2,11 @@
  * The **Commons** surface: Wikimedia Commons file info and stable
  * `Special:FilePath` URL construction.
  *
+ * `getFileInfo` requests are anonymous: `Core` sends every `/w/api.php` request with
+ * `origin=*`, so a browser page on another origin can read the response,
+ * and MediaWiki then ignores any session cookies or `Authorization` header
+ * (see {@link "./core".WikimediaRequest}).
+ *
  * Imports only {@link "./core"} — never `Action` or `Rest` — so a consumer
  * that imports only `Commons` from the package barrel never pulls those
  * modules' code into a bundle.

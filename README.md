@@ -23,7 +23,7 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 );
 ```
 
-Every `Action`, `Rest`, `Commons`, `Wikidata` and `Sparql` request goes through `Core.WikimediaClient`, which applies the UA policy and `maxlag` etiquette, and retries a `429`/`503`/in-body maxlag signal automatically. `Core.wikimediaLayer` is the production layer (over the platform `fetch`); in tests, provide `Core.wikimediaClientLayer` over a stubbed `HttpClient` instead.
+Every `Action`, `Rest`, `Commons`, `Wikidata` and `Sparql` request goes through `Core.WikimediaClient`, which applies the UA policy, the `maxlag` etiquette and the Action API's `origin=*` (see [Anonymous requests](#anonymous-requests)), and retries a `429`/`503`/in-body maxlag signal automatically. `Core.wikimediaLayer` is the production layer (over the platform `fetch`); in tests, provide `Core.wikimediaClientLayer` over a stubbed `HttpClient` instead.
 
 ### User-Agent
 
@@ -45,9 +45,18 @@ In a browser, the browser decides. The Fetch standard lets a page set `User-Agen
 
 `Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it from the program's context when the stream runs, or takes a `userAgent` option that wins over it. Merging the reference into the layer with `Layer.provideMerge`, as above, reaches both (`Dumps.fromHttpRange` also needs an `HttpClient`, such as `FetchHttpClient.layer`, which `Core.wikimediaLayer` doesn't expose). So does `Effect.provideService(Core.UserAgent, userAgent)` placed outside the `Effect.provide` that builds the layer. `Layer.provide` reaches the client only. A `provideService` the layer build doesn't see reaches the dump download only: one applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer.
 
+### Anonymous requests
+
+Every Action API (`/w/api.php`) request carries `origin=*`, so a page on another origin can read the response: without an `origin` parameter MediaWiki sends no CORS headers on the Action API. `origin=*` is MediaWiki's anonymous mode, so `Action`, `Commons`, `Wikidata` and `Reconciliation` make anonymous requests. MediaWiki answers as a logged-out user whatever credentials arrive, which is all these read-only surfaces need, and their limits are already the anonymous ones. Two setups lose their credentials:
+
+- an on-wiki gadget or user script on the same origin that relies on the user's session cookies;
+- a caller that adds an `Authorization` header (an OAuth token, say) through `HttpClient.mapRequest`.
+
+`Rest` and `Sparql` requests don't carry the parameter, because the REST API and WDQS already send CORS headers without it. A request you build yourself for `Core.WikimediaClient` keeps any `origin` you put in its `params`, sent instead of `*`.
+
 ## API
 
-- **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), and the `maxlag` / retry-after etiquette every other module builds on.
+- **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), the Action API's `origin=*`, and the `maxlag` / retry-after etiquette every other module builds on.
 - **`Action`** — the Action API (`/w/api.php`): `getWikitext`, `getPageMetadata`, `search`, `parsePage` (sections/links/categories/templates).
 - **`Rest`** — the Core REST API / Parsoid surface (`/w/rest.php/v1/...`): `getPageMetadata`, `getRevisionMetadata`, `getParsedHtml`, `getRevisionHtml`.
 - **`Commons`** — `filePathUrl` (`Special:FilePath` URL construction, with optional thumbnail width) and `getFileInfo`.
