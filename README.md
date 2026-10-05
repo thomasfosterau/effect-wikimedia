@@ -52,7 +52,7 @@ Every Action API (`/w/api.php`) request carries `origin=*`, so a page on another
 - an on-wiki gadget or user script on the same origin that relies on the user's session cookies;
 - a caller that adds an `Authorization` header (an OAuth token, say) through `HttpClient.mapRequest`.
 
-`Rest` and `Sparql` requests don't carry the parameter, because the REST API and WDQS already send CORS headers without it. A request you build yourself for `Core.WikimediaClient` keeps any `origin` you put in its `params`, sent instead of `*`. If its `params` carry `crossorigin`, it gets no `origin` at all. `crossorigin` is MediaWiki's authenticated-CORS mode, which pairs with an `Authorization` header, and MediaWiki rejects a request that carries both parameters with a 403.
+`Rest` and `Sparql` requests don't carry the parameter, because the REST API and WDQS already send CORS headers without it. A request you build yourself for `Core.WikimediaClient` keeps any `origin` you put in its `params`, sent instead of `*`. If its `params` carry `crossorigin`, it gets no `origin=*`. `crossorigin` is MediaWiki's authenticated-CORS mode, which needs an `Authorization` header; without one, MediaWiki rejects the request. MediaWiki also returns a 403 for a request that carries both `origin` and `crossorigin`, so don't put both in `params`.
 
 ## API
 
