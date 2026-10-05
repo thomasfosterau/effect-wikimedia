@@ -15,6 +15,9 @@
  *   (a browser may drop it; see {@link UserAgent});
  * - the `maxlag` query parameter (bots/scripts are asked to send it so a
  *   lagged replica can decline cheaply rather than serving stale data);
+ * - `origin=*` on every Action API (`/w/api.php`) request, so a page on
+ *   another origin can read the response; MediaWiki then answers as an
+ *   anonymous user (see {@link WikimediaRequest});
  * - `Retry-After` / `maxlag`-error backoff — a lagged or rate-limited
  *   response is retried with the server-requested delay, capped, up to a
  *   bounded number of attempts, rather than either hammering the API or
@@ -41,7 +44,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } 
 // ── Identity & etiquette constants ──────────────────────────────────────
 
 /**
- * The default `User-Agent` sent when the caller sets none through
+ * The default `User-Agent` this package sets when the caller sets none through
  * {@link UserAgent}: it names this package and its repository, and no
  * consumer. Wikimedia's User-Agent policy
  * (https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to
@@ -91,6 +94,13 @@ export const UserAgent: Context.Reference<string> = Context.Reference<string>(
  * stale data — see {@link detectMaxlagSignal}.
  */
 export const DEFAULT_MAXLAG_SECONDS = 5;
+
+/**
+ * The Action API path every `/w/api.php` request uses; {@link buildUrl}
+ * keys the `origin=*` parameter on it, so a surface module that targets
+ * this path gets anonymous CORS without having to remember to ask for it.
+ */
+const ACTION_API_PATH = "/w/api.php";
 
 // ── Typed error family ───────────────────────────────────────────────────
 
@@ -304,13 +314,39 @@ export function withMaxlagRetry<A, R>(
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
 
-/** One request against a validated per-wiki host and a fixed API path. */
+/**
+ * One request against a validated per-wiki host and a fixed API path.
+ *
+ * A request whose `path` is exactly `"/w/api.php"` (the Action API) is sent
+ * with `origin=*` added to its query string. That is MediaWiki's anonymous
+ * CORS mode: without an `origin` parameter the Action API sends no
+ * `Access-Control-*` headers, so a browser page on another origin couldn't
+ * read the response. In exchange MediaWiki answers as an anonymous user
+ * whatever credentials arrive, and marks the response
+ * `MediaWiki-Login-Suppressed: true`. It ignores the session cookies a
+ * same-origin on-wiki gadget would send, and it ignores an `Authorization`
+ * header injected through `HttpClient.mapRequest`. Every Action API call
+ * the `Action`, `Commons`, `Wikidata` and `Reconciliation` surfaces make
+ * is therefore anonymous; their limits are already the anonymous ones.
+ * REST (`/w/rest.php`) and WDQS requests are left unchanged, since both
+ * send CORS headers without the parameter.
+ *
+ * An `origin` the caller puts in `params` is sent as given, in place of
+ * `*`, never alongside it.
+ */
 export interface WikimediaRequest {
   /** The wiki host, e.g. `"en.wikipedia.org"` — validated by {@link normaliseWikimediaHost}. */
   readonly host: string;
-  /** The fixed API path, e.g. `"/w/api.php"` or `"/w/rest.php/v1/page/Douglas_Adams"`. */
+  /**
+   * The fixed API path, e.g. `"/w/api.php"` or `"/w/rest.php/v1/page/Douglas_Adams"`;
+   * exactly `"/w/api.php"` adds `origin=*` to the query string.
+   */
   readonly path: string;
-  /** Query parameters; percent-encoded by `URLSearchParams`, never interpolated into the path. */
+  /**
+   * Query parameters; percent-encoded by `URLSearchParams`, never interpolated
+   * into the path. An `origin` here replaces the `origin=*` the Action API path
+   * otherwise gets.
+   */
   readonly params?: Record<string, string>;
   /**
    * Seconds to send as `maxlag`, or `null` to omit the parameter entirely
@@ -325,6 +361,10 @@ export interface WikimediaRequest {
  * `host` must already have passed {@link normaliseWikimediaHost} — this
  * function does not re-validate it, so every call site validates first and
  * fails with {@link InvalidRequest} before reaching here.
+ *
+ * Adds `origin=*` here, on the Action API path, rather than in each surface
+ * module, because every request passes through this one function: a future
+ * surface that calls `/w/api.php` can't forget it.
  */
 function buildUrl(request: WikimediaRequest): string {
   const url = new URL(`https://${request.host}${request.path}`);
@@ -332,6 +372,7 @@ function buildUrl(request: WikimediaRequest): string {
   const maxlag =
     request.maxlagSeconds === undefined ? DEFAULT_MAXLAG_SECONDS : request.maxlagSeconds;
   if (maxlag !== null) search.set("maxlag", String(maxlag));
+  if (request.path === ACTION_API_PATH && !search.has("origin")) search.set("origin", "*");
   url.search = search.toString();
   return url.toString();
 }
@@ -347,7 +388,9 @@ function describeHttpError(error: HttpClientError.HttpClientError): string {
  * `Commons`, `Wikidata`, `Sparql`) depends on. `getJson` decodes a JSON body
  * through a caller-supplied lenient schema; `getText` reads a raw text body (the REST/Parsoid HTML
  * endpoints return `text/html`, not JSON). Both apply the UA policy, the
- * `maxlag` parameter, and {@link withMaxlagRetry} automatically — callers
+ * `maxlag` parameter, the Action API's `origin=*` (which makes those
+ * requests anonymous; see {@link WikimediaRequest}), and
+ * {@link withMaxlagRetry} automatically — callers
  * never see a transient maxlag/rate-limit signal unless retries exhaust.
  */
 export class WikimediaClient extends Context.Service<

@@ -3,6 +3,11 @@
  * the `wbgetentities` (batched entity fetch) and `wbsearchentities` (label
  * search) endpoints of the Wikibase Action API (`/w/api.php`).
  *
+ * Requests are anonymous: `Core` sends every `/w/api.php` request with
+ * `origin=*`, so a browser page on another origin can read the response,
+ * and MediaWiki then ignores any session cookies or `Authorization` header
+ * (see {@link "./core".WikimediaRequest}).
+ *
  * Rather than narrowing only the handful of fields reconciliation needs,
  * this module exposes the honest thing: a
  * discriminated `DataValue` union covering every Wikibase datavalue kind

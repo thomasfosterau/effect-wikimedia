@@ -3,6 +3,11 @@
  * endpoints (`/w/api.php`) — page wikitext, page metadata, search, and the
  * `parse` endpoint's typed sections / links / categories / templates.
  *
+ * Requests are anonymous: `Core` sends every `/w/api.php` request with
+ * `origin=*`, so a browser page on another origin can read the response,
+ * and MediaWiki then ignores any session cookies or `Authorization` header
+ * (see {@link "./core".WikimediaRequest}).
+ *
  * Imports only {@link "./core"} — never `Rest` or `Commons` — so a consumer
  * that imports only `Action` from the package barrel never pulls those
  * modules' code into a bundle.
