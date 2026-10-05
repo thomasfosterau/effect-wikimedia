@@ -332,20 +332,22 @@ export function withMaxlagRetry<A, R>(
  * send CORS headers without the parameter.
  *
  * An `origin` the caller puts in `params` is sent as given, in place of
- * `*`, never alongside it.
+ * `*`, never alongside it. A `crossorigin` there (MediaWiki's authenticated
+ * CORS mode) suppresses `origin=*` too, since MediaWiki rejects a request
+ * carrying both with HTTP 403.
  */
 export interface WikimediaRequest {
   /** The wiki host, e.g. `"en.wikipedia.org"` — validated by {@link normaliseWikimediaHost}. */
   readonly host: string;
   /**
    * The fixed API path, e.g. `"/w/api.php"` or `"/w/rest.php/v1/page/Douglas_Adams"`;
-   * exactly `"/w/api.php"` adds `origin=*` to the query string.
+   * one that resolves to `"/w/api.php"` adds `origin=*` to the query string.
    */
   readonly path: string;
   /**
    * Query parameters; percent-encoded by `URLSearchParams`, never interpolated
    * into the path. An `origin` here replaces the `origin=*` the Action API path
-   * otherwise gets.
+   * otherwise gets, and a `crossorigin` here suppresses it.
    */
   readonly params?: Record<string, string>;
   /**
@@ -372,7 +374,9 @@ function buildUrl(request: WikimediaRequest): string {
   const maxlag =
     request.maxlagSeconds === undefined ? DEFAULT_MAXLAG_SECONDS : request.maxlagSeconds;
   if (maxlag !== null) search.set("maxlag", String(maxlag));
-  if (request.path === ACTION_API_PATH && !search.has("origin")) search.set("origin", "*");
+  if (url.pathname === ACTION_API_PATH && !search.has("origin") && !search.has("crossorigin")) {
+    search.set("origin", "*");
+  }
   url.search = search.toString();
   return url.toString();
 }

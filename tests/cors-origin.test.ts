@@ -111,6 +111,33 @@ describe("Action API requests (/w/api.php)", () => {
     expect(urls).toHaveLength(1);
     expect(urls[0]?.searchParams.getAll("origin")).toEqual(["https://example.org"]);
   });
+
+  it("send no origin alongside a caller-supplied crossorigin, which MediaWiki would reject", async () => {
+    const urls = await sentUrls(
+      Effect.gen(function* () {
+        const client = yield* Core.WikimediaClient;
+        yield* client.getText({
+          host: "en.wikipedia.org",
+          path: "/w/api.php",
+          params: { action: "query", crossorigin: "1" },
+        });
+      }),
+    );
+    expect(urls).toHaveLength(1);
+    expect(urls[0]?.searchParams.has("origin")).toBe(false);
+    expect(urls[0]?.searchParams.get("crossorigin")).toBe("1");
+  });
+
+  it("send origin=* on an Action API path spelled with a dot segment", async () => {
+    const urls = await sentUrls(
+      Effect.gen(function* () {
+        const client = yield* Core.WikimediaClient;
+        yield* client.getText({ host: "en.wikipedia.org", path: "/w/./api.php", params: {} });
+      }),
+    );
+    expect(urls).toHaveLength(1);
+    expect(urls[0]?.searchParams.getAll("origin")).toEqual(["*"]);
+  });
 });
 
 describe("REST and WDQS requests", () => {
