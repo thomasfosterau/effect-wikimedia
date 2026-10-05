@@ -317,7 +317,7 @@ export function withMaxlagRetry<A, R>(
 /**
  * One request against a validated per-wiki host and a fixed API path.
  *
- * A request whose `path` is exactly `"/w/api.php"` (the Action API) is sent
+ * A request whose `path` resolves to `"/w/api.php"` (the Action API) is sent
  * with `origin=*` added to its query string. That is MediaWiki's anonymous
  * CORS mode: without an `origin` parameter the Action API sends no
  * `Access-Control-*` headers, so a browser page on another origin couldn't
