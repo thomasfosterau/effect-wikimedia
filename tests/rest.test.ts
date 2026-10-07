@@ -50,6 +50,24 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, Core.WikimediaClient>,
 ) => runTest(toEffect(layer, effect));
 
+/**
+ * MediaWiki's relative-path title forms (`TitleParser`'s
+ * `title-invalid-relative`). Unrejected, `.` and `..` are removed by
+ * `new URL`'s dot-segment normalisation: `getPageMetadata("..")` requests
+ * `/w/rest.php/v1/` and `getParsedHtml(".")` requests `/w/rest.php/v1/page/html`.
+ */
+const RELATIVE_TITLES = [
+  ".",
+  "..",
+  " .. ",
+  "./Foo",
+  "../Foo",
+  "Foo/./Bar",
+  "Foo/../Bar",
+  "Foo/.",
+  "Foo/..",
+];
+
 describe("Rest.getPageMetadata", () => {
   it("extracts page identity metadata", async () => {
     const { urls, layer } = stubRouter({
@@ -97,6 +115,32 @@ describe("Rest.getPageMetadata", () => {
       Core.InvalidRequest,
     );
     expect(urls).toEqual([]);
+  });
+
+  it.each(RELATIVE_TITLES)(
+    "rejects the relative-path title %j before any request",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
+  it("requests a title that merely contains dots at its own path", async () => {
+    const { urls, layer } = stubRouter({});
+    for (const title of ["A.B", "..."]) {
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", title)),
+        Core.RequestFailed,
+      );
+    }
+    expect(urls.map((url) => new URL(url).pathname)).toEqual([
+      "/w/rest.php/v1/page/A.B",
+      "/w/rest.php/v1/page/...",
+    ]);
   });
 });
 
@@ -161,6 +205,18 @@ describe("Rest.getParsedHtml", () => {
       Core.RequestFailed,
     );
   });
+
+  it.each(RELATIVE_TITLES)(
+    "rejects the relative-path title %j before any request",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getParsedHtml("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
 });
 
 describe("Rest.getRevisionHtml", () => {

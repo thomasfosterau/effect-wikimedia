@@ -176,14 +176,45 @@ export function normaliseWikimediaHost(raw: string): string | null {
 export const MAX_TITLE_LENGTH = 512;
 
 /**
+ * Whether `title` is one of the relative-path forms MediaWiki's
+ * `TitleParser` rejects (`title-invalid-relative`): exactly `.` or `..`, a
+ * leading `./` or `../`, a `/./` or `/../` anywhere, or a trailing `/.` or
+ * `/..`. `encodeURIComponent` leaves dots alone, so a bare `.` or `..` path
+ * segment would otherwise be removed by `new URL`'s dot-segment
+ * normalisation and the request would reach a different path.
+ */
+function isRelativePathTitle(title: string): boolean {
+  return (
+    title === "." ||
+    title === ".." ||
+    title.startsWith("./") ||
+    title.startsWith("../") ||
+    title.includes("/./") ||
+    title.includes("/../") ||
+    title.endsWith("/.") ||
+    title.endsWith("/..")
+  );
+}
+
+/**
  * Validates and canonicalises an untrusted MediaWiki title (a page title or
  * a `File:`-namespaced filename): trims, collapses internal whitespace to a
  * single underscore (MediaWiki's canonical title form), bounds length, and
- * rejects control characters and the `|`/`#` that could inject an extra
- * query clause or a fragment. The result is still placed through
- * `encodeURIComponent` wherever it lands (a query parameter or a REST path
- * segment) — this validation is the belt to that braces. Returns `null` for
- * unusable input.
+ * rejects control characters, the `|`/`#` that could inject an extra
+ * query clause or a fragment, and MediaWiki's relative-path titles (`.`,
+ * `..`, a leading `./` or `../`, a `/./` or `/../` anywhere, a trailing `/.`
+ * or `/..`), which `new URL` would otherwise resolve into a different
+ * path. The result is still placed through `encodeURIComponent` wherever it
+ * lands (a query parameter or a REST path segment) — this validation is the
+ * belt to that braces. Returns `null` for unusable input.
+ *
+ * This is a string-level check, not full MediaWiki title parsing: it knows
+ * no wiki's namespaces, so it applies the relative-path rule to the whole
+ * string where MediaWiki applies it after removing a namespace prefix
+ * (MediaWiki rejects `Talk:../x`; this accepts it, and as `:` encodes to
+ * `%3A` the path is unchanged). A caller that strips a prefix itself, as
+ * `Commons` strips `File:`, passes the stripped title. Titles that merely
+ * contain dots (`Mr._Smith`, `A.B`, `...`) stay valid.
  */
 export function normaliseTitle(raw: string): string | null {
   if (typeof raw !== "string") return null;
@@ -194,12 +225,15 @@ export function normaliseTitle(raw: string): string | null {
     if (code < 0x20 || code === 0x7f) return null;
   }
   if (/[|#]/.test(collapsed)) return null;
+  if (isRelativePathTitle(collapsed)) return null;
   return collapsed;
 }
 
 /**
  * Validates a title/filename and fails {@link InvalidRequest} for anything
- * unusable — the `yield*`-able form of {@link normaliseTitle} every surface
+ * {@link normaliseTitle} rejects (blank, too long, control characters, `|`
+ * or `#`, or a relative-path title such as `.` or `..`), before any request
+ * is sent — the `yield*`-able form of {@link normaliseTitle} every surface
  * module's request-building functions start with. `kind` names the field in
  * the resulting error (`"title"` for a page title, `"filename"` for a
  * Commons file).

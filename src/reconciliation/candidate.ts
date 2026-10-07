@@ -12,6 +12,8 @@
  * @module reconciliation/candidate
  */
 
+import { normaliseTitle } from "../core.ts";
+
 /**
  * A provider-neutral Wikidata candidate match. Every string field is
  * already trimmed and length-bounded by the normalisers, so consumers
@@ -255,10 +257,13 @@ export function normaliseTimeValue(raw: unknown): string | null {
 
 /**
  * Validates a Commons media filename (the value of a P18 image claim) and
- * builds its stable `Special:FilePath` URL. Rejects control characters and
- * the `|`/`#`/`?` that could break out of the path segment; the filename is
- * percent-encoded into the fixed Commons host. Returns `null` for unusable
- * input. The returned `{ externalId, externalIri }` are both trusted.
+ * builds its stable `Special:FilePath` URL. Rejects control characters, the
+ * `|`/`#`/`?` that could break out of the path segment, and MediaWiki's
+ * relative-path titles (`.`, `..`, a leading `./` or `../`, a `/./` or
+ * `/../` anywhere, a trailing `/.` or `/..`), which `new URL` would resolve
+ * into a different path; the filename is percent-encoded into the fixed
+ * Commons host. Returns `null` for unusable input, as `Commons.filePathUrl`
+ * does. The returned `{ externalId, externalIri }` are both trusted.
  */
 export function normaliseCommonsImage(
   raw: unknown,
@@ -266,11 +271,11 @@ export function normaliseCommonsImage(
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0 || trimmed.length > 256) return null;
-  for (let i = 0; i < trimmed.length; i++) {
-    const code = trimmed.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return null;
-  }
-  if (/[|#?]/.test(trimmed)) return null;
+  // `normaliseTitle` rejects control characters, `|`/`#` and the
+  // relative-path forms; its whitespace-collapsed result is discarded so
+  // `externalId` keeps the claim's own spelling.
+  if (normaliseTitle(trimmed) === null) return null;
+  if (/\?/.test(trimmed)) return null;
   const externalIri = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`;
   return { externalId: trimmed, externalIri };
 }

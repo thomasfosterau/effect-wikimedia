@@ -126,7 +126,12 @@ export function normaliseRevisionMetadata(
   };
 }
 
-/** Fetches a page's REST-surface metadata via `GET /w/rest.php/v1/page/{title}`. */
+/**
+ * Fetches a page's REST-surface metadata via `GET /w/rest.php/v1/page/{title}`.
+ * Fails with `InvalidRequest`, before any request is sent, for a title
+ * `normaliseTitle` rejects, including the relative-path titles `.` and `..`
+ * that would otherwise reach a different REST path.
+ */
 export const getPageMetadata = Effect.fn("Rest.getPageMetadata")(function* (
   host: string,
   title: string,
@@ -160,7 +165,12 @@ export const getRevisionMetadata = Effect.fn("Rest.getRevisionMetadata")(functio
 
 // ── Parsed HTML (Parsoid, text/html) ─────────────────────────────────────
 
-/** Fetches a title's current parsed HTML via `GET /w/rest.php/v1/page/{title}/html`. */
+/**
+ * Fetches a title's current parsed HTML via `GET /w/rest.php/v1/page/{title}/html`.
+ * Fails with `InvalidRequest`, before any request is sent, for a title
+ * `normaliseTitle` rejects, including the relative-path titles `.` and `..`
+ * that would otherwise reach a different REST path.
+ */
 export const getParsedHtml = Effect.fn("Rest.getParsedHtml")(function* (
   host: string,
   title: string,
