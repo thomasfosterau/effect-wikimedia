@@ -271,11 +271,17 @@ export function normaliseCommonsImage(
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0 || trimmed.length > 256) return null;
-  // `normaliseTitle` rejects control characters, `|`/`#` and the
-  // relative-path forms; its whitespace-collapsed result is discarded so
-  // `externalId` keeps the claim's own spelling.
+  // Checked on the raw string: `normaliseTitle` collapses whitespace
+  // (tab, newline, CR, ...) to `_` before its own control-character check,
+  // so it can't be relied on to reject them here.
+  for (let i = 0; i < trimmed.length; i++) {
+    const code = trimmed.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return null;
+  }
+  if (/[|#?]/.test(trimmed)) return null;
+  // `normaliseTitle` adds the relative-path forms; its whitespace-collapsed
+  // result is discarded so `externalId` keeps the claim's own spelling.
   if (normaliseTitle(trimmed) === null) return null;
-  if (/\?/.test(trimmed)) return null;
   const externalIri = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`;
   return { externalId: trimmed, externalIri };
 }

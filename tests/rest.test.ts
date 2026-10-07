@@ -136,10 +136,16 @@ describe("Rest.getPageMetadata", () => {
         toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", title)),
         Core.RequestFailed,
       );
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getParsedHtml("en.wikipedia.org", title)),
+        Core.RequestFailed,
+      );
     }
     expect(urls.map((url) => new URL(url).pathname)).toEqual([
       "/w/rest.php/v1/page/A.B",
+      "/w/rest.php/v1/page/A.B/html",
       "/w/rest.php/v1/page/...",
+      "/w/rest.php/v1/page/.../html",
     ]);
   });
 });
