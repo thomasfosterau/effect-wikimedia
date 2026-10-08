@@ -249,10 +249,16 @@ const externalIdAuthority = (
  * percent-encoded path segment — never an arbitrary host or path from the
  * untrusted response. Each `iri` returns `null` for a value outside the
  * authority's identifier format, which also refuses `.`, `..` and `/`.
- * Each format is the property's Wikidata "format as a regular expression"
- * (P1793) constraint, except P244, which uses the Library of Congress's
- * normalised LCCN form (a 1-3 letter prefix, then an 8- or 10-digit
- * year and serial number; https://www.loc.gov/marc/lccn-namespace.html).
+ * Each format is anchored at both ends and is at least as permissive as
+ * the property's Wikidata "format as a regular expression" (P1793)
+ * constraint: VIAF and BnF follow it, ISNI, ORCID and GND accept a wider
+ * set of shapes, and P244 (LCCN) uses the Library of Congress's normalised
+ * LCCN form (https://www.loc.gov/marc/lccn-namespace.html) — an 8- or
+ * 10-digit year and serial number after a prefix of up to 3 letters — with
+ * this package's own requirement that the prefix have at least one letter,
+ * since a name-authority LCCN always does. Every value a format accepts is
+ * digits, ASCII letters and `-` (ISNI's spaces are removed first), so the
+ * percent-encoding is defence in depth that changes no accepted value.
  * No template needs a `/` inside the value. P213 (ISNI) accepts
  * Wikidata's spaced form (`0000 0001 2103 2683`) and the compact form; its
  * IRI always uses the compact form.
