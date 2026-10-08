@@ -43,7 +43,9 @@ export interface FilePathOptions {
  * accepted and normalised away) and is validated by {@link normaliseTitle}
  * before being percent-encoded into the fixed `commons.wikimedia.org` host,
  * so a hostile filename can never redirect the URL elsewhere. Returns
- * `null` for unusable input, matching wikidata's `normaliseCommonsImage`.
+ * `null` for unusable input, matching `Reconciliation.normaliseCommonsImage`,
+ * including a relative-path filename such as `..` (checked after the
+ * `File:` prefix is removed) that would otherwise resolve to another path.
  *
  * `Special:FilePath` redirects to the actual media URL, and — given
  * `?width=`, an integer bounded by {@link MAX_THUMBNAIL_WIDTH} — to a
@@ -164,7 +166,10 @@ function normaliseFileInfo(response: FileInfoResponse, title: string): FileInfo 
  * Action API's `imageinfo` prop. `filename` accepts a bare filename or a
  * `File:`-prefixed title; `host` is typically `"commons.wikimedia.org"` but
  * any validated Wikimedia host works (files can be local to a wiki).
- * Returns `null` when no such file exists upstream.
+ * Returns `null` when no such file exists upstream. Fails with
+ * `InvalidRequest`, before any request is sent, for an invalid host or a
+ * filename `normaliseTitle` rejects once the `File:` prefix is removed
+ * (including the relative-path forms `.` and `..`).
  */
 export const getFileInfo = Effect.fn("Commons.getFileInfo")(function* (
   host: string,

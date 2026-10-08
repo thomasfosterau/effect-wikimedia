@@ -114,6 +114,18 @@ describe("Action.getWikitext", () => {
     expect(urls).toEqual([]);
   });
 
+  it.each([".", "..", "../Foo", "Foo/.."])(
+    "rejects the relative-path title %j before any request",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.getWikitext("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
   it("rejects an invalid host before any request", async () => {
     const { urls, layer } = stubRouter({});
     await expectFailureInstanceOf(

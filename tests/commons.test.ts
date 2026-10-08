@@ -44,6 +44,29 @@ describe("filePathUrl", () => {
     expect(Commons.filePathUrl("Foo#Bar.jpg")).toBeNull();
   });
 
+  it("rejects a relative-path filename, with or without the File: prefix", () => {
+    for (const filename of [
+      ".",
+      "..",
+      "File:..",
+      "file:.",
+      "./Foo.jpg",
+      "Foo/../Bar.jpg",
+      "Foo/..",
+    ]) {
+      expect(Commons.filePathUrl(filename), filename).toBeNull();
+    }
+  });
+
+  it("keeps a filename that merely contains dots", () => {
+    expect(Commons.filePathUrl("Mr. Smith.jpg")).toBe(
+      "https://commons.wikimedia.org/wiki/Special:FilePath/Mr._Smith.jpg",
+    );
+    expect(Commons.filePathUrl("...")).toBe(
+      "https://commons.wikimedia.org/wiki/Special:FilePath/...",
+    );
+  });
+
   it("rejects blank input", () => {
     expect(Commons.filePathUrl("")).toBeNull();
     expect(Commons.filePathUrl("   ")).toBeNull();
@@ -177,4 +200,16 @@ describe("Commons.getFileInfo", () => {
     );
     expect(urls).toEqual([]);
   });
+
+  it.each([".", "..", "File:..", "../Foo.jpg"])(
+    "rejects the relative-path filename %j before any request",
+    async (filename) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Commons.getFileInfo("commons.wikimedia.org", filename)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
 });
