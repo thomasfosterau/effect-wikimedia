@@ -126,6 +126,28 @@ describe("Action.getWikitext", () => {
     },
   );
 
+  // Unrejected, `URLSearchParams` replaces the surrogate with U+FFFD and the
+  // request asks for a different title.
+  it.each(["Foo\uD800Bar", "Foo\uDC00Bar"])(
+    "rejects the lone-surrogate title %j before any request, from every title-taking function",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.getWikitext("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.getPageMetadata("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.parsePage("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
   it("rejects an invalid host before any request", async () => {
     const { urls, layer } = stubRouter({});
     await expectFailureInstanceOf(

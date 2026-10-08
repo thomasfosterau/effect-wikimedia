@@ -68,6 +68,13 @@ const RELATIVE_TITLES = [
   "Foo/..",
 ];
 
+/**
+ * Titles carrying a lone UTF-16 surrogate. Unrejected, `encodeURIComponent`
+ * throws `URIError` while the REST path is built, which surfaces as a defect
+ * rather than the typed `InvalidRequest`.
+ */
+const LONE_SURROGATE_TITLES = ["Foo\uD800Bar", "Foo\uDC00Bar", "\uD83D", "\uDE00\uD83D"];
+
 describe("Rest.getPageMetadata", () => {
   it("extracts page identity metadata", async () => {
     const { urls, layer } = stubRouter({
@@ -148,6 +155,34 @@ describe("Rest.getPageMetadata", () => {
       "/w/rest.php/v1/page/.../html",
     ]);
   });
+
+  it.each(LONE_SURROGATE_TITLES)(
+    "rejects the lone-surrogate title %j before any request",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
+  it("requests a title with a valid surrogate pair at its percent-encoded path", async () => {
+    const { urls, layer } = stubRouter({});
+    await expectFailureInstanceOf(
+      toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", "Smile \u{1F600}")),
+      Core.RequestFailed,
+    );
+    await expectFailureInstanceOf(
+      toEffect(layer, Rest.getParsedHtml("en.wikipedia.org", "Smile \u{1F600}")),
+      Core.RequestFailed,
+    );
+    expect(urls.map((url) => new URL(url).pathname)).toEqual([
+      "/w/rest.php/v1/page/Smile_%F0%9F%98%80",
+      "/w/rest.php/v1/page/Smile_%F0%9F%98%80/html",
+    ]);
+  });
 });
 
 describe("Rest.getRevisionMetadata", () => {
@@ -214,6 +249,18 @@ describe("Rest.getParsedHtml", () => {
 
   it.each(RELATIVE_TITLES)(
     "rejects the relative-path title %j before any request",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getParsedHtml("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
+  it.each(LONE_SURROGATE_TITLES)(
+    "rejects the lone-surrogate title %j before any request",
     async (title) => {
       const { urls, layer } = stubRouter({});
       await expectFailureInstanceOf(

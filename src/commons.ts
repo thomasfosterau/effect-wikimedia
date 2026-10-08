@@ -44,7 +44,8 @@ export interface FilePathOptions {
  * before being percent-encoded into the fixed `commons.wikimedia.org` host,
  * so a hostile filename can never redirect the URL elsewhere. Returns
  * `null` for unusable input, matching `Reconciliation.normaliseCommonsImage`,
- * including a relative-path filename such as `..` (checked after the
+ * including a lone UTF-16 surrogate (which would make `encodeURIComponent`
+ * throw) and a relative-path filename such as `..` (checked after the
  * `File:` prefix is removed) that would otherwise resolve to another path.
  *
  * `Special:FilePath` redirects to the actual media URL, and — given
@@ -169,7 +170,8 @@ function normaliseFileInfo(response: FileInfoResponse, title: string): FileInfo 
  * Returns `null` when no such file exists upstream. Fails with
  * `InvalidRequest`, before any request is sent, for an invalid host or a
  * filename `normaliseTitle` rejects once the `File:` prefix is removed
- * (including the relative-path forms `.` and `..`).
+ * (including a lone UTF-16 surrogate and the relative-path forms `.` and
+ * `..`).
  */
 export const getFileInfo = Effect.fn("Commons.getFileInfo")(function* (
   host: string,

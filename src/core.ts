@@ -200,11 +200,12 @@ function isRelativePathTitle(title: string): boolean {
  * Validates and canonicalises an untrusted MediaWiki title (a page title or
  * a `File:`-namespaced filename): trims, collapses internal whitespace to a
  * single underscore (MediaWiki's canonical title form), bounds length, and
- * rejects control characters, the `|`/`#` that could inject an extra
- * query clause or a fragment, and MediaWiki's relative-path titles (`.`,
- * `..`, a leading `./` or `../`, a `/./` or `/../` anywhere, a trailing `/.`
- * or `/..`), which `new URL` would otherwise resolve into a different
- * path. The result is still placed through `encodeURIComponent` wherever it
+ * rejects control characters, a lone UTF-16 surrogate (which makes
+ * `encodeURIComponent` throw `URIError`; a valid surrogate pair such as an
+ * emoji is kept), the `|`/`#` that could inject an extra query clause or a
+ * fragment, and MediaWiki's relative-path titles (`.`, `..`, a leading `./`
+ * or `../`, a `/./` or `/../` anywhere, a trailing `/.` or `/..`), which
+ * `new URL` would otherwise resolve into a different path. The result is still placed through `encodeURIComponent` wherever it
  * lands (a query parameter or a REST path segment) — this validation is the
  * belt to that braces. Returns `null` for unusable input.
  *
@@ -220,9 +221,21 @@ export function normaliseTitle(raw: string): string | null {
   if (typeof raw !== "string") return null;
   const collapsed = raw.trim().replace(/\s+/g, "_");
   if (collapsed.length === 0 || collapsed.length > MAX_TITLE_LENGTH) return null;
+  // One pass over UTF-16 code units: control characters, and any surrogate
+  // that isn't half of a high-low pair (it would make `encodeURIComponent`
+  // throw). A loop rather than `isWellFormed` (ES2024) or a lookbehind regex
+  // (a parse-time SyntaxError before Safari 16.4), so the module loads on any
+  // runtime the package supports.
   for (let i = 0; i < collapsed.length; i++) {
     const code = collapsed.charCodeAt(i);
     if (code < 0x20 || code === 0x7f) return null;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = collapsed.charCodeAt(i + 1); // NaN past the end
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return null;
+      i++; // skip the low half of a valid pair
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return null;
+    }
   }
   if (/[|#]/.test(collapsed)) return null;
   if (isRelativePathTitle(collapsed)) return null;
@@ -231,9 +244,9 @@ export function normaliseTitle(raw: string): string | null {
 
 /**
  * Validates a title/filename and fails {@link InvalidRequest} for anything
- * {@link normaliseTitle} rejects (blank, too long, control characters, `|`
- * or `#`, or a relative-path title such as `.` or `..`), before any request
- * is sent — the `yield*`-able form of {@link normaliseTitle} every surface
+ * {@link normaliseTitle} rejects (blank, too long, control characters, a
+ * lone UTF-16 surrogate, `|` or `#`, or a relative-path title such as `.` or
+ * `..`), before any request is sent — the `yield*`-able form of {@link normaliseTitle} every surface
  * module's request-building functions start with. `kind` names the field in
  * the resulting error (`"title"` for a page title, `"filename"` for a
  * Commons file).
