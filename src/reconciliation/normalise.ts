@@ -133,9 +133,10 @@ function statementValues(
  * `sameAs` facts — an `exact` mapping per allowlisted external-id claim
  * ({@link EXTERNAL_ID_AUTHORITIES}). Only a typed `external-id` datavalue
  * is read (the property's registered Wikibase datatype); its value is
- * re-validated by {@link normaliseExternalIdValue} and slotted into the
- * authority's fixed IRI template, so a hostile value never reaches a
- * stored IRI.
+ * re-validated by {@link normaliseExternalIdValue}, then checked against
+ * the authority's identifier format and percent-encoded into its fixed IRI
+ * template, so a hostile value never reaches a stored IRI. A value outside
+ * the format yields no fact.
  */
 function sameAsFacts(item: Wikidata.WikidataItem): WikidataFact[] {
   const out: WikidataFact[] = [];
@@ -145,10 +146,12 @@ function sameAsFacts(item: Wikidata.WikidataItem): WikidataFact[] {
       if (value._tag !== "external-id") continue;
       const validated = normaliseExternalIdValue(value.value);
       if (validated === null) continue;
+      const externalIri = scheme.iri(validated);
+      if (externalIri === null) continue;
       out.push({
         authority: scheme.authority,
         externalId: validated,
-        externalIri: scheme.iri(validated),
+        externalIri,
         mappingKind: "exact",
         notes: null,
       });

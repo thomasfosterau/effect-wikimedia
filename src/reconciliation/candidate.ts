@@ -206,24 +206,89 @@ export function wikidataEntityIri(id: string): string {
 }
 
 /**
+ * One curated external-identifier authority: its local name and the
+ * builder that turns a Wikidata claim value into the authority's IRI.
+ */
+export interface ExternalIdAuthority {
+  /** Local authority name stored as {@link WikidataFact.authority}, e.g. `"viaf"`. */
+  readonly authority: string;
+  /**
+   * Builds the authority's IRI for an identifier value, or returns `null`
+   * when the value doesn't match the authority's identifier format. The
+   * value is percent-encoded into a single path segment of a fixed host,
+   * so the result never points outside that authority's identifier path.
+   */
+  readonly iri: (value: string) => string | null;
+}
+
+/**
+ * Builds an {@link ExternalIdAuthority} whose `iri` checks `format` (an
+ * anchored pattern for the whole value) before it percent-encodes the
+ * value, after `canonical` has rewritten it, into `template`.
+ */
+const externalIdAuthority = (
+  authority: string,
+  format: RegExp,
+  template: (encoded: string) => string,
+  canonical: (value: string) => string = (value) => value,
+): ExternalIdAuthority => ({
+  authority,
+  iri: (value) =>
+    typeof value === "string" && format.test(value)
+      ? template(encodeURIComponent(canonical(value)))
+      : null,
+});
+
+/**
  * Curated allowlist of Wikidata external-identifier properties we lift as
  * `sameAs` links — property id → the local authority name and the IRI
- * template that turns a validated identifier value into a resolvable URL.
+ * builder that turns an identifier value into a resolvable URL.
  *
  * Deliberately a closed set: only well-known authorities over known hosts,
- * so an enriched `sameAs` IRI is always built from a fixed template plus a
- * `normaliseExternalIdValue`-checked value — never an arbitrary host from
- * the untrusted response. New authorities are a one-line addition.
+ * so an enriched `sameAs` IRI is always a fixed template plus one
+ * percent-encoded path segment — never an arbitrary host or path from the
+ * untrusted response. Each `iri` returns `null` for a value outside the
+ * authority's identifier format, which also refuses `.`, `..` and `/`.
+ * Each format is the property's Wikidata "format as a regular expression"
+ * (P1793) constraint, except P244, which uses the Library of Congress's
+ * normalised LCCN form (a 1-3 letter prefix, then an 8- or 10-digit
+ * year and serial number; https://www.loc.gov/marc/lccn-namespace.html).
+ * No template needs a `/` inside the value. P213 (ISNI) accepts
+ * Wikidata's spaced form (`0000 0001 2103 2683`) and the compact form; its
+ * IRI always uses the compact form.
  */
-export const EXTERNAL_ID_AUTHORITIES: Readonly<
-  Record<string, { readonly authority: string; readonly iri: (value: string) => string }>
-> = {
-  P214: { authority: "viaf", iri: (v) => `https://viaf.org/viaf/${v}` },
-  P213: { authority: "isni", iri: (v) => `https://isni.org/isni/${v}` },
-  P496: { authority: "orcid", iri: (v) => `https://orcid.org/${v}` },
-  P244: { authority: "lccn", iri: (v) => `https://id.loc.gov/authorities/names/${v}` },
-  P227: { authority: "gnd", iri: (v) => `https://d-nb.info/gnd/${v}` },
-  P268: { authority: "bnf", iri: (v) => `https://catalogue.bnf.fr/ark:/12148/cb${v}` },
+export const EXTERNAL_ID_AUTHORITIES: Readonly<Record<string, ExternalIdAuthority>> = {
+  P214: externalIdAuthority(
+    "viaf",
+    /^[1-9]\d(?:\d{0,7}|\d{17,20})$/,
+    (v) => `https://viaf.org/viaf/${v}`,
+  ),
+  P213: externalIdAuthority(
+    "isni",
+    /^0000(?: \d{4} \d{4} \d{3}|\d{11})[\dX]$/,
+    (v) => `https://isni.org/isni/${v}`,
+    (v) => v.replaceAll(" ", ""),
+  ),
+  P496: externalIdAuthority(
+    "orcid",
+    /^0000-000[1-9]-\d{4}-\d{3}[\dX]$/,
+    (v) => `https://orcid.org/${v}`,
+  ),
+  P244: externalIdAuthority(
+    "lccn",
+    /^[a-z]{1,3}(?:\d{8}|\d{10})$/,
+    (v) => `https://id.loc.gov/authorities/names/${v}`,
+  ),
+  P227: externalIdAuthority(
+    "gnd",
+    /^(?:1[012]?\d{7}[\dX]|[47]\d{6}-\d|[1-9]\d{0,7}-[\dX]|3\d{7}[\dX])$/,
+    (v) => `https://d-nb.info/gnd/${v}`,
+  ),
+  P268: externalIdAuthority(
+    "bnf",
+    /^\d{8}[\dbcdfghjkmnpqrstvwxz]$/,
+    (v) => `https://catalogue.bnf.fr/ark:/12148/cb${v}`,
+  ),
 };
 
 /**
