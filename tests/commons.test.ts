@@ -58,6 +58,18 @@ describe("filePathUrl", () => {
     }
   });
 
+  it("rejects a filename with a lone UTF-16 surrogate", () => {
+    for (const filename of ["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg", "\uD83D.jpg"]) {
+      expect(Commons.filePathUrl(filename), JSON.stringify(filename)).toBeNull();
+    }
+  });
+
+  it("keeps a filename with a valid surrogate pair", () => {
+    expect(Commons.filePathUrl("Smile \u{1F600}.jpg")).toBe(
+      "https://commons.wikimedia.org/wiki/Special:FilePath/Smile_%F0%9F%98%80.jpg",
+    );
+  });
+
   it("keeps a filename that merely contains dots", () => {
     expect(Commons.filePathUrl("Mr. Smith.jpg")).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Mr._Smith.jpg",
@@ -203,6 +215,18 @@ describe("Commons.getFileInfo", () => {
 
   it.each([".", "..", "File:..", "../Foo.jpg"])(
     "rejects the relative-path filename %j before any request",
+    async (filename) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Commons.getFileInfo("commons.wikimedia.org", filename)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
+  it.each(["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg"])(
+    "rejects the lone-surrogate filename %j before any request",
     async (filename) => {
       const { urls, layer } = stubRouter({});
       await expectFailureInstanceOf(

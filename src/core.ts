@@ -197,10 +197,22 @@ function isRelativePathTitle(title: string): boolean {
 }
 
 /**
+ * Matches an unpaired UTF-16 surrogate: a high surrogate not followed by a
+ * low one, or a low surrogate not preceded by a high one. Without the `u`
+ * flag the pattern sees UTF-16 code units, so a valid pair (an emoji or any
+ * other astral character) never matches. This is a regex rather than
+ * `String.prototype.isWellFormed` because that method is ES2024, beyond the
+ * ES2022 `lib` this package compiles against and the runtimes it supports.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
  * Validates and canonicalises an untrusted MediaWiki title (a page title or
  * a `File:`-namespaced filename): trims, collapses internal whitespace to a
  * single underscore (MediaWiki's canonical title form), bounds length, and
- * rejects control characters, the `|`/`#` that could inject an extra
+ * rejects control characters, a lone UTF-16 surrogate (which makes
+ * `encodeURIComponent` throw `URIError`; a valid surrogate pair such as an
+ * emoji is kept), the `|`/`#` that could inject an extra
  * query clause or a fragment, and MediaWiki's relative-path titles (`.`,
  * `..`, a leading `./` or `../`, a `/./` or `/../` anywhere, a trailing `/.`
  * or `/..`), which `new URL` would otherwise resolve into a different
@@ -224,6 +236,7 @@ export function normaliseTitle(raw: string): string | null {
     const code = collapsed.charCodeAt(i);
     if (code < 0x20 || code === 0x7f) return null;
   }
+  if (LONE_SURROGATE.test(collapsed)) return null;
   if (/[|#]/.test(collapsed)) return null;
   if (isRelativePathTitle(collapsed)) return null;
   return collapsed;
@@ -231,8 +244,9 @@ export function normaliseTitle(raw: string): string | null {
 
 /**
  * Validates a title/filename and fails {@link InvalidRequest} for anything
- * {@link normaliseTitle} rejects (blank, too long, control characters, `|`
- * or `#`, or a relative-path title such as `.` or `..`), before any request
+ * {@link normaliseTitle} rejects (blank, too long, control characters, a
+ * lone UTF-16 surrogate, `|` or `#`, or a relative-path title such as `.` or
+ * `..`), before any request
  * is sent — the `yield*`-able form of {@link normaliseTitle} every surface
  * module's request-building functions start with. `kind` names the field in
  * the resulting error (`"title"` for a page title, `"filename"` for a
