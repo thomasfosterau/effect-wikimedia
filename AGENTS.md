@@ -16,9 +16,10 @@ Toolchain differences from the other library repos: single package, so the tasks
 
 - Relative imports carry their `.ts` extension (`allowImportingTsExtensions` + `rewriteRelativeImportExtensions`).
 - `exactOptionalPropertyTypes` is on: spell an optional a caller may pass `undefined` for as `?: T | undefined`.
-- Tests import from `vite-plus/test`, never `vitest`.
+- Tests import from `vite-plus/test`, never `vitest` or `@effect/vitest`.
 - Every export has a doc comment whose first sentence says what it is for and stands alone in a hover; state the error channel, units and invariants the signature can't. Put the description before any tag (`@copyright`, `@module`): only text before the first tag shows as the summary.
-- Errors are `Schema.TaggedError<Self>()(tag, fields)` classes.
+- Errors are `Schema.TaggedError<Self>()(tag, fields)` classes (the pinned `effect` has no `Schema.TaggedErrorClass`).
+- Services are keyed `"effect-wikimedia/<Name>"` (e.g. `"effect-wikimedia/Client"`), not an app-style `"@app/<Name>"` (that slip was #19).
 
 ## Commands
 
@@ -60,28 +61,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 
 ## Effect
 
-<!-- effect-solutions:start -->
-
-## Effect Best Practices
-
-**IMPORTANT:** Always consult effect-solutions before writing Effect code.
-
-1. Run `node node_modules/effect-solutions/bin.js list` to see available guides
-2. Run `node node_modules/effect-solutions/bin.js show <topic>...` for relevant patterns (supports multiple topics)
-3. Search `node_modules/effect/src` for real implementations (signatures are in `node_modules/effect/dist/*.d.ts`)
-
-Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
-
-Never guess at Effect patterns — check the guide first.
-
-<!-- effect-solutions:end -->
-
-- `effect-solutions` is a catalog devDependency. Call `bin.js` through `node`, not `vp exec effect-solutions` or `pnpm exec`: its `bun` shebang makes pnpm's `.bin` shim need Bun on PATH, while `bin.js` runs under Node and spawns the bundled binary for the host (macOS and glibc Linux, arm64 and x64 only; it fails on musl/Alpine and Windows). The block between the `effect-solutions` markers is hand-maintained: the CLI has no command that regenerates it.
-- The guides target `effect` 4.0.0-beta.59, not this repo's pinned version; where they differ, this repo wins:
-  - errors are `Schema.TaggedError`; the guides' `Schema.TaggedErrorClass` doesn't exist in the pinned `effect`;
-  - tests import from `vite-plus/test`, not the guides' `@effect/vitest`;
-  - services are keyed `"effect-wikimedia/<Name>"` (e.g. `"effect-wikimedia/Client"`), not the guides' app-style `"@app/<Name>"` (that slip was #19);
-  - HTTP and platform imports follow the rc-line bullet below, not the guides' `effect/unstable/*` or `@effect/platform-*`.
+- Read the Effect API from the installed package, not from memory: signatures and doc comments in `node_modules/effect/dist/*.d.ts`, implementations in `node_modules/effect/src`.
 - The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer floor is `catalogs.peers.effect`.
 - In the rc line, HTTP modules live under `effect/http` (`HttpApi` under `effect/http-api`); there are no `effect/unstable/*` paths and no `@effect/platform`. `FileSystem` / `Path` are `effect/*` modules.
 - The peer floor is a published contract: raising it is a breaking change for consumers and gets its own issue and a major changeset, never a drive-by bump.

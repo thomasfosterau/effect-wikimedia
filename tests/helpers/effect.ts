@@ -11,8 +11,7 @@
  * the integration suite keeps its own transaction-rollback harness
  * (`tests/integration/harness.ts`).
  *
- * Provide layers per test with `Effect.provide` at the call site, per
- * the effect-solutions testing guide:
+ * Provide layers per test with `Effect.provide` at the call site:
  *
  * ```ts
  * const exit = await runTestExit(requireAdmin.pipe(Effect.provide(layer)));
