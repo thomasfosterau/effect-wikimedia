@@ -136,5 +136,6 @@ assert<
 >();
 assert<Equals<Reconciliation.WikidataFact["_tag"], "Item" | "Identifier" | "Date" | "Image">>();
 assert<Equals<typeof Reconciliation.WikidataFact.Type, Reconciliation.WikidataFact>>();
+assert<Equals<Reconciliation.DateFact["calendar"], "gregorian" | "julian" | null>>();
 
 export { document, items, qid, roundTrip, templates, unbranded };

@@ -171,9 +171,24 @@ function timePrecision(precision: number | null): number | null {
 }
 
 /**
+ * The {@link DateFact} `calendar` for a time value's calendar model: the
+ * entity IRI of proleptic Gregorian (`Q1985727`) or proleptic Julian
+ * (`Q1985786`), as `http` (Wikibase's concept URI, what the JSON carries)
+ * or `https`. Anything else, including a missing model, is `null`.
+ */
+function timeCalendar(calendarModel: string | null): DateFact["calendar"] {
+  const match =
+    calendarModel === null
+      ? null
+      : /^https?:\/\/www\.wikidata\.org\/entity\/(Q1985727|Q1985786)$/.exec(calendarModel);
+  if (match === null) return null;
+  return match[1] === "Q1985727" ? "gregorian" : "julian";
+}
+
+/**
  * {@link DateFact}s ({@link DATE_PROPERTIES}) — the typed `time` value
  * validated by {@link normaliseTimeValue}, its precision code range-checked,
- * and the property's English label.
+ * its calendar model mapped to a calendar, and the property's English label.
  */
 function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
   const out: DateFact[] = [];
@@ -183,7 +198,14 @@ function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
       if (value._tag !== "time") continue;
       const time = normaliseTimeValue(value.time);
       if (time === null) continue;
-      out.push({ _tag: "Date", property, label, time, precision: timePrecision(value.precision) });
+      out.push({
+        _tag: "Date",
+        property,
+        label,
+        time,
+        precision: timePrecision(value.precision),
+        calendar: timeCalendar(value.calendarModel),
+      });
     }
   }
   return out;

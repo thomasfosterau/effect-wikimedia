@@ -217,6 +217,15 @@ export const DateFact = Schema.TaggedStruct("Date", {
    * carries none or it is out of range.
    */
   precision: Schema.NullOr(Schema.Int),
+  /**
+   * The calendar `time` is written in, from the claim's Wikibase calendar
+   * model: `"gregorian"` for proleptic Gregorian (`Q1985727`), `"julian"` for
+   * proleptic Julian (`Q1985786`). Julian dates are common before 1582, and
+   * their `time` is not a Gregorian date. `null` when the claim names no
+   * calendar model or one that is neither of these, so read `time` as of
+   * unknown calendar.
+   */
+  calendar: Schema.NullOr(Schema.Literals(["gregorian", "julian"])),
 });
 
 /** A calendar date claim on the item; see {@link DateFact}. */
