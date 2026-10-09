@@ -74,10 +74,11 @@ export const USER_AGENT =
  * clients to identify themselves with `Api-User-Agent` instead
  * (https://www.mediawiki.org/wiki/API:Etiquette), which browsers send as
  * given, so that header carries this value to Wikimedia from a browser.
- * `Api-User-Agent` is not a CORS-safelisted header, so in a browser every
- * cross-origin request gets a CORS preflight (`OPTIONS`) first. The Action
- * API (with the `origin=*` this package sends), the REST API and WDQS all
- * allow the header in their preflight responses.
+ * `Api-User-Agent` is not a CORS-safelisted header, so in a browser a
+ * cross-origin request needs a CORS preflight (`OPTIONS`) first. The Action
+ * API (with `origin=*`, which this package sends by default) and the REST API
+ * allow the header in their preflight responses, and WDQS's nginx config
+ * lists it too, though no live WDQS preflight has been checked.
  *
  * `Dumps.fromHttpRange` sends this value as `User-Agent` only. It is a
  * Node-only download from the dump host, which serves static files rather
