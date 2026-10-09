@@ -12,6 +12,7 @@
  * @module reconciliation/candidate
  */
 
+import * as Schema from "effect/Schema";
 import { normaliseTitle } from "../core.ts";
 
 /**
@@ -158,45 +159,118 @@ export function normaliseExternalIdValue(raw: string): string | null {
   return trimmed;
 }
 
-// ── Enrich: neutral fact shape + extraction helpers (website#613) ──────
+// ── Enrich: the fact union + extraction helpers (website#613) ──────────
 
 /**
- * A single fact pulled from a confirmed Wikidata item, in a neutral shape
- * a consumer can store as a provenance-marked mapping. `externalIri` (with
- * `mappingKind`) is the natural dedup key (the correspondence target);
- * `authority` + `externalId` name the source scheme and its value; `notes` carries the human-readable fact label
- * (e.g. `"date of birth"`) for facts that aren't ontology correspondences.
- * Every string is already validated / clamped — consumers treat them as
- * trusted application values.
+ * The confirmed item itself (`_tag: "Item"`): the canonical Wikidata
+ * correspondence for the QID that was enriched. `enrich` always returns
+ * exactly one, first.
  */
-export interface WikidataFact {
-  /** Source scheme, e.g. `"wikidata"`, `"viaf"`, `"wikimedia-commons"`. */
-  readonly authority: string;
-  /** The identifier / value in that scheme, if any (a VIAF number, a date). */
-  readonly externalId: string | null;
-  /** The correspondence target IRI; with {@link WikidataFact.mappingKind}, the natural dedup key. */
-  readonly externalIri: string;
-  /** `exact` for identity links (the QID, a `sameAs`); `equivalent` for facts (dates, images). */
-  readonly mappingKind: "exact" | "equivalent";
-  /** Human label for non-correspondence facts; `null` for plain `sameAs` links. */
-  readonly notes: string | null;
-}
+export const ItemFact = Schema.TaggedStruct("Item", {
+  /** The confirmed item id (`Q<digits>`), validated by {@link normaliseQid}. */
+  qid: Schema.String,
+  /** The item's entity IRI, `http://www.wikidata.org/entity/<qid>` ({@link wikidataEntityIri}). */
+  iri: Schema.String,
+});
 
-/** Selected facts extracted from a confirmed Wikidata item, ready to assert. */
+/** The confirmed item itself; see {@link ItemFact}. */
+export type ItemFact = typeof ItemFact.Type;
+
+/**
+ * An external identifier the item carries (`_tag: "Identifier"`), a
+ * `sameAs` link to one of the curated {@link EXTERNAL_ID_AUTHORITIES}.
+ * `{ property, value }` is an `ExternalIdentifier`-shaped pair, so it
+ * can be passed back to `WikidataLookup.searchByIdentifier`.
+ */
+export const IdentifierFact = Schema.TaggedStruct("Identifier", {
+  /** The Wikidata external-identifier property, e.g. `"P214"` (VIAF). */
+  property: Schema.String,
+  /** The authority's local name from {@link EXTERNAL_ID_AUTHORITIES}, e.g. `"viaf"`. */
+  authority: Schema.String,
+  /** The identifier as the claim spells it (an ISNI may keep Wikidata's spaces). */
+  value: Schema.String,
+  /** The authority's IRI for the identifier, built from a fixed template, e.g. `https://viaf.org/viaf/113230702`. */
+  iri: Schema.String,
+});
+
+/** An external identifier the item carries; see {@link IdentifierFact}. */
+export type IdentifierFact = typeof IdentifierFact.Type;
+
+/**
+ * A calendar date claim on the item (`_tag: "Date"`), for one of the
+ * {@link DATE_PROPERTIES}.
+ */
+export const DateFact = Schema.TaggedStruct("Date", {
+  /** The Wikidata date property, e.g. `"P569"`. */
+  property: Schema.String,
+  /** The property's English label from {@link DATE_PROPERTIES}, e.g. `"date of birth"`. */
+  label: Schema.String,
+  /**
+   * The Wikibase timestamp without its leading `+`, e.g.
+   * `"1952-03-11T00:00:00Z"` (see {@link normaliseTimeValue}). Read it with
+   * `precision`: a year-precision date is stored as `"1952-00-00T00:00:00Z"`.
+   */
+  time: Schema.String,
+  /**
+   * Wikibase's precision code, an integer from 0 (billion years) to 14
+   * (second): 9 is a year, 10 a month, 11 a day. `null` when the claim
+   * carries none or it is out of range.
+   */
+  precision: Schema.NullOr(Schema.Int),
+});
+
+/** A calendar date claim on the item; see {@link DateFact}. */
+export type DateFact = typeof DateFact.Type;
+
+/**
+ * A Commons image claim on the item (`_tag: "Image"`), for one of the
+ * {@link IMAGE_PROPERTIES}.
+ */
+export const ImageFact = Schema.TaggedStruct("Image", {
+  /** The Wikidata image property, e.g. `"P18"`. */
+  property: Schema.String,
+  /** The Commons filename as the claim spells it, without the `File:` prefix. */
+  filename: Schema.String,
+  /** The file's `Special:FilePath` URL on Commons (see {@link normaliseCommonsImage}). */
+  iri: Schema.String,
+});
+
+/** A Commons image claim on the item; see {@link ImageFact}. */
+export type ImageFact = typeof ImageFact.Type;
+
+/**
+ * A single fact pulled from a confirmed Wikidata item, as a union tagged by
+ * fact kind: {@link ItemFact} (`"Item"`), {@link IdentifierFact}
+ * (`"Identifier"`), {@link DateFact} (`"Date"`) or {@link ImageFact}
+ * (`"Image"`). Branch on `_tag`, or use the schema's `match`, `guards` and
+ * `isAnyOf`, e.g. `WikidataFact.match(fact, { Item: …, Identifier: …, Date: …, Image: … })`.
+ * Every string in a fact `enrich` returns is already validated and clamped,
+ * so consumers treat them as trusted application values; decoding through
+ * the schema checks only the shape. How a fact is stored is the caller's
+ * choice.
+ */
+export const WikidataFact = Schema.Union([ItemFact, IdentifierFact, DateFact, ImageFact]).pipe(
+  Schema.toTaggedUnion("_tag"),
+);
+
+/** A single fact pulled from a confirmed Wikidata item; see {@link WikidataFact}. */
+export type WikidataFact = typeof WikidataFact.Type;
+
+/** The selected facts `WikidataLookup.enrich` extracts from a confirmed Wikidata item. */
 export interface WikidataFacts {
   /** The confirmed item id the facts were pulled for. */
   readonly qid: string;
-  /** The neutral facts (QID self-link + `sameAs` + dates + images). */
+  /** The facts, in order: the {@link ItemFact}, then {@link IdentifierFact}s, {@link DateFact}s and {@link ImageFact}s. */
   readonly facts: readonly WikidataFact[];
 }
 
-/** Cap on how many `sameAs` external-identifier facts we extract per item. */
+/** Cap on how many {@link IdentifierFact}s we extract per item. */
 export const MAX_SAME_AS = 30;
 
-/** Cap on how many date facts we extract per item. */
+/** Cap on how many {@link DateFact}s we extract per item. */
 export const MAX_DATES = 10;
 
-/** Cap on how many image facts we extract per item. */
+/** Cap on how many {@link ImageFact}s we extract per item. */
 export const MAX_IMAGES = 5;
 
 /** The `http://www.wikidata.org/entity/<id>` IRI for a validated Q/P id. */
@@ -209,7 +283,7 @@ export function wikidataEntityIri(id: string): string {
  * builder that turns a Wikidata claim value into the authority's IRI.
  */
 export interface ExternalIdAuthority {
-  /** Local authority name stored as {@link WikidataFact.authority}, e.g. `"viaf"`. */
+  /** Local authority name, reported as {@link IdentifierFact}'s `authority`, e.g. `"viaf"`. */
   readonly authority: string;
   /**
    * Builds the authority's IRI for an identifier value, or returns `null`
@@ -297,8 +371,8 @@ export const EXTERNAL_ID_AUTHORITIES: Readonly<Record<string, ExternalIdAuthorit
 };
 
 /**
- * Wikidata properties whose value is a calendar date we lift as a fact,
- * mapped to the human label stored in the assertion's `notes`.
+ * Wikidata properties whose value is a calendar date we lift as a
+ * {@link DateFact}, mapped to the English label reported as its `label`.
  */
 export const DATE_PROPERTIES: Readonly<Record<string, string>> = {
   P569: "date of birth",
@@ -307,7 +381,7 @@ export const DATE_PROPERTIES: Readonly<Record<string, string>> = {
   P576: "dissolved, abolished or demolished date",
 };
 
-/** Wikidata image properties (Commons media). */
+/** Wikidata image properties (Commons media) we lift as an {@link ImageFact}. */
 export const IMAGE_PROPERTIES: readonly string[] = ["P18"];
 
 /**

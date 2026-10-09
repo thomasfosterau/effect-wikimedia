@@ -128,5 +128,7 @@ assert<
 assert<
   Equals<Reconciliation.LookupError, Reconciliation.InvalidQuery | Reconciliation.LookupFailed>
 >();
+assert<Equals<Reconciliation.WikidataFact["_tag"], "Item" | "Identifier" | "Date" | "Image">>();
+assert<Equals<typeof Reconciliation.WikidataFact.Type, Reconciliation.WikidataFact>>();
 
 export { document, items, qid, roundTrip, templates, unbranded };

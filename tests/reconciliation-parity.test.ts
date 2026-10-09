@@ -6,8 +6,10 @@
  * We reimplement `packages/wikidata`'s enrich normaliser (`normaliseFacts`
  * in `src/normalise.ts`) and its label-search normaliser (`normaliseSearch`)
  * **on top of the typed model** — matching on the `DataValue` `_tag` union
- * instead of poking at an `Unknown` blob — and assert they produce the same
- * neutral shapes the reconciliation package produces today. The package
+ * instead of poking at an `Unknown` blob — and assert they produce the
+ * website-era shapes the reconciliation package produced at extraction time
+ * (before `Reconciliation.WikidataFact` became a tagged union, website#1064 /
+ * #37); it does not track `src/reconciliation`. The package
  * under test stays website-agnostic: this test imports nothing from
  * `packages/wikidata`; the expected outputs are the known-correct values.
  *
@@ -32,7 +34,7 @@ const decodeQ42 = (): Wikidata.WikidataItem => {
   return item;
 };
 
-// ── The reconciliation shapes, restated locally (no cross-package import) ──
+// ── The extraction-era reconciliation shapes, restated locally (no cross-package import) ──
 
 interface NeutralFact {
   readonly authority: string;
