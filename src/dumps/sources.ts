@@ -179,6 +179,9 @@ export interface FromHttpRangeOptions {
    * runs, which itself defaults to `Core.USER_AGENT`. Set it, or that
    * reference, to your own UA with your contact details, as Wikimedia's
    * User-Agent policy asks (https://meta.wikimedia.org/wiki/User-Agent_policy).
+   * No `Api-User-Agent` is sent, unlike `Core.WikimediaClient` requests: that
+   * header is for browser clients of Wikimedia's APIs, and this is a Node
+   * download from the dump host, where `User-Agent` arrives as given.
    */
   readonly userAgent?: string | undefined;
 }

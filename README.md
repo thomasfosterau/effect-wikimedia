@@ -27,7 +27,7 @@ Every `Action`, `Rest`, `Commons`, `Wikidata` and `Sparql` request goes through 
 
 ### User-Agent
 
-Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sets the `User-Agent` header to `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://www.npmjs.com/package/@thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference; in Node the value is sent verbatim:
+Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sets both the `User-Agent` and the `Api-User-Agent` header to `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://www.npmjs.com/package/@thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference, which sets both headers; in Node both are sent verbatim:
 
 ```ts
 import * as Layer from "effect/Layer";
@@ -41,7 +41,11 @@ const program = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 );
 ```
 
-In a browser, the browser decides. The Fetch standard lets a page set `User-Agent`, but Chromium-based browsers silently drop it and send their own, so Wikimedia doesn't see yours. Wikimedia's [API etiquette](https://www.mediawiki.org/wiki/API:Etiquette#The_User-Agent_header) asks browser clients to send an `Api-User-Agent` header instead, which this package doesn't send.
+In a browser, the browser decides what happens to `User-Agent`. The Fetch standard lets a page set it, but Chromium-based browsers silently drop it and send their own. Wikimedia's [API etiquette](https://www.mediawiki.org/wiki/API:Etiquette#The_User-Agent_header) asks browser clients to send an `Api-User-Agent` header instead, and browsers send that one as given, so your value still reaches Wikimedia.
+
+The cost is a CORS preflight. `Api-User-Agent` isn't a [CORS-safelisted request header](https://fetch.spec.whatwg.org/#cors-safelisted-request-header), so a browser sends an `OPTIONS` request before each cross-origin request, and Wikimedia's APIs set no `Access-Control-Max-Age`, so the browser caches each preflight for only about 5 seconds. Every API this package calls allows the header in its preflight response: the Action API with `origin=*` (see [Anonymous requests](#anonymous-requests)) and the REST API both allow the headers in MediaWiki's [`$wgAllowedCorsHeaders`](https://github.com/wikimedia/mediawiki/blob/18d8c1070cde87412919f36e46a8197185534272/includes/MainConfigSchema.php#L12992-L13011), which lists `Api-User-Agent`, and WDQS's [nginx config](https://github.com/wikimedia/operations-puppet/blob/1a24a2a3354c4a147ac712d1cfb01879b01611e3/modules/query_service/templates/nginx.erb#L253-L259) lists it too. A browser that honours a script-set `User-Agent` preflights already, because that header isn't safelisted either.
+
+`Dumps.fromHttpRange` sends `User-Agent` only: it's a Node download from the dump host, which serves files rather than an API.
 
 `Core.WikimediaClient` reads the reference once, when its layer is built. `Dumps.fromHttpRange` reads it from the program's context when the stream runs, or takes a `userAgent` option that wins over it. Merging the reference into the layer with `Layer.provideMerge`, as above, reaches both (`Dumps.fromHttpRange` also needs an `HttpClient`, such as `FetchHttpClient.layer`, which `Core.wikimediaLayer` doesn't expose). So does `Effect.provideService(Core.UserAgent, userAgent)` placed outside the `Effect.provide` that builds the layer. `Layer.provide` reaches the client only. A `provideService` the layer build doesn't see reaches the dump download only: one applied inside `Effect.provide(Core.wikimediaLayer)`, or per run on a `ManagedRuntime` made from the layer.
 
@@ -56,7 +60,7 @@ Every Action API (`/w/api.php`) request carries `origin=*`, so a page on another
 
 ## API
 
-- **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), the Action API's `origin=*`, and the `maxlag` / retry-after etiquette every other module builds on.
+- **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` and `Api-User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), the Action API's `origin=*`, and the `maxlag` / retry-after etiquette every other module builds on.
 - **`Action`** — the Action API (`/w/api.php`): `getWikitext`, `getPageMetadata`, `search`, `parsePage` (sections/links/categories/templates).
 - **`Rest`** — the Core REST API / Parsoid surface (`/w/rest.php/v1/...`): `getPageMetadata`, `getRevisionMetadata`, `getParsedHtml`, `getRevisionHtml`.
 - **`Commons`** — `filePathUrl` (`Special:FilePath` URL construction, with optional thumbnail width) and `getFileInfo`.

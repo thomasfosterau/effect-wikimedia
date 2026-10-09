@@ -18,10 +18,10 @@
  * for a query that is intrinsically bounded) and fails
  * {@link "./core".InvalidRequest} before any request when it does not.
  *
- * Etiquette is inherited from {@link "./core"}: the polite `User-Agent` on
- * every request, and WDQS's `429` / `503` + `Retry-After` backoff handled by
- * the shared retry loop. `maxlag` — an Action-API parameter WDQS does not
- * accept — is omitted.
+ * Etiquette is inherited from {@link "./core"}: the polite `User-Agent` and
+ * `Api-User-Agent` on every request, and WDQS's `429` / `503` +
+ * `Retry-After` backoff handled by the shared retry loop. `maxlag` — an
+ * Action-API parameter WDQS does not accept — is omitted.
  *
  * Imports only {@link "./core"} — never `Action`, `Rest`, `Commons`, or
  * `Wikidata` — so a consumer that imports only `Sparql` from the package

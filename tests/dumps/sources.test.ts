@@ -184,6 +184,18 @@ describe("fromHttpRange", () => {
     expect(userAgents).toEqual([Core.USER_AGENT]);
   });
 
+  it("sends no Api-User-Agent: the dump host is not an API, unlike Core.WikimediaClient's", async () => {
+    const apiUserAgents: (string | null)[] = [];
+    const fetch: typeof globalThis.fetch = (input, init) => {
+      apiUserAgents.push(new Request(input, init).headers.get("api-user-agent"));
+      return Promise.resolve(new Response("abc", { status: 206 }));
+    };
+    await collectRange(
+      FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
+    );
+    expect(apiUserAgents).toEqual([null]);
+  });
+
   it("sends the Core.UserAgent reference's value when one is provided", async () => {
     const userAgent = "my-bot/1.2 (bot@example.org)";
     const { userAgents, layer } = stubFetch(() => new Response("abc", { status: 206 }));

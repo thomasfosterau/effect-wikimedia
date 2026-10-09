@@ -10,9 +10,10 @@
  * every request, never a constant baked into the module.
  *
  * Etiquette this module owns so no surface module has to reimplement it:
- * - a polite `User-Agent` set on every request: the caller's own, set
- *   through {@link UserAgent}, or this package's neutral {@link USER_AGENT}
- *   (a browser may drop it; see {@link UserAgent});
+ * - a polite `User-Agent`, and an `Api-User-Agent` with the same value, set
+ *   on every request: the caller's own, set through {@link UserAgent}, or
+ *   this package's neutral {@link USER_AGENT} (a browser may drop
+ *   `User-Agent` but sends `Api-User-Agent`; see {@link UserAgent});
  * - the `maxlag` query parameter (bots/scripts are asked to send it so a
  *   lagged replica can decline cheaply rather than serving stale data);
  * - `origin=*` on every Action API (`/w/api.php`) request, so a page on
@@ -44,9 +45,9 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } 
 // ── Identity & etiquette constants ──────────────────────────────────────
 
 /**
- * The default `User-Agent` this package sets when the caller sets none through
- * {@link UserAgent}: it names this package and links its public npm page,
- * and no consumer. Wikimedia's User-Agent policy
+ * The default `User-Agent` and `Api-User-Agent` value this package sends
+ * when the caller sets none through {@link UserAgent}: it names this package
+ * and links its public npm page, and no consumer. Wikimedia's User-Agent policy
  * (https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to
  * identify itself so abusive traffic can be contacted rather than
  * blanket-blocked, and an unidentified default `fetch` UA risks a hard block;
@@ -58,18 +59,29 @@ export const USER_AGENT =
   "effect-wikimedia (+https://www.npmjs.com/package/@thomasfosterau/effect-wikimedia)";
 
 /**
- * The `User-Agent` header value this package sets on every request;
+ * The value this package sends as both the `User-Agent` and the
+ * `Api-User-Agent` header on every {@link WikimediaClient} request;
  * defaults to {@link USER_AGENT}. Provide your own, with your contact details,
  * as Wikimedia's User-Agent policy asks
  * (https://meta.wikimedia.org/wiki/User-Agent_policy) — for example
  * `"my-bot/1.2 (https://example.org/my-bot; bot@example.org) effect-wikimedia"`.
  *
- * Node sends the value verbatim. A browser may not: the Fetch standard lets
- * a page set `User-Agent`, but Chromium-based browsers silently drop it and
- * send their own, so Wikimedia never sees this value. Wikimedia asks
- * browser clients to identify themselves with an `Api-User-Agent` header
- * instead (https://www.mediawiki.org/wiki/API:Etiquette), which this package
- * does not send.
+ * Node sends both headers verbatim, as does any other server-side `fetch`
+ * that doesn't restrict `User-Agent`; a Web Worker or Service Worker in a
+ * browser follows the browser's rules. A browser may drop
+ * `User-Agent`: the Fetch standard lets a page set it, but Chromium-based
+ * browsers silently replace it with their own. Wikimedia asks browser
+ * clients to identify themselves with `Api-User-Agent` instead
+ * (https://www.mediawiki.org/wiki/API:Etiquette), which browsers send as
+ * given, so that header carries this value to Wikimedia from a browser.
+ * `Api-User-Agent` is not a CORS-safelisted header, so in a browser every
+ * cross-origin request gets a CORS preflight (`OPTIONS`) first. The Action
+ * API (with the `origin=*` this package sends), the REST API and WDQS all
+ * allow the header in their preflight responses.
+ *
+ * `Dumps.fromHttpRange` sends this value as `User-Agent` only. It is a
+ * Node-only download from the dump host, which serves static files rather
+ * than an API, and Node already sends `User-Agent` as given.
  *
  * {@link WikimediaClient} reads it once, when its layer is built;
  * `Dumps.fromHttpRange` reads it from the program's context when the stream
@@ -464,7 +476,8 @@ export class WikimediaClient extends Context.Service<
 
 /**
  * Builds the {@link WikimediaClient} service over an `HttpClient`, sending
- * the {@link UserAgent} in context at build time. Wrapped by
+ * the {@link UserAgent} in context at build time as both `User-Agent` and
+ * `Api-User-Agent`. Wrapped by
  * {@link wikimediaClientLayer} (tests drive with a stubbed client) and
  * {@link wikimediaLayer} (production, over `FetchHttpClient`); not exported
  * because both layers live in this module.
@@ -474,7 +487,12 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
   const userAgent = yield* UserAgent;
   const client = baseClient.pipe(
     HttpClient.mapRequest((req) =>
-      req.pipe(HttpClientRequest.setHeader("user-agent", userAgent), HttpClientRequest.acceptJson),
+      req.pipe(
+        // Chromium drops `User-Agent` on `fetch` but sends `Api-User-Agent`,
+        // the header Wikimedia's API etiquette asks browser clients to use.
+        HttpClientRequest.setHeaders({ "user-agent": userAgent, "api-user-agent": userAgent }),
+        HttpClientRequest.acceptJson,
+      ),
     ),
   );
 
@@ -570,17 +588,17 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
  * {@link WikimediaClient} layer over whatever `HttpClient` is in context.
  * The production graph supplies `FetchHttpClient` (see
  * {@link wikimediaLayer}); a test supplies a stubbed fetch under the same
- * `FetchHttpClient` slot. Sets the `User-Agent` header to the
- * {@link UserAgent} in context when the layer is built ({@link USER_AGENT}
- * if none is provided).
+ * `FetchHttpClient` slot. Sets the `User-Agent` and `Api-User-Agent`
+ * headers to the {@link UserAgent} in context when the layer is built
+ * ({@link USER_AGENT} if none is provided).
  */
 export const wikimediaClientLayer: Layer.Layer<WikimediaClient, never, HttpClient.HttpClient> =
   Layer.effect(WikimediaClient)(makeWikimediaClient());
 
 /**
  * Production {@link WikimediaClient} layer, backed by the global `fetch` via
- * `FetchHttpClient`. Sets the `User-Agent` header to the {@link UserAgent} in
- * context when the layer is built; set yours with
+ * `FetchHttpClient`. Sets the `User-Agent` and `Api-User-Agent` headers to
+ * the {@link UserAgent} in context when the layer is built; set yours with
  * `Core.wikimediaLayer.pipe(Layer.provideMerge(Layer.succeed(Core.UserAgent, ua)))`
  * (see {@link UserAgent} for which form reaches `Dumps.fromHttpRange` too).
  */
