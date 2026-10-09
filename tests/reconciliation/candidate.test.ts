@@ -12,16 +12,17 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   EXTERNAL_ID_AUTHORITIES,
   MAX_LABEL_QUERY_LENGTH,
-  MAX_TEXT_FIELD_LENGTH,
+  MAX_CANDIDATE_TEXT_LENGTH,
   normaliseExternalIdValue,
   normaliseLabelQuery,
   normalisePropertyId,
   normaliseQid,
-  sanitiseText,
+  sanitiseCandidateText,
   normaliseCommonsImage,
   normaliseTimeValue,
   wikidataEntityIri,
 } from "../../src/reconciliation/index.ts";
+import { Core, Reconciliation } from "../../src/index.ts";
 
 describe("normaliseLabelQuery", () => {
   it("trims and collapses internal whitespace", () => {
@@ -90,21 +91,38 @@ describe("normaliseExternalIdValue", () => {
   });
 });
 
-describe("sanitiseText", () => {
+describe("sanitiseCandidateText", () => {
   it("trims and collapses internal whitespace", () => {
-    expect(sanitiseText("  hello   world \n")).toBe("hello world");
+    expect(sanitiseCandidateText("  hello   world \n")).toBe("hello world");
   });
 
   it("returns null for whitespace-only or non-string input", () => {
-    expect(sanitiseText("   ")).toBeNull();
-    expect(sanitiseText(undefined)).toBeNull();
-    expect(sanitiseText(42)).toBeNull();
+    expect(sanitiseCandidateText("   ")).toBeNull();
+    expect(sanitiseCandidateText(undefined)).toBeNull();
+    expect(sanitiseCandidateText(42)).toBeNull();
   });
 
   it("clamps an over-long value to the max field length", () => {
-    const result = sanitiseText("x".repeat(MAX_TEXT_FIELD_LENGTH + 500));
+    const result = sanitiseCandidateText("x".repeat(MAX_CANDIDATE_TEXT_LENGTH + 500));
     expect(result).not.toBeNull();
-    expect(result!.length).toBe(MAX_TEXT_FIELD_LENGTH);
+    expect(result!.length).toBe(MAX_CANDIDATE_TEXT_LENGTH);
+  });
+});
+
+describe("candidate text names on the barrel", () => {
+  it("no longer shadow Core's MAX_TEXT_FIELD_LENGTH / sanitiseText", () => {
+    // @ts-expect-error renamed to MAX_CANDIDATE_TEXT_LENGTH (#63)
+    expect(Reconciliation.MAX_TEXT_FIELD_LENGTH).toBeUndefined();
+    // @ts-expect-error renamed to sanitiseCandidateText (#63)
+    expect(Reconciliation.sanitiseText).toBeUndefined();
+    expect(Reconciliation.MAX_CANDIDATE_TEXT_LENGTH).toBe(2000);
+    expect(Reconciliation.sanitiseCandidateText).toBe(sanitiseCandidateText);
+  });
+
+  it("keeps Core's looser bound and trim-only behaviour distinct", () => {
+    expect(Core.MAX_TEXT_FIELD_LENGTH).toBe(4000);
+    expect(Core.sanitiseText("  a   b ")).toBe("a   b");
+    expect(Reconciliation.sanitiseCandidateText("  a   b ")).toBe("a b");
   });
 });
 

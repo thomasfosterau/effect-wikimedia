@@ -28,7 +28,7 @@ import {
   normaliseExternalIdValue,
   normaliseQid,
   normaliseTimeValue,
-  sanitiseText,
+  sanitiseCandidateText,
   type WikidataCandidate,
   type WikidataFact,
   type WikidataFacts,
@@ -50,8 +50,8 @@ export function hitToCandidate(hit: Wikidata.SearchHit): readonly WikidataCandid
   return [
     {
       qid,
-      label: sanitiseText(hit.label),
-      description: sanitiseText(hit.description),
+      label: sanitiseCandidateText(hit.label),
+      description: sanitiseCandidateText(hit.description),
       instanceOf: [],
     },
   ];
@@ -108,8 +108,8 @@ export function itemToCandidate(
   return [
     {
       qid: normaliseQid(item.id) ?? qid,
-      label: sanitiseText(item.labels[language]),
-      description: sanitiseText(item.descriptions[language]),
+      label: sanitiseCandidateText(item.labels[language]),
+      description: sanitiseCandidateText(item.descriptions[language]),
       instanceOf: instanceOfQids(item),
     },
   ];

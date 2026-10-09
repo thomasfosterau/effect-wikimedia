@@ -38,14 +38,13 @@ export interface WikidataCandidate {
 
 /**
  * Upper bound, in UTF-16 code units, on a candidate's label or description
- * as `WikidataLookup` returns it: 2000, against the 4000 of
- * `Core.MAX_TEXT_FIELD_LENGTH`, which bounds the `Action` and `Rest`
- * clients (`Wikidata` applies its own 4000 bound). The barrel exports both names, so qualify them by
- * namespace when you use both. The clamp keeps a hostile or malformed
- * response from pushing an unbounded blob through the service (defence in
- * depth).
+ * as `WikidataLookup` returns it: 2000. It is deliberately tighter than
+ * `Core.MAX_TEXT_FIELD_LENGTH` (4000), which bounds the `Action` and `Rest`
+ * clients (`Wikidata` applies its own 4000 bound). The clamp keeps a hostile
+ * or malformed response from pushing an unbounded blob through the service
+ * (defence in depth).
  */
-export const MAX_TEXT_FIELD_LENGTH = 2000;
+export const MAX_CANDIDATE_TEXT_LENGTH = 2000;
 
 /** Cap on how many candidates a single search returns. */
 export const MAX_CANDIDATES = 20;
@@ -63,18 +62,18 @@ export const MAX_LABEL_QUERY_LENGTH = 300;
 /**
  * Cleans an untrusted free-text value for a reconciliation candidate: trims
  * it, collapses each internal whitespace run to one space, and clamps it to
- * {@link MAX_TEXT_FIELD_LENGTH} (2000) code units. Returns `null` for a
+ * {@link MAX_CANDIDATE_TEXT_LENGTH} (2000) code units. Returns `null` for a
  * non-string or an empty / whitespace-only string, so callers can map
  * "nothing usable" to an absent field rather than an empty string.
  *
- * Differs from the same-named `Core.sanitiseText`, which only trims, keeps
- * internal whitespace and clamps to `Core.MAX_TEXT_FIELD_LENGTH` (4000).
+ * Differs from `Core.sanitiseText`, which only trims, keeps internal
+ * whitespace and clamps to `Core.MAX_TEXT_FIELD_LENGTH` (4000).
  */
-export function sanitiseText(value: unknown): string | null {
+export function sanitiseCandidateText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const collapsed = value.replace(/\s+/g, " ").trim();
   if (collapsed.length === 0) return null;
-  return collapsed.slice(0, MAX_TEXT_FIELD_LENGTH);
+  return collapsed.slice(0, MAX_CANDIDATE_TEXT_LENGTH);
 }
 
 // ── Input validation (SSRF / injection defence) ───────────────────────
