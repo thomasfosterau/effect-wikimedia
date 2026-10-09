@@ -43,8 +43,8 @@
  * pipeline stays constant-memory rather than OOMing.
  *
  * Runtime-agnostic: imports only `effect`. The byte source / decompression
- * stages (`fromFile`, `fromHttpRange`, `decompressWith`) are the Node-only
- * corner.
+ * stages (`fromFile`, `fromHttpRange`, `decompressWith`) live in the
+ * Node-only `dumps/sources` module.
  *
  * @copyright Thomas Foster
  * @module dumps/xml

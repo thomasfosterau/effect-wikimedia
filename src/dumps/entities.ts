@@ -23,8 +23,9 @@
  *
  * Runtime-agnostic: this module imports only `effect` and the pure `Wikidata`
  * model (never its HTTP client). The byte source and decompression stages
- * (`fromFile`, `fromHttpRange`, `decompressWith`) are the Node-only corner;
- * this module operates on whatever `Stream<Uint8Array>` it is handed.
+ * (`fromFile`, `fromHttpRange`, `decompressWith`) live in the Node-only
+ * `dumps/sources` module; this module operates on whatever
+ * `Stream<Uint8Array>` it is handed.
  *
  * @copyright Thomas Foster
  * @module dumps/entities
