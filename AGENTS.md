@@ -47,8 +47,9 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 
 ## Branches and pull requests
 
-- Branch off `trunk` as `issue-<n>-<slug>`; PR against `trunk`; squash-merge. Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges).
-- Every change to the published package's behaviour, including its doc comments (they ship in the `.d.ts`), carries a changeset (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR (`chore: version packages`), the owner merges it, and the workflow publishes. See [docs/RELEASING.md](docs/RELEASING.md).
+- Branch off `trunk` as `issue-<n>-<slug>`; PR against `trunk`. Squash-merge is preferred and a merge commit is acceptable; either way, rebase onto `origin/trunk` before opening or updating a PR, and never merge `trunk` into your branch (GitHub's Update-branch button merges).
+- Every change to the published package's behaviour, including its doc comments (they ship in the `.d.ts`), carries a changeset (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand (the one exception is the owner's one-off 2.0.0 bump; see [docs/RELEASING.md](docs/RELEASING.md#versioning)): the Release workflow opens the "Version Packages" PR (`chore: version packages`), the owner merges it, and the workflow publishes. See [docs/RELEASING.md](docs/RELEASING.md).
+- The package stays on 0.x: a breaking change takes a `minor` changeset, and `major` is never used while on 0.x. 1.0.0 was published and unpublished, so npm will never accept it again and a `major` bump from 0.x would fail at publish; going stable skips straight to 2.0.0 with a one-off manual bump in the Version Packages PR (see [docs/RELEASING.md](docs/RELEASING.md#versioning)).
 - Standing approvals: open a PR once a branch has a pushed commit; watch it to merge or close (CI failures, review comments, rebase when it conflicts); keep the PR body current.
 - GitHub writes go to `thomasfosterau/effect-wikimedia` only; pass `-R thomasfosterau/effect-wikimedia` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations, even when GitHub MCP tools are available. If another repo needs something, say so in the PR body.
 
@@ -64,7 +65,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 - Read the Effect API from the installed package, not from memory: signatures and doc comments in `node_modules/effect/dist/*.d.ts`, implementations in `node_modules/effect/src`.
 - The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer floor is `catalogs.peers.effect`.
 - In the rc line, HTTP modules live under `effect/http` (`HttpApi` under `effect/http-api`); there are no `effect/unstable/*` paths and no `@effect/platform`. `FileSystem` / `Path` are `effect/*` modules.
-- The peer floor is a published contract: raising it is a breaking change for consumers and gets its own issue and a major changeset, never a drive-by bump.
+- The peer floor is a published contract: raising it is a breaking change for consumers and gets its own issue and a `minor` changeset while on 0.x (a major one once stable), never a drive-by bump.
 
 ## Agent sessions
 
