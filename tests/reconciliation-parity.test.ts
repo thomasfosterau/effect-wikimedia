@@ -42,6 +42,8 @@ interface NeutralFact {
   readonly notes: string | null;
 }
 
+// An extraction-era parity fixture: it does not track `src/reconciliation`'s
+// `EXTERNAL_ID_AUTHORITIES` (which validates and encodes each value).
 const EXTERNAL_ID_AUTHORITIES: Record<string, { authority: string; iri: (v: string) => string }> = {
   P214: { authority: "viaf", iri: (v) => `https://viaf.org/viaf/${v}` },
   P496: { authority: "orcid", iri: (v) => `https://orcid.org/${v}` },

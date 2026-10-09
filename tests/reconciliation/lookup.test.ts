@@ -632,6 +632,35 @@ describe("WikidataLookup.enrich", () => {
     expect(facts?.facts[0]?.authority).toBe("wikidata");
   });
 
+  it("drops an external-id value that would escape its authority's IRI path", async () => {
+    const { layer } = stubClient({
+      "action=wbgetentities": {
+        body: {
+          entities: {
+            Q1: {
+              id: "Q1",
+              claims: {
+                // Passes `normaliseExternalIdValue` (`.` and `/` are allowed
+                // for the search clause) but would build
+                // `https://viaf.org/viaf/../../x`, i.e. `https://viaf.org/x`.
+                P214: [externalIdClaim("P214", "../../x")],
+                P496: [externalIdClaim("P496", "..")],
+                P213: [externalIdClaim("P213", "0000 0001 2103 2683")],
+              },
+            },
+          },
+        },
+      },
+    });
+    const facts = await loadFacts(layer, "Q1");
+    // The QID self-link and the well-formed (spaced) ISNI survive.
+    expect(facts.facts.map((fact) => fact.externalIri)).toEqual([
+      "http://www.wikidata.org/entity/Q1",
+      "https://isni.org/isni/0000000121032683",
+    ]);
+    expect(facts.facts[1]?.externalId).toBe("0000 0001 2103 2683");
+  });
+
   it("returns null when the item is absent upstream", async () => {
     const { layer } = stubClient({
       "action=wbgetentities": { body: { entities: {} } },
