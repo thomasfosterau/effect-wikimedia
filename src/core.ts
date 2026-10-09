@@ -45,8 +45,8 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } 
 
 /**
  * The default `User-Agent` this package sets when the caller sets none through
- * {@link UserAgent}: it names this package and its repository, and no
- * consumer. Wikimedia's User-Agent policy
+ * {@link UserAgent}: it names this package and links its public npm page,
+ * and no consumer. Wikimedia's User-Agent policy
  * (https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to
  * identify itself so abusive traffic can be contacted rather than
  * blanket-blocked, and an unidentified default `fetch` UA risks a hard block;
@@ -54,7 +54,8 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } 
  * provide their own UA with their contact details. It carries no version
  * number, because the build injects none and a hard-coded one drifts.
  */
-export const USER_AGENT = "effect-wikimedia (+https://github.com/thomasfosterau/effect-wikimedia)";
+export const USER_AGENT =
+  "effect-wikimedia (+https://www.npmjs.com/package/@thomasfosterau/effect-wikimedia)";
 
 /**
  * The `User-Agent` header value this package sets on every request;
@@ -394,7 +395,9 @@ export interface WikimediaRequest {
   /**
    * Query parameters; percent-encoded by `URLSearchParams`, never interpolated
    * into the path. An `origin` here replaces the `origin=*` the Action API path
-   * otherwise gets, and a `crossorigin` here suppresses it.
+   * otherwise gets, and a `crossorigin` here suppresses it. A lone UTF-16
+   * surrogate in a value is sent as U+FFFD (`URLSearchParams` replaces it, and
+   * never throws), unlike in a title, which {@link normaliseTitle} rejects.
    */
   readonly params?: Record<string, string>;
   /**
