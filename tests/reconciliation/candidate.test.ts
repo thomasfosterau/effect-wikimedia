@@ -281,9 +281,8 @@ describe("normaliseTimeValue", () => {
 describe("normaliseCommonsImage", () => {
   it("builds the Special:FilePath URL for a Commons filename", () => {
     expect(normaliseCommonsImage("Douglas adams portrait.jpg")).toEqual({
-      externalId: "Douglas adams portrait.jpg",
-      externalIri:
-        "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait.jpg",
+      filename: "Douglas adams portrait.jpg",
+      iri: "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait.jpg",
     });
   });
 
@@ -326,10 +325,10 @@ describe("normaliseCommonsImage", () => {
 
   it("keeps a filename that merely contains dots", () => {
     expect(normaliseCommonsImage("Mr. Smith.jpg")).toEqual({
-      externalId: "Mr. Smith.jpg",
-      externalIri: "https://commons.wikimedia.org/wiki/Special:FilePath/Mr.%20Smith.jpg",
+      filename: "Mr. Smith.jpg",
+      iri: "https://commons.wikimedia.org/wiki/Special:FilePath/Mr.%20Smith.jpg",
     });
-    expect(normaliseCommonsImage("...")?.externalIri).toBe(
+    expect(normaliseCommonsImage("...")?.iri).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/...",
     );
   });
@@ -337,7 +336,7 @@ describe("normaliseCommonsImage", () => {
   it("rejects a lone UTF-16 surrogate and keeps a valid surrogate pair", () => {
     expect(normaliseCommonsImage("Foo\uD800Bar.jpg")).toBeNull();
     expect(normaliseCommonsImage("Foo\uDC00Bar.jpg")).toBeNull();
-    expect(normaliseCommonsImage("Smile \u{1F600}.jpg")?.externalIri).toBe(
+    expect(normaliseCommonsImage("Smile \u{1F600}.jpg")?.iri).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Smile%20%F0%9F%98%80.jpg",
     );
   });

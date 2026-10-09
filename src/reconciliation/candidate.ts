@@ -407,11 +407,13 @@ export function normaliseTimeValue(raw: unknown): string | null {
  * `/../` anywhere, a trailing `/.` or `/..`), which `new URL` would resolve
  * into a different path; the filename is percent-encoded into the fixed
  * Commons host. Returns `null` for unusable input, as `Commons.filePathUrl`
- * does. The returned `{ externalId, externalIri }` are both trusted.
+ * does. The returned `filename` is the trimmed claim as spelled (the
+ * {@link ImageFact} `filename`) and `iri` is its `Special:FilePath` URL;
+ * both are trusted.
  */
 export function normaliseCommonsImage(
   raw: unknown,
-): { readonly externalId: string; readonly externalIri: string } | null {
+): { readonly filename: string; readonly iri: string } | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0 || trimmed.length > 256) return null;
@@ -424,8 +426,8 @@ export function normaliseCommonsImage(
   }
   if (/[|#?]/.test(trimmed)) return null;
   // `normaliseTitle` adds the relative-path forms; its whitespace-collapsed
-  // result is discarded so `externalId` keeps the claim's own spelling.
+  // result is discarded so `filename` keeps the claim's own spelling.
   if (normaliseTitle(trimmed) === null) return null;
-  const externalIri = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`;
-  return { externalId: trimmed, externalIri };
+  const iri = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`;
+  return { filename: trimmed, iri };
 }
