@@ -6,9 +6,9 @@
  * Requests are anonymous: `Core` sends every `/w/api.php` request with
  * `origin=*`, so a browser page on another origin can read the response,
  * and MediaWiki then ignores any session cookies or `Authorization` header
- * (see {@link "./core".WikimediaRequest}).
+ * (see {@link WikimediaRequest}).
  *
- * Imports only {@link "./core"} — never `Rest` or `Commons` — so a consumer
+ * Imports only {@link Core} — never `Rest` or `Commons` — so a consumer
  * that imports only `Action` from the package barrel never pulls those
  * modules' code into a bundle.
  *
@@ -20,7 +20,7 @@
  * at worst yield fewer / no results, never an injection.
  *
  * @copyright Thomas Foster
- * @module action
+ * @module
  */
 
 import * as Effect from "effect/Effect";

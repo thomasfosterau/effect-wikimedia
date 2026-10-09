@@ -32,7 +32,7 @@
  * structurally until a pure normaliser has checked every field.
  *
  * @copyright Thomas Foster
- * @module core
+ * @module
  */
 
 import * as Context from "effect/Context";
@@ -153,7 +153,7 @@ const ALLOWED_HOSTS: ReadonlySet<string> = new Set(["wikidata.org", "www.wikidat
  * Wikipedia (`en.wikipedia.org`, `zh-yue.wikipedia.org`, …), any other
  * Wikimedia project host (`commons.wikimedia.org`, `meta.wikimedia.org`, …),
  * and any Wikidata subdomain — notably `query.wikidata.org`, the Wikidata
- * Query Service (WDQS) SPARQL endpoint the {@link "./sparql"} module targets.
+ * Query Service (WDQS) SPARQL endpoint the `Sparql` module targets.
  */
 const ALLOWED_HOST_SUFFIXES: readonly string[] = [
   ".wikipedia.org",
@@ -166,7 +166,7 @@ const MAX_HOST_LENGTH = 100;
 
 /**
  * Validates and lower-cases an untrusted wiki host. Only exact matches
- * against {@link ALLOWED_HOSTS} or a subdomain of {@link ALLOWED_HOST_SUFFIXES}
+ * against `ALLOWED_HOSTS` or a subdomain of `ALLOWED_HOST_SUFFIXES`
  * are accepted — this is the SSRF guard: every request this package builds
  * targets `https://<validated host><fixed path>`, so a caller (or a value
  * threaded through from an untrusted source) can never redirect a request
@@ -463,11 +463,27 @@ function describeHttpError(error: HttpClientError.HttpClientError): string {
 export class WikimediaClient extends Context.Service<
   WikimediaClient,
   {
+    /**
+     * Sends a GET for `request` and decodes the JSON body through `schema`.
+     * Fails with {@link InvalidRequest} for a host outside the allowed
+     * families, {@link RateLimited} for a `429` / `503` or a `maxlag` error
+     * body once `retry` (default {@link DEFAULT_RETRY_OPTIONS}) is
+     * exhausted, and {@link RequestFailed} for any other non-2xx status, a
+     * transport error, or a body that does not match `schema`.
+     */
     readonly getJson: <S extends Schema.Top>(
       request: WikimediaRequest,
       schema: S,
       retry?: RetryOptions,
     ) => Effect.Effect<S["Type"], WikimediaError, S["DecodingServices"]>;
+    /**
+     * Sends a GET for `request` and returns the raw body as text, undecoded
+     * (the REST/Parsoid HTML endpoints answer `text/html`). Fails with
+     * {@link InvalidRequest} for a host outside the allowed families,
+     * {@link RateLimited} for a `429` / `503` once `retry` (default
+     * {@link DEFAULT_RETRY_OPTIONS}) is exhausted, and {@link RequestFailed}
+     * for any other non-2xx status or a transport error.
+     */
     readonly getText: (
       request: WikimediaRequest,
       retry?: RetryOptions,

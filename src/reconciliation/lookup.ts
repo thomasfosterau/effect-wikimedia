@@ -8,7 +8,7 @@
  * `instance of` where cheap) for a reviewer to disambiguate. Enrich pulls the
  * selected facts for a **confirmed** QID — the item itself, its curated
  * external identifiers, dates, and images ({@link WikidataFacts}, each a
- * {@link "./candidate".WikidataFact} tagged by kind).
+ * {@link Reconciliation.WikidataFact} tagged by kind).
  *
  * Runs over this package's `Action` and `Wikidata` modules through
  * `Core.WikimediaClient`: provide {@link wikidataLookupLayer} in production,
@@ -100,7 +100,7 @@ export class WikidataLookup extends Context.Service<
     /**
      * Fetch the selected enrichment facts for a **confirmed** QID: the
      * item itself, then its curated external identifiers, dates and
-     * images, each a {@link "./candidate".WikidataFact} tagged by kind.
+     * images, each a {@link Reconciliation.WikidataFact} tagged by kind.
      * Returns `null` when the item is absent upstream; fails
      * `InvalidQuery` for a non-QID input.
      */

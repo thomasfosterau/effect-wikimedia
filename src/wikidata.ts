@@ -6,7 +6,7 @@
  * Requests are anonymous: `Core` sends every `/w/api.php` request with
  * `origin=*`, so a browser page on another origin can read the response,
  * and MediaWiki then ignores any session cookies or `Authorization` header
- * (see {@link "./core".WikimediaRequest}).
+ * (see {@link Core.WikimediaRequest}).
  *
  * Rather than narrowing only the handful of fields reconciliation needs,
  * this module exposes the honest thing: a
@@ -25,12 +25,12 @@
  * typed {@link UnknownValue} member carrying the raw payload, **never** a
  * decode failure. The type model is the part that is allowed to be strict.
  *
- * Imports only {@link "./core"} — never `Action`, `Rest`, or `Commons` — so
+ * Imports only {@link Core} — never `Action`, `Rest`, or `Commons` — so
  * a consumer that imports only `Wikidata` from the package barrel never
  * pulls those modules' code into a bundle.
  *
  * @copyright Thomas Foster
- * @module wikidata
+ * @module
  */
 
 import * as Effect from "effect/Effect";
@@ -593,7 +593,7 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
  * carries no valid id, or Wikibase flagged it `missing`. Pure, total, and
  * lenient: a partial / malformed / future-shaped object yields `null` (or a
  * best-effort item), never a throw. This is the entry point the
- * {@link "./dumps"} entity-dump pipeline runs each dump line through.
+ * {@link Dumps} entity-dump pipeline runs each dump line through.
  */
 export function decodeEntity(raw: unknown): WikidataItem | null {
   if (typeof raw !== "object" || raw === null) return null;

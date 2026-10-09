@@ -144,9 +144,9 @@ const isHit = (record: EntityRecord): record is EntityHit => record._tag === "en
 
 /**
  * Projects an {@link EntityRecord} stream down to just the successfully
- * decoded {@link "../wikidata".WikidataItem}s, dropping the per-line error
- * elements. Compose this after {@link entityRecords} when a consumer wants
- * only the good entities and is content to ignore corrupt lines.
+ * decoded {@link WikidataItem}s, dropping the per-line error elements.
+ * Compose this after {@link entityRecords} when a consumer wants only the
+ * good entities and is content to ignore corrupt lines.
  */
 export const onlyEntities = <E, R>(
   records: Stream.Stream<EntityRecord, E, R>,

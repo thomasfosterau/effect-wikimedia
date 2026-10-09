@@ -169,7 +169,7 @@ export interface Wikilink {
 /**
  * A bracketed external link `[https://example.org label]` (or bare
  * `[https://example.org]`). `label` includes the separating whitespace as
- * leading text so that serialization is exact; {@link labelText} on the
+ * leading text so that serialization is exact; {@link stripToText} on the
  * query surface trims it. Bare (unbracketed) URLs are intentionally not
  * recognised — they stay in {@link Text}.
  */
@@ -188,7 +188,7 @@ export interface ExternalLink {
  * semantics below is left in the surrounding text, not stored here.
  *
  * **Chosen semantics** (matching MediaWiki, narrowed to `http`/`https` —
- * this package's protocol scope; see {@link PROTOCOL_RE} for the fuller list
+ * this package's protocol scope; see the parser's `PROTOCOL_RE` for the fuller list
  * honoured by bracketed links):
  *
  * - The URL body is the maximal run of characters excluding ASCII

@@ -1,0 +1,42 @@
+// The docs gate (`vp run docgen`, #20). TypeDoc renders the API reference for
+// everything reachable from the package's one entry point into the gitignored
+// `api-docs/`; the validation below, with warnings as errors, is what makes it
+// a gate.
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "out": "api-docs",
+  "tsconfig": "tsconfig.json",
+  // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
+  // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
+  "skipErrorChecking": true,
+  // TypeDoc's default list minus `Property`: every export (and every method)
+  // needs a doc comment, but the fields of the schemas and interfaces aren't
+  // all documented yet (#79).
+  "requiredToBeDocumented": [
+    "Enum",
+    "EnumMember",
+    "Variable",
+    "Function",
+    "Class",
+    "Interface",
+    "Method",
+    "Accessor",
+    "TypeAlias"
+  ],
+  // Links that resolve into `effect` (our own, and the ones inherited from
+  // Effect's comments on `Schema.TaggedError` statics such as `makeEffect`)
+  // point at Effect's API reference, the URL its own README gives.
+  "externalSymbolLinkMappings": {
+    "effect": { "*": "https://effect.website/docs/v4/api/effect" }
+  },
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "invalidPath": true,
+    "rewrittenLink": true,
+    "notDocumented": true,
+    "unusedMergeModuleWith": true
+  },
+  "treatWarningsAsErrors": true
+}
