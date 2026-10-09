@@ -205,12 +205,7 @@ function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
       if (value._tag !== "string") continue;
       const image = normaliseCommonsImage(value.value);
       if (image === null) continue;
-      out.push({
-        _tag: "Image",
-        property,
-        filename: image.externalId,
-        iri: image.externalIri,
-      });
+      out.push({ _tag: "Image", property, ...image });
     }
   }
   return out;
