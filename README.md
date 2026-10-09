@@ -70,6 +70,10 @@ Every Action API (`/w/api.php`) request carries `origin=*`, so a page on another
 - **`Dumps`** — Wikimedia dump processing as `Stream` pipelines: the Wikidata JSON entity dump decoded through `Wikidata`'s model, MediaWiki XML pages / incrementals via a scoped SAX-style scanner, and Node-only byte sources (file / resumable HTTP range) with pluggable gzip / bz2 decompression stages. Those byte sources are the package's only Node-only exports; the pipelines themselves stay runtime-agnostic over any `Stream<Uint8Array>`.
 - **`Reconciliation`** — the one _opinionated_ namespace, layered on top of `Action` / `Wikidata`: resolve a label or an external identifier to candidate Wikidata items (**Match**), then pull the selected facts for a confirmed QID (**Enrich**). It carries policy the surface modules deliberately don't — input validators, curated property allowlists, and the candidate/fact shapes. It is persistence-free: Match returns candidates, Enrich returns facts as a `WikidataFact` union tagged by kind (`Item`, `Identifier`, `Date`, `Image`), and storing either is the caller's job.
 
+## Contact
+
+Questions, bug reports, and reports from Wikimedia operators about this client's traffic: email [me@thomasfoster.au](mailto:me@thomasfoster.au). The source repository is private, so there is no public issue tracker.
+
 ## Development
 
 Commands and conventions: [AGENTS.md](AGENTS.md). Releases: [docs/RELEASING.md](docs/RELEASING.md).
