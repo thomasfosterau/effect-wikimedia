@@ -9,19 +9,19 @@
  * @module tests/dumps/sources
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
-import { gzipSync } from "node:zlib";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { compose, Duplex, PassThrough, Readable, Transform } from "node:stream";
+import { createGunzip, gzipSync } from "node:zlib";
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { Core, Dumps } from "../../src/index.ts";
-import { runTest, runTestExit } from "../helpers/effect.ts";
+import { expectFailureInstanceOf, runTest, runTestExit } from "../helpers/effect.ts";
 
 const DUMP = '[\n{"type":"item","id":"Q1"},\n{"type":"item","id":"Q2"}\n]\n';
 
@@ -76,6 +76,84 @@ describe("decompression stages", () => {
       Stream.runCollect(source.pipe(Dumps.decompressWith(Dumps.gunzipTransform))),
     );
     expect(decodeUtf8(bytes)).toBe(DUMP);
+  });
+});
+
+// ── Structural stream types ──────────────────────────────────────────────
+
+describe("structural stream types", () => {
+  // The public signatures name `NodeReadableLike` / `NodeDuplexLike` rather
+  // than `node:stream` classes, so the published declarations need no
+  // `@types/node` (#73). These pin that real Node streams still fit them.
+  it("accept real Node readables", () => {
+    expectTypeOf<ReturnType<typeof createReadStream>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<ReturnType<typeof Readable.from>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<ReturnType<typeof createGunzip>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<ReturnType<typeof compose>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<Readable>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<TrackedGzSource>().toExtend<Dumps.NodeReadableLike>();
+  });
+
+  it("accept real Node duplexes and transforms as decompressors", () => {
+    expectTypeOf<ReturnType<typeof createGunzip>>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf<Duplex>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf<Transform>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf<PassThrough>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf(() => createGunzip()).toExtend<Dumps.Decompressor>();
+    expectTypeOf(() => new PassThrough()).toExtend<Dumps.Decompressor>();
+    // A readable-only stream is not a decompressor: it has no writable side.
+    expectTypeOf<Readable>().not.toExtend<Dumps.NodeDuplexLike>();
+  });
+
+  it("runs a caller-supplied Transform that is not a zlib stream", async () => {
+    // An identity stage: the point is a plain `stream.Transform` subclass,
+    // the shape a third-party bzip2 decoder has, through `decompressWith`.
+    const source = Dumps.fromNodeReadable(() => Readable.from([Buffer.from(DUMP)]));
+    const bytes = await runTest(
+      Stream.runCollect(source.pipe(Dumps.decompressWith(() => new PassThrough()))),
+    );
+    expect(decodeUtf8(bytes)).toBe(DUMP);
+  });
+});
+
+/**
+ * A value that fits {@link Dumps.NodeDuplexLike} but is not a Node stream: it
+ * has none of the internals `stream.compose` relies on, so composing it would
+ * hang rather than fail.
+ */
+const fakeDuplex = (): Dumps.NodeDuplexLike => ({
+  destroyed: false,
+  destroy: () => undefined,
+  write: () => true,
+  end: () => undefined,
+  async *[Symbol.asyncIterator]() {},
+});
+
+describe("a decompressor that is not a Node stream", () => {
+  // The structural type admits it, so the runtime must reject it. Without
+  // that check the stream never settles and ignores interruption, so
+  // `Effect.timeout` can't bound it; racing a timer turns a regression into
+  // a prompt failure instead of a test timeout.
+  const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
+    const outcome = await Promise.race([
+      runTestExit(Stream.runDrain(stream)),
+      wait(1000).then(() => "hung" as const),
+    ]);
+    if (outcome === "hung") throw new Error("the stream hung instead of failing");
+    return expectFailureInstanceOf(outcome, Dumps.SourceError);
+  };
+
+  it("fails fromFile with a SourceError", async () => {
+    const path = join(tmp, "fake-decompressor.bin");
+    writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+    const error = await failsPromptly(Dumps.fromFile(path, { decompressor: fakeDuplex }));
+    expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
+  });
+
+  it("fails decompressWith with a SourceError", async () => {
+    const source = Dumps.fromNodeReadable(() => Readable.from([gzipSync(Buffer.from(DUMP))]));
+    const error = await failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
+    expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
   });
 });
 

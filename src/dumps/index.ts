@@ -16,7 +16,9 @@
  *
  * Byte sources and decompression ({@link "./sources"}) are the one Node-only
  * corner of the package; the pipelines themselves are runtime-agnostic and
- * operate on any `Stream<Uint8Array>`.
+ * operate on any `Stream<Uint8Array>`. Even the byte sources' declarations
+ * type their Node streams structurally, so type-checking the package needs
+ * no `@types/node`.
  *
  * ## Two decisions recorded here
  *
@@ -105,5 +107,7 @@ export {
   fromNodeReadable,
   gunzip,
   gunzipTransform,
+  type NodeDuplexLike,
+  type NodeReadableLike,
   SourceError,
 } from "./sources.ts";
