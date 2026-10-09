@@ -128,6 +128,33 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
 
 // ── Node Readable → Stream<Uint8Array> ───────────────────────────────────
 
+const destroyReadable = (readable: NodeReadableLike): void => {
+  if (!readable.destroyed) readable.destroy();
+};
+
+/**
+ * Iterates `readable` through an iterator whose `return()` destroys the
+ * Readable before delegating. `Stream.fromAsyncIterable` awaits `return()` on
+ * teardown, and a Node Readable's iterator queues `return()` behind a pending
+ * `next()`; while the Readable is stalled that `next()` never settles, so
+ * teardown would hang (#83). Destroying first settles the pending `next()`,
+ * and the queued `return()` then completes.
+ */
+const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> => ({
+  [Symbol.asyncIterator]: () => {
+    const iterator = readable[Symbol.asyncIterator]();
+    return {
+      next: () => iterator.next(),
+      return: (value?: unknown) => {
+        destroyReadable(readable);
+        return iterator.return !== undefined
+          ? iterator.return(value)
+          : Promise.resolve({ done: true, value });
+      },
+    };
+  },
+});
+
 /**
  * Wraps any Node `Readable` ({@link NodeReadableLike}) as a
  * `Stream<Uint8Array>`; a read failure, or `evaluate` throwing, fails the
@@ -140,7 +167,9 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
  * A scope finalizer destroys the Readable on stream teardown, which is the
  * interruption guarantee: cancelling the consuming Effect destroys the
  * Readable and anything composed into it — an open file descriptor, an
- * in-flight gunzip — so no decompression work is orphaned.
+ * in-flight gunzip — so no decompression work is orphaned. It holds while the
+ * Readable is stalled waiting for data, too: the interruption completes
+ * without waiting for that data.
  */
 export const fromNodeReadable = (
   evaluate: () => NodeReadableLike,
@@ -148,12 +177,10 @@ export const fromNodeReadable = (
   Stream.unwrap(
     Effect.gen(function* () {
       const readable = yield* Effect.try({ try: evaluate, catch: sourceError });
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          if (!readable.destroyed) readable.destroy();
-        }),
-      );
-      return Stream.fromAsyncIterable(readable, sourceError);
+      // Covers teardown before the stream is first pulled, when no iterator
+      // exists for `destroyOnReturn` to destroy through.
+      yield* Effect.addFinalizer(() => Effect.sync(() => destroyReadable(readable)));
+      return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
     }),
   );
 

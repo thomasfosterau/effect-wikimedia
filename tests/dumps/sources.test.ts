@@ -174,18 +174,10 @@ describe("a decompressor that is not a Node stream", () => {
   it("tears down decompressWith's upstream source when it rejects the stage", async () => {
     // The upstream is already running by the time the stage is checked, so
     // the rejection must cancel it, or the source (an HTTP body, a file)
-    // stays open. This source never ends on its own: only teardown closes it.
-    // It always has a chunk ready, since teardown of a stalled one hangs
-    // whatever the stage does (#83).
+    // stays open. This source never pushes and never ends: only teardown
+    // closes it, and it must, even while stalled (#83).
     let opened = false;
-    const chunk = gzipSync(Buffer.from(DUMP));
-    const readable = new Readable({
-      read() {
-        this.push(chunk);
-      },
-    });
-    // Teardown destroys it with an AbortError; only the close matters here.
-    readable.on("error", () => undefined);
+    const readable = new Readable({ read() {} });
     const closed = new Promise<"closed">((resolve) =>
       readable.once("close", () => resolve("closed")),
     );
@@ -249,6 +241,32 @@ describe("interruption teardown", () => {
     await runTest(Fiber.interrupt(fiber));
     await wait(60);
     expect(source.destroyedFlag).toBe(true);
+  });
+
+  // A stalled Readable has a pending `next()` that no data will settle, and
+  // its async iterator queues `return()` behind it, so a teardown that waits
+  // on `return()` before destroying hangs (#83). Racing a timer turns that
+  // regression into a prompt failure instead of a test timeout.
+  const interruptsPromptly = async (stream: Stream.Stream<unknown, unknown>): Promise<void> => {
+    const fiber = Effect.runFork(Stream.runDrain(stream));
+    await wait(50); // let the drain reach the pending `next()`
+    const outcome = await Promise.race([
+      runTest(Fiber.interrupt(fiber)).then(() => "interrupted" as const),
+      wait(5000).then(() => "hung" as const),
+    ]);
+    expect(outcome).toBe("interrupted");
+  };
+
+  it("destroys a stalled Readable when the Effect is interrupted", async () => {
+    const readable = new Readable({ read() {} });
+    await interruptsPromptly(Dumps.fromNodeReadable(() => readable));
+    expect(readable.destroyed).toBe(true);
+  });
+
+  it("destroys a stalled source behind a decompression stage when the Effect is interrupted", async () => {
+    const readable = new Readable({ read() {} });
+    await interruptsPromptly(Dumps.fromNodeReadable(() => readable).pipe(Dumps.gunzip));
+    expect(readable.destroyed).toBe(true);
   });
 });
 
