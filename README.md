@@ -27,7 +27,7 @@ Every `Action`, `Rest`, `Commons`, `Wikidata` and `Sparql` request goes through 
 
 ### User-Agent
 
-Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sets the `User-Agent` header to `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://github.com/thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference; in Node the value is sent verbatim:
+Wikimedia's [User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) asks every caller to identify itself with contact details, so problem traffic can be raised with its owner rather than blocked. By default every request sets the `User-Agent` header to `Core.USER_AGENT`, which names only this package (`effect-wikimedia (+https://www.npmjs.com/package/@thomasfosterau/effect-wikimedia)`). Set your own through the `Core.UserAgent` reference; in Node the value is sent verbatim:
 
 ```ts
 import * as Layer from "effect/Layer";
