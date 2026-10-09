@@ -14,6 +14,14 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 The job runs in the protected `release` environment, so every run on `trunk` — the version PR and the publish alike — pauses for the environment's required reviewer to approve it.
 
+## Versioning
+
+The package stays on 0.x for now. A breaking change takes a `minor` changeset; `major` is never used while on 0.x.
+
+**Why 1.0.0 is missing.** 1.0.0 was published on 2026-08-14 from a changeset marked `major` in error, then unpublished; its change shipped as 0.3.0 instead (see `CHANGELOG.md`). The `v1.0.0` tag and GitHub release remain, but npm never accepts a version number again once it has been unpublished, so a `major` changeset on 0.x, which bumps to 1.0.0, would fail at publish.
+
+**Going stable means 2.0.0.** When the package is ready for a stable release, it goes straight from 0.x to 2.0.0 with a one-off manual bump in the Version Packages PR, the only time a version is set by hand: on the `changeset-release/trunk` branch, change `version` in `package.json` and the new heading in `CHANGELOG.md` to `2.0.0`, commit, and merge. The Release workflow rebuilds that branch on every push to `trunk`, discarding the edit, so make it last, after everything meant for 2.0.0 has landed. After 2.0.0, breaking changes take `major` changesets as usual.
+
 ## One-time repository setup
 
 1. **Allow the Action to open the release PR.** _Settings → Actions → General → Workflow permissions →_ enable **"Allow GitHub Actions to create and approve pull requests."** Without this, the workflow runs `changeset version` and pushes the `changeset-release/trunk` branch successfully, but fails at the final step with `GitHub Actions is not permitted to create or approve pull requests`, so no version PR is opened.
