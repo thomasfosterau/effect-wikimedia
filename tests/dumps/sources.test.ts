@@ -202,12 +202,20 @@ describe("a decompressor that is not a Node stream", () => {
 
   it("fails without an unhandled rejection when the upstream has already failed", async () => {
     // A source that fails as it starts leaves the bridged web stream errored,
-    // so cancelling it rejects; that rejection must not escape (Vitest fails
-    // the run on an unhandled rejection, and Node would exit).
-    const exit = await runTestExit(
-      Stream.runDrain(Stream.fail("boom").pipe(Dumps.decompressWith(fakeDuplex))),
-    );
-    expect(exit._tag).toBe("Failure");
+    // so cancelling it rejects; that rejection must not escape. The listener
+    // makes this test fail on its own (Vitest would otherwise only fail the
+    // run, unattributed).
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const error = await failsPromptly(Stream.fail("boom").pipe(Dumps.decompressWith(fakeDuplex)));
+      expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
+      await wait(20); // let any rejection surface
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });
 
