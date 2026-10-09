@@ -6,8 +6,9 @@
  * Match resolves a label and/or external identifiers to candidate Wikidata
  * items ({@link WikidataCandidate}: QID + label + description, plus
  * `instance of` where cheap) for a reviewer to disambiguate. Enrich pulls the
- * selected facts for a **confirmed** QID — the QID self-link, `sameAs`
- * external identifiers, dates, and images ({@link WikidataFacts}).
+ * selected facts for a **confirmed** QID — the item itself, its curated
+ * external identifiers, dates, and images ({@link WikidataFacts}, each a
+ * {@link "./candidate".WikidataFact} tagged by kind).
  *
  * Runs over this package's `Action` and `Wikidata` modules through
  * `Core.WikimediaClient`: provide {@link wikidataLookupLayer} in production,
@@ -97,10 +98,11 @@ export class WikidataLookup extends Context.Service<
       identifier: ExternalIdentifier,
     ) => Effect.Effect<readonly WikidataCandidate[], LookupError>;
     /**
-     * Fetch the selected enrichment facts (QID self-link, `sameAs`
-     * external identifiers, dates, images) for a **confirmed** QID, ready
-     * to store as provenance-marked mappings. Returns `null` when
-     * the item is absent upstream; fails `InvalidQuery` for a non-QID input.
+     * Fetch the selected enrichment facts for a **confirmed** QID: the
+     * item itself, then its curated external identifiers, dates and
+     * images, each a {@link "./candidate".WikidataFact} tagged by kind.
+     * Returns `null` when the item is absent upstream; fails
+     * `InvalidQuery` for a non-QID input.
      */
     readonly enrich: (qid: string) => Effect.Effect<WikidataFacts | null, LookupError>;
   }

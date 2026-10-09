@@ -29,6 +29,9 @@ import {
   normaliseQid,
   normaliseTimeValue,
   sanitiseCandidateText,
+  type DateFact,
+  type IdentifierFact,
+  type ImageFact,
   type WikidataCandidate,
   type WikidataFact,
   type WikidataFacts,
@@ -130,7 +133,7 @@ function statementValues(
 }
 
 /**
- * `sameAs` facts — an `exact` mapping per allowlisted external-id claim
+ * {@link IdentifierFact}s — one per allowlisted external-id claim
  * ({@link EXTERNAL_ID_AUTHORITIES}). Only a typed `external-id` datavalue
  * is read (the property's registered Wikibase datatype); its value is
  * re-validated by {@link normaliseExternalIdValue}, then checked against
@@ -138,63 +141,64 @@ function statementValues(
  * template, so a hostile value never reaches a stored IRI. A value outside
  * the format yields no fact.
  */
-function sameAsFacts(item: Wikidata.WikidataItem): WikidataFact[] {
-  const out: WikidataFact[] = [];
+function identifierFacts(item: Wikidata.WikidataItem): IdentifierFact[] {
+  const out: IdentifierFact[] = [];
   for (const [property, scheme] of Object.entries(EXTERNAL_ID_AUTHORITIES)) {
     for (const value of statementValues(item, property)) {
       if (out.length >= MAX_SAME_AS) return out;
       if (value._tag !== "external-id") continue;
       const validated = normaliseExternalIdValue(value.value);
       if (validated === null) continue;
-      const externalIri = scheme.iri(validated);
-      if (externalIri === null) continue;
+      const iri = scheme.iri(validated);
+      if (iri === null) continue;
       out.push({
+        _tag: "Identifier",
+        property,
         authority: scheme.authority,
-        externalId: validated,
-        externalIri,
-        mappingKind: "exact",
-        notes: null,
+        value: validated,
+        iri,
       });
     }
   }
   return out;
 }
 
+/** Wikibase's precision code when it is an integer in its 0–14 range, else `null`. */
+function timePrecision(precision: number | null): number | null {
+  return precision !== null && Number.isInteger(precision) && precision >= 0 && precision <= 14
+    ? precision
+    : null;
+}
+
 /**
- * Date facts ({@link DATE_PROPERTIES}) — `equivalent` mappings keyed by the
- * date property's entity IRI, the typed `time` value validated by
- * {@link normaliseTimeValue}, the human label stored in `notes`.
+ * {@link DateFact}s ({@link DATE_PROPERTIES}) — the typed `time` value
+ * validated by {@link normaliseTimeValue}, its precision code range-checked,
+ * and the property's English label.
  */
-function dateFacts(item: Wikidata.WikidataItem): WikidataFact[] {
-  const out: WikidataFact[] = [];
+function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
+  const out: DateFact[] = [];
   for (const [property, label] of Object.entries(DATE_PROPERTIES)) {
     for (const value of statementValues(item, property)) {
       if (out.length >= MAX_DATES) return out;
       if (value._tag !== "time") continue;
       const time = normaliseTimeValue(value.time);
       if (time === null) continue;
-      out.push({
-        authority: "wikidata",
-        externalId: time,
-        externalIri: wikidataEntityIri(property),
-        mappingKind: "equivalent",
-        notes: label,
-      });
+      out.push({ _tag: "Date", property, label, time, precision: timePrecision(value.precision) });
     }
   }
   return out;
 }
 
 /**
- * Image facts ({@link IMAGE_PROPERTIES}) — `equivalent` mappings to the
- * Commons `Special:FilePath` URL built by {@link normaliseCommonsImage}.
+ * {@link ImageFact}s ({@link IMAGE_PROPERTIES}) — the Commons filename and
+ * the `Special:FilePath` URL built by {@link normaliseCommonsImage}.
  * Deliberately keeps this namespace's own filename → URL policy rather than
  * `Commons.filePathUrl` — that helper canonicalises spaces to underscores
- * (MediaWiki's canonical title form), which would change the `externalIri`
- * of facts a consumer has already stored.
+ * (MediaWiki's canonical title form), which would change the `iri` of facts
+ * a consumer has already stored.
  */
-function imageFacts(item: Wikidata.WikidataItem): WikidataFact[] {
-  const out: WikidataFact[] = [];
+function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
+  const out: ImageFact[] = [];
   for (const property of IMAGE_PROPERTIES) {
     for (const value of statementValues(item, property)) {
       if (out.length >= MAX_IMAGES) return out;
@@ -202,11 +206,10 @@ function imageFacts(item: Wikidata.WikidataItem): WikidataFact[] {
       const image = normaliseCommonsImage(value.value);
       if (image === null) continue;
       out.push({
-        authority: "wikimedia-commons",
-        externalId: image.externalId,
-        externalIri: image.externalIri,
-        mappingKind: "equivalent",
-        notes: "image",
+        _tag: "Image",
+        property,
+        filename: image.externalId,
+        iri: image.externalIri,
       });
     }
   }
@@ -214,26 +217,19 @@ function imageFacts(item: Wikidata.WikidataItem): WikidataFact[] {
 }
 
 /**
- * Builds the neutral {@link WikidataFacts} the enrich operation asserts for
- * a confirmed, already-fetched item: the **QID self-link** plus the
- * {@link sameAsFacts}, {@link dateFacts}, and {@link imageFacts} branches.
+ * Builds the {@link WikidataFacts} the enrich operation returns for a
+ * confirmed, already-fetched item: the {@link ItemFact} for `qid`, then the
+ * {@link identifierFacts}, {@link dateFacts} and {@link imageFacts} branches.
  * Each branch is bounded and re-validates the upstream value, so a hostile
  * response can at worst yield fewer facts — never an injection or an
- * arbitrary host in a stored IRI. Presence (the `wbgetentities` miss /
+ * arbitrary host in a returned IRI. Presence (the `wbgetentities` miss /
  * `missing`-sentinel case) is handled by the caller, which only calls this
  * once it has a fetched `WikidataItem` for `qid`.
  */
 export function normaliseFacts(item: Wikidata.WikidataItem, qid: string): WikidataFacts {
   const facts: WikidataFact[] = [
-    // The QID self-link (the canonical Wikidata correspondence).
-    {
-      authority: "wikidata",
-      externalId: qid,
-      externalIri: wikidataEntityIri(qid),
-      mappingKind: "exact",
-      notes: null,
-    },
-    ...sameAsFacts(item),
+    { _tag: "Item", qid, iri: wikidataEntityIri(qid) },
+    ...identifierFacts(item),
     ...dateFacts(item),
     ...imageFacts(item),
   ];

@@ -23,16 +23,22 @@
  * @module tests/lookup
  */
 
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Core from "../../src/core.ts";
 import {
+  type DateFact,
   type ExternalIdentifier,
+  type IdentifierFact,
+  type ImageFact,
   InvalidQuery,
+  type ItemFact,
   type LookupError,
   LookupFailed,
   type WikidataCandidate,
+  WikidataFact,
   type WikidataFacts,
   WikidataLookup,
   wikidataLookupClientLayer,
@@ -491,103 +497,185 @@ describe("WikidataLookup.enrich", () => {
     return facts;
   };
 
-  it("returns the QID self-link and every curated sameAs authority", async () => {
+  it("returns the item fact first, then every curated authority as an Identifier fact", async () => {
     const { requests, layer } = stubClient({
       "action=wbgetentities": { body: enrichBody("Q42") },
     });
     const facts = await loadFacts(layer, "Q42");
 
     expect(facts.qid).toBe("Q42");
-    expect(facts.facts).toEqual(
-      expect.arrayContaining([
-        {
-          authority: "wikidata",
-          externalId: "Q42",
-          externalIri: "http://www.wikidata.org/entity/Q42",
-          mappingKind: "exact",
-          notes: null,
-        },
-        {
-          authority: "viaf",
-          externalId: "113230702",
-          externalIri: "https://viaf.org/viaf/113230702",
-          mappingKind: "exact",
-          notes: null,
-        },
-        // Every other curated `sameAs` authority — not just VIAF.
-        {
-          authority: "isni",
-          externalId: "0000000121032683",
-          externalIri: "https://isni.org/isni/0000000121032683",
-          mappingKind: "exact",
-          notes: null,
-        },
-        {
-          authority: "orcid",
-          externalId: "0000-0002-1825-0097",
-          externalIri: "https://orcid.org/0000-0002-1825-0097",
-          mappingKind: "exact",
-          notes: null,
-        },
-        {
-          authority: "lccn",
-          externalId: "n79021164",
-          externalIri: "https://id.loc.gov/authorities/names/n79021164",
-          mappingKind: "exact",
-          notes: null,
-        },
-        {
-          authority: "gnd",
-          externalId: "118540238",
-          externalIri: "https://d-nb.info/gnd/118540238",
-          mappingKind: "exact",
-          notes: null,
-        },
-        {
-          authority: "bnf",
-          externalId: "119008064",
-          externalIri: "https://catalogue.bnf.fr/ark:/12148/cb119008064",
-          mappingKind: "exact",
-          notes: null,
-        },
-      ]),
-    );
+    expect(facts.facts[0]).toEqual({
+      _tag: "Item",
+      qid: "Q42",
+      iri: "http://www.wikidata.org/entity/Q42",
+    });
+    // Every curated authority — not just VIAF — in `EXTERNAL_ID_AUTHORITIES` order.
+    expect(facts.facts.filter(WikidataFact.guards.Identifier)).toEqual([
+      {
+        _tag: "Identifier",
+        property: "P214",
+        authority: "viaf",
+        value: "113230702",
+        iri: "https://viaf.org/viaf/113230702",
+      },
+      {
+        _tag: "Identifier",
+        property: "P213",
+        authority: "isni",
+        value: "0000000121032683",
+        iri: "https://isni.org/isni/0000000121032683",
+      },
+      {
+        _tag: "Identifier",
+        property: "P496",
+        authority: "orcid",
+        value: "0000-0002-1825-0097",
+        iri: "https://orcid.org/0000-0002-1825-0097",
+      },
+      {
+        _tag: "Identifier",
+        property: "P244",
+        authority: "lccn",
+        value: "n79021164",
+        iri: "https://id.loc.gov/authorities/names/n79021164",
+      },
+      {
+        _tag: "Identifier",
+        property: "P227",
+        authority: "gnd",
+        value: "118540238",
+        iri: "https://d-nb.info/gnd/118540238",
+      },
+      {
+        _tag: "Identifier",
+        property: "P268",
+        authority: "bnf",
+        value: "119008064",
+        iri: "https://catalogue.bnf.fr/ark:/12148/cb119008064",
+      },
+    ]);
     // The request targeted the fixed wbgetentities endpoint for the QID.
     expect(
       requests.some((r) => r.params?.action === "wbgetentities" && r.params?.ids === "Q42"),
     ).toBe(true);
   });
 
-  it("returns the birth-date fact", async () => {
+  it("returns the birth date as a Date fact with its label and precision", async () => {
     const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
     const facts = await loadFacts(layer, "Q42");
 
-    expect(facts.facts).toContainEqual({
-      authority: "wikidata",
-      externalId: "1952-03-11T00:00:00Z",
-      externalIri: "http://www.wikidata.org/entity/P569",
-      mappingKind: "equivalent",
-      notes: "date of birth",
-    });
-  });
-
-  it("returns only the accepted image fact, dropping a hostile filename", async () => {
-    const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
-    const facts = await loadFacts(layer, "Q42");
-
-    const images = facts.facts.filter((f) => f.authority === "wikimedia-commons");
-    // The second P18 claim's hostile filename (`#`) was rejected, not
-    // stored as a second image fact.
-    expect(images).toEqual([
+    expect(facts.facts.filter(WikidataFact.guards.Date)).toEqual([
       {
-        authority: "wikimedia-commons",
-        externalId: "Douglas adams portrait.jpg",
-        externalIri:
-          "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait.jpg",
-        mappingKind: "equivalent",
-        notes: "image",
+        _tag: "Date",
+        property: "P569",
+        label: "date of birth",
+        time: "1952-03-11T00:00:00Z",
+        precision: 11,
       },
     ]);
+  });
+
+  it("reports a missing or out-of-range precision as null", async () => {
+    const timeClaim = (precision: unknown) => ({
+      mainsnak: {
+        snaktype: "value",
+        property: "P569",
+        datatype: "time",
+        datavalue: {
+          type: "time",
+          value: {
+            time: "+1952-00-00T00:00:00Z",
+            ...(precision === undefined ? {} : { precision }),
+          },
+        },
+      },
+    });
+    const { layer } = stubClient({
+      "action=wbgetentities": {
+        body: {
+          entities: {
+            Q1: {
+              id: "Q1",
+              claims: {
+                P569: [
+                  timeClaim(9),
+                  timeClaim(undefined),
+                  timeClaim(15),
+                  timeClaim(9.5),
+                  timeClaim(-1),
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+    const facts = await loadFacts(layer, "Q1");
+    expect(facts.facts.filter(WikidataFact.guards.Date).map((fact) => fact.precision)).toEqual([
+      9,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("returns only the accepted Image fact, dropping a hostile filename", async () => {
+    const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
+    const facts = await loadFacts(layer, "Q42");
+
+    // The second P18 claim's hostile filename (`#`) was rejected, not
+    // returned as a second image fact.
+    expect(facts.facts.filter(WikidataFact.guards.Image)).toEqual([
+      {
+        _tag: "Image",
+        property: "P18",
+        filename: "Douglas adams portrait.jpg",
+        iri: "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait.jpg",
+      },
+    ]);
+  });
+
+  it("returns facts in kind order, each decoding against the WikidataFact schema", async () => {
+    const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
+    const facts = await loadFacts(layer, "Q42");
+
+    expect(facts.facts.map((fact) => fact._tag)).toEqual([
+      "Item",
+      ...Array.from({ length: 6 }, () => "Identifier"),
+      "Date",
+      "Image",
+    ]);
+    for (const fact of facts.facts) {
+      expect(Schema.decodeSync(WikidataFact)(fact)).toEqual(fact);
+    }
+    // `match` is exhaustive over the four kinds.
+    const describeFact = WikidataFact.match({
+      Item: (fact) => `item ${fact.qid}`,
+      Identifier: (fact) => `${fact.authority} ${fact.value}`,
+      Date: (fact) => `${fact.label} ${fact.time}`,
+      Image: (fact) => `image ${fact.filename}`,
+    });
+    expect(facts.facts.map(describeFact).slice(-2)).toEqual([
+      "date of birth 1952-03-11T00:00:00Z",
+      "image Douglas adams portrait.jpg",
+    ]);
+  });
+
+  it("carries no website mapping-table fields (mappingKind, notes)", async () => {
+    const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
+    const facts = await loadFacts(layer, "Q42");
+    for (const fact of facts.facts) {
+      expect(fact).not.toHaveProperty("mappingKind");
+      expect(fact).not.toHaveProperty("notes");
+    }
+    // Type level: no variant of the union declares either field.
+    expectTypeOf<
+      Extract<
+        keyof ItemFact | keyof IdentifierFact | keyof DateFact | keyof ImageFact,
+        "mappingKind" | "notes"
+      >
+    >().toEqualTypeOf<never>();
   });
 
   it("drops a hostile external-id value and an out-of-shape date, keeping the QID link", async () => {
@@ -628,8 +716,9 @@ describe("WikidataLookup.enrich", () => {
     });
     const facts = await runTest(enrichEffect(layer, "Q1"));
     // Only the QID self-link survives.
-    expect(facts?.facts).toHaveLength(1);
-    expect(facts?.facts[0]?.authority).toBe("wikidata");
+    expect(facts?.facts).toEqual([
+      { _tag: "Item", qid: "Q1", iri: "http://www.wikidata.org/entity/Q1" },
+    ]);
   });
 
   it("drops an external-id value that would escape its authority's IRI path", async () => {
@@ -654,11 +743,16 @@ describe("WikidataLookup.enrich", () => {
     });
     const facts = await loadFacts(layer, "Q1");
     // The QID self-link and the well-formed (spaced) ISNI survive.
-    expect(facts.facts.map((fact) => fact.externalIri)).toEqual([
-      "http://www.wikidata.org/entity/Q1",
-      "https://isni.org/isni/0000000121032683",
+    expect(facts.facts).toEqual([
+      { _tag: "Item", qid: "Q1", iri: "http://www.wikidata.org/entity/Q1" },
+      {
+        _tag: "Identifier",
+        property: "P213",
+        authority: "isni",
+        value: "0000 0001 2103 2683",
+        iri: "https://isni.org/isni/0000000121032683",
+      },
     ]);
-    expect(facts.facts[1]?.externalId).toBe("0000 0001 2103 2683");
   });
 
   it("returns null when the item is absent upstream", async () => {
