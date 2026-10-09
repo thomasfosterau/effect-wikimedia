@@ -310,7 +310,9 @@ describe("interruption teardown", () => {
     }
     const readable = new InterruptsOnIterate({ read() {} });
     const exit = await orHung(runTestExit(Stream.runDrain(Dumps.fromNodeReadable(() => readable))));
-    expect(exit !== "hung" && Exit.hasInterrupts(exit)).toBe(true);
+    expect(exit).not.toBe("hung");
+    if (exit === "hung") return;
+    expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(readable.destroyed).toBe(true);
   });
 });
