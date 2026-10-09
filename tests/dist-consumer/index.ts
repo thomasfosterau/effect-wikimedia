@@ -119,6 +119,12 @@ assert<
 >();
 const items: Stream.Stream<Wikidata.WikidataItem> = Dumps.onlyEntities(Dumps.entityRecords(bytes));
 assert<Equals<ReturnType<typeof Dumps.fromFile>, Stream.Stream<Uint8Array, Dumps.SourceError>>>();
+// The Node-only byte sources type their streams structurally, so naming them
+// needs no `@types/node` (#73).
+assert<Equals<Dumps.Decompressor, () => Dumps.NodeDuplexLike>>();
+assert<
+  Equals<Parameters<typeof Dumps.fromNodeReadable>, [evaluate: () => Dumps.NodeReadableLike]>
+>();
 
 // --- Reconciliation ---------------------------------------------------------
 

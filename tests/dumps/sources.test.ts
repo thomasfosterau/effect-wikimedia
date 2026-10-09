@@ -9,12 +9,12 @@
  * @module tests/dumps/sources
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
-import { gzipSync } from "node:zlib";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { compose, Duplex, PassThrough, Readable, Transform } from "node:stream";
+import { createGunzip, gzipSync } from "node:zlib";
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -74,6 +74,43 @@ describe("decompression stages", () => {
     const source = Dumps.fromNodeReadable(() => Readable.from([gzipSync(Buffer.from(DUMP))]));
     const bytes = await runTest(
       Stream.runCollect(source.pipe(Dumps.decompressWith(Dumps.gunzipTransform))),
+    );
+    expect(decodeUtf8(bytes)).toBe(DUMP);
+  });
+});
+
+// ── Structural stream types ──────────────────────────────────────────────
+
+describe("structural stream types", () => {
+  // The public signatures name `NodeReadableLike` / `NodeDuplexLike` rather
+  // than `node:stream` classes, so the published declarations need no
+  // `@types/node` (#73). These pin that real Node streams still fit them.
+  it("accept real Node readables", () => {
+    expectTypeOf<ReturnType<typeof createReadStream>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<ReturnType<typeof Readable.from>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<ReturnType<typeof createGunzip>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<ReturnType<typeof compose>>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<Readable>().toExtend<Dumps.NodeReadableLike>();
+    expectTypeOf<TrackedGzSource>().toExtend<Dumps.NodeReadableLike>();
+  });
+
+  it("accept real Node duplexes and transforms as decompressors", () => {
+    expectTypeOf<ReturnType<typeof createGunzip>>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf<Duplex>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf<Transform>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf<PassThrough>().toExtend<Dumps.NodeDuplexLike>();
+    expectTypeOf(() => createGunzip()).toExtend<Dumps.Decompressor>();
+    expectTypeOf(() => new PassThrough()).toExtend<Dumps.Decompressor>();
+    // A readable-only stream is not a decompressor: it has no writable side.
+    expectTypeOf<Readable>().not.toExtend<Dumps.NodeDuplexLike>();
+  });
+
+  it("runs a caller-supplied Transform that is not a zlib stream", async () => {
+    // An identity stage: the point is a plain `stream.Transform` subclass,
+    // the shape a third-party bzip2 decoder has, through `decompressWith`.
+    const source = Dumps.fromNodeReadable(() => Readable.from([Buffer.from(DUMP)]));
+    const bytes = await runTest(
+      Stream.runCollect(source.pipe(Dumps.decompressWith(() => new PassThrough()))),
     );
     expect(decodeUtf8(bytes)).toBe(DUMP);
   });

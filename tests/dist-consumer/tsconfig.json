@@ -10,7 +10,11 @@
   // language-service plugin), and the root config excludes this directory.
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    // A browser consumer's lib, and what effect's own declarations need:
+    // `DOM` for the web types they name, `ESNext.Disposable` for `Disposable`
+    // / `AsyncDisposable` (`ES2025` or later also has them). The package's
+    // own declarations need nothing beyond `ES2022`.
+    "lib": ["ES2022", "DOM", "ESNext.Disposable"],
     // `nodenext` is the strictest consumer resolution: it requires the `types`
     // condition in `exports` and explicit `.js` extensions on every relative
     // specifier inside the emitted declarations. A `bundler` consumer accepts
@@ -20,10 +24,12 @@
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
     "noEmit": true,
-    // `dist/dumps/sources.d.ts` imports `node:stream` (and effect's own
-    // declarations name `Disposable`), so a consumer that type-checks the
-    // declarations currently needs `@types/node` (#73).
-    "types": ["node"],
+    // No `@types/node`, as in a browser or Worker project: the published
+    // declarations must not need Node's types (#73). The `Dumps` byte sources
+    // run on Node but type their streams structurally, and the build is
+    // `platform: "neutral"`; a `Buffer`, `NodeJS.*` or `node:*` type leaking
+    // into a declaration fails this check.
+    "types": [],
     "strict": true,
     "exactOptionalPropertyTypes": true,
     // The point of the check: type-check the published `.d.ts` files
