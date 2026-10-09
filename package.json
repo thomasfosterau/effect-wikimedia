@@ -14,9 +14,9 @@
     "wikipedia",
     "wikitext"
   ],
-  "homepage": "https://github.com/thomasfosterau/effect-wikimedia#readme",
+  "homepage": "https://www.npmjs.com/package/@thomasfosterau/effect-wikimedia",
   "bugs": {
-    "url": "https://github.com/thomasfosterau/effect-wikimedia/issues"
+    "email": "me@thomasfoster.au"
   },
   "license": "MIT",
   "author": "Thomas Foster <me@thomasfoster.au>",
