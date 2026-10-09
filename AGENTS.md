@@ -28,6 +28,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 - `tsc -p tsconfig.json` — Effect diagnostics: the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these.
 - `vp run test` — the Vitest suite.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
+- `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
 - `pnpm audit --audit-level high` — the supply-chain gate (network: needs the npm registry).
 - `pnpm changeset` — add a changeset.
 
@@ -41,7 +42,8 @@ Before you report work as done, run these in CI's order (`.github/workflows/ci.y
 2. `tsc -p tsconfig.json`
 3. `vp run test`
 4. `vp run build`
-5. `pnpm audit --audit-level high`
+5. `vp run check:dist`
+6. `pnpm audit --audit-level high`
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 

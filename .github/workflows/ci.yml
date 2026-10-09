@@ -59,5 +59,13 @@ jobs:
       - name: Build
         run: vp run build
 
+      # Type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts`
+      # with `skipLibCheck: false`, as a consumer's compiler sees the published
+      # package, so broken declarations fail here even when the source
+      # type-check passes (#20). Its `build` dependency replays from the step
+      # above.
+      - name: Dist-consumer declaration check
+        run: vp run check:dist
+
       - name: Audit
         run: pnpm audit --audit-level high

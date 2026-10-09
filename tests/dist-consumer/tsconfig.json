@@ -1,0 +1,35 @@
+{
+  // The dist-consumer declaration check (`vp run check:dist`, #20): type-checks
+  // `index.ts` the way a consumer's compiler sees the PUBLISHED package — the
+  // emitted `dist/*.d.ts`, reached through package.json `exports` — so broken
+  // declarations fail CI even when the source type-check passes. Run it after
+  // `vp run build`; without `dist/` the import does not resolve.
+  //
+  // Deliberately NOT extending ../../tsconfig.json: a consumer has none of the
+  // repo's source-only flags (`allowImportingTsExtensions`, the Effect
+  // language-service plugin), and the root config excludes this directory.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    // `nodenext` is the strictest consumer resolution: it requires the `types`
+    // condition in `exports` and explicit `.js` extensions on every relative
+    // specifier inside the emitted declarations. A `bundler` consumer accepts
+    // everything `nodenext` does.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    // `dist/dumps/sources.d.ts` imports `node:stream` (and effect's own
+    // declarations name `Disposable`), so a consumer that type-checks the
+    // declarations currently needs `@types/node` (#73).
+    "types": ["node"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    // The point of the check: type-check the published `.d.ts` files
+    // themselves, not just this file's uses of them.
+    "skipLibCheck": false,
+    "isolatedModules": true
+  },
+  "files": ["index.ts"]
+}
