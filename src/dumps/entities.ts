@@ -1,7 +1,7 @@
 /**
- * **Entity JSON dump** pipeline — the core of the {@link "./index" | Dumps}
- * surface. A Wikidata entity dump (`.json.bz2` / `.json.gz`) is a single
- * top-level JSON array printed one entity per line:
+ * **Entity JSON dump** pipeline — the core of the `Dumps` surface. A
+ * Wikidata entity dump (`.json.bz2` / `.json.gz`) is a single top-level JSON
+ * array printed one entity per line:
  *
  * ```text
  * [
@@ -14,18 +14,17 @@
  *
  * The opening `[` and closing `]` sit on their own lines, and every entity
  * line except the last carries a trailing comma. This module turns that byte
- * stream into a constant-memory {@link Stream} of typed
- * {@link "../wikidata".WikidataItem} records: decode bytes → text → lines,
- * strip the array framing per line, `JSON.parse` and decode each entity
- * through `Wikidata`'s model. **Lenient by construction** — a line that fails to
- * parse or is not a valid entity becomes a typed {@link DumpLineError}
- * *element*, never a stream failure, so one corrupt line in a 100M-line dump
- * does not tear the pipeline down.
+ * stream into a constant-memory {@link Stream} of typed {@link WikidataItem}
+ * records: decode bytes → text → lines, strip the array framing per line,
+ * `JSON.parse` and decode each entity through `Wikidata`'s model. **Lenient
+ * by construction** — a line that fails to parse or is not a valid entity
+ * becomes a typed {@link DumpLineError} *element*, never a stream failure, so
+ * one corrupt line in a 100M-line dump does not tear the pipeline down.
  *
- * Runtime-agnostic: this module imports only `effect` and the pure
- * {@link "../wikidata"} model (never its HTTP client). The byte source and
- * decompression stages live in {@link "./sources"} (Node-only); this module
- * operates on whatever `Stream<Uint8Array>` it is handed.
+ * Runtime-agnostic: this module imports only `effect` and the pure `Wikidata`
+ * model (never its HTTP client). The byte source and decompression stages
+ * (`fromFile`, `fromHttpRange`, `decompressWith`) are the Node-only corner;
+ * this module operates on whatever `Stream<Uint8Array>` it is handed.
  *
  * @copyright Thomas Foster
  * @module dumps/entities

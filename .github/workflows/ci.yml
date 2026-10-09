@@ -32,8 +32,9 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # `vp run` tasks (`test`, `build`) are content-addressed (`run.cache` in
-      # vite.config.ts); restoring the cache lets an unchanged task replay.
+      # `vp run` tasks (`test`, `build`, `check:dist`, `docgen`) are
+      # content-addressed (`run.cache` in vite.config.ts); restoring the cache
+      # lets an unchanged task replay.
       - name: Restore the Vite+ task cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
