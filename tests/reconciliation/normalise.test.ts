@@ -13,16 +13,17 @@
 
 import { describe, expect, it, vi } from "vite-plus/test";
 import type * as Wikidata from "../../src/wikidata.ts";
+import { normaliseCommonsImage } from "../../src/reconciliation/candidate.ts";
 import { normaliseFacts } from "../../src/reconciliation/normalise.ts";
 
 vi.mock(import("../../src/reconciliation/candidate.ts"), async (importOriginal) => {
   const original = await importOriginal();
   return {
     ...original,
-    normaliseCommonsImage: (raw: unknown) => {
+    normaliseCommonsImage: vi.fn((raw: unknown) => {
       const image = original.normaliseCommonsImage(raw);
       return image === null ? null : { ...image, helperOnly: "leaked" };
-    },
+    }),
   };
 });
 
@@ -63,5 +64,8 @@ describe("normaliseFacts Image facts", () => {
         iri: "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait.jpg",
       },
     ]);
+    // Fails, rather than passing vacuously, if the mock stops reaching
+    // `normalise.ts` (e.g. the helper moves module, or isolation is off).
+    expect(normaliseCommonsImage).toHaveBeenCalled();
   });
 });
