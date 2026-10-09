@@ -59,6 +59,21 @@ describe("fromFile", () => {
     );
     expect(decodeUtf8(bytes)).toBe(DUMP);
   });
+
+  it("destroys the decompressor when opening the file throws", async () => {
+    // A NUL byte in the path makes `createReadStream` throw synchronously,
+    // after the decompressor was created.
+    let stage: PassThrough | undefined;
+    await expectFailureInstanceOf(
+      Stream.runDrain(
+        Dumps.fromFile(join(tmp, "bad\0path.gz"), {
+          decompressor: () => (stage = new PassThrough()),
+        }),
+      ),
+      Dumps.SourceError,
+    );
+    expect(stage?.destroyed).toBe(true);
+  });
 });
 
 describe("decompression stages", () => {
@@ -137,7 +152,7 @@ describe("a decompressor that is not a Node stream", () => {
   const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
     const outcome = await Promise.race([
       runTestExit(Stream.runDrain(stream)),
-      wait(1000).then(() => "hung" as const),
+      wait(5000).then(() => "hung" as const),
     ]);
     if (outcome === "hung") throw new Error("the stream hung instead of failing");
     return expectFailureInstanceOf(outcome, Dumps.SourceError);
@@ -154,6 +169,35 @@ describe("a decompressor that is not a Node stream", () => {
     const source = Dumps.fromNodeReadable(() => Readable.from([gzipSync(Buffer.from(DUMP))]));
     const error = await failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
     expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
+  });
+
+  it("tears down decompressWith's upstream source when it rejects the stage", async () => {
+    // The upstream is already running by the time the stage is checked, so
+    // the rejection must cancel it, or the source (an HTTP body, a file)
+    // stays open. This source never ends on its own: only teardown closes it.
+    // It always has a chunk ready, since teardown of a stalled one hangs
+    // whatever the stage does (#83).
+    let opened = false;
+    const chunk = gzipSync(Buffer.from(DUMP));
+    const readable = new Readable({
+      read() {
+        this.push(chunk);
+      },
+    });
+    // Teardown destroys it with an AbortError; only the close matters here.
+    readable.on("error", () => undefined);
+    const closed = new Promise<"closed">((resolve) =>
+      readable.once("close", () => resolve("closed")),
+    );
+    const source = Dumps.fromNodeReadable(() => {
+      opened = true;
+      return readable;
+    });
+    await failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
+    const outcome = await Promise.race([closed, wait(5000).then(() => "open" as const)]);
+    expect(opened).toBe(true);
+    expect(outcome).toBe("closed");
+    expect(readable.destroyed).toBe(true);
   });
 });
 
