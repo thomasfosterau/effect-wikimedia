@@ -7,6 +7,9 @@
   "entryPoints": ["src/index.ts"],
   "out": "api-docs",
   "tsconfig": "tsconfig.json",
+  // Drops the members `Core.WikimediaClient` and `Reconciliation.WikidataLookup`
+  // inherit from Effect's `Context.Service`, keeping the `Service` shape (#87).
+  "plugin": ["./scripts/typedoc-context-service.mjs"],
   // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
   // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
   "skipErrorChecking": true,
