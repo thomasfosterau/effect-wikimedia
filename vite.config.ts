@@ -12,6 +12,21 @@ export default defineConfig({
     tasks: {
       build: "vp pack",
       test: "vp test run",
+      // The dist-consumer declaration check (#20): type-check
+      // `tests/dist-consumer/` against the emitted `dist/*.d.ts`, so broken
+      // published types fail even when the source type-check passes. Both
+      // compilers a consumer may run: TS 7 (`tsc`, what `typescript` installs
+      // today) and TS 6 (`tsc6`, the JS compiler behind editors and
+      // declaration tooling until TS 7.1 ships a JS API). The fixture's
+      // tsconfig carries no Effect plugin, so the patched `tsc` checks it as
+      // stock TS 7 would.
+      "check:dist": {
+        command: [
+          "tsc -p tests/dist-consumer/tsconfig.json",
+          "tsc6 -p tests/dist-consumer/tsconfig.json",
+        ],
+        dependsOn: ["build"],
+      },
     },
   },
 
@@ -42,7 +57,10 @@ export default defineConfig({
 
   /** `vp check` (Oxlint + tsgolint) */
   lint: {
-    ignorePatterns: ["**/dist/**"],
+    // `tests/dist-consumer/` resolves the package through the built `dist/`,
+    // which doesn't exist yet when `vp check` runs; `check:dist` type-checks it
+    // after the build instead.
+    ignorePatterns: ["**/dist/**", "tests/dist-consumer/**"],
     options: {
       typeAware: true,
       typeCheck: true,

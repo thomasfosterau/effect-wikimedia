@@ -49,5 +49,7 @@
     ]
   },
   "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
-  "exclude": ["node_modules", "dist"]
+  // `tests/dist-consumer/` type-checks against the built `dist/` under its own
+  // tsconfig (`vp run check:dist`), not against `src/`.
+  "exclude": ["node_modules", "dist", "tests/dist-consumer"]
 }
