@@ -286,6 +286,15 @@ describe("normaliseCommonsImage", () => {
     });
   });
 
+  it("keeps a File: prefix as the claim spells it, unlike Commons.filePathUrl", () => {
+    // Wikibase `commonsMedia` values carry no prefix, so `ImageFact.filename`
+    // has none in practice; this helper doesn't strip one if it appears.
+    expect(normaliseCommonsImage("File:Foo.jpg")).toEqual({
+      filename: "File:Foo.jpg",
+      iri: "https://commons.wikimedia.org/wiki/Special:FilePath/File%3AFoo.jpg",
+    });
+  });
+
   it("rejects path-breaking characters and empty / non-string input", () => {
     expect(normaliseCommonsImage("evil#name.jpg")).toBeNull();
     expect(normaliseCommonsImage("a?b.jpg")).toBeNull();

@@ -227,7 +227,9 @@ function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
       if (value._tag !== "string") continue;
       const image = normaliseCommonsImage(value.value);
       if (image === null) continue;
-      out.push({ _tag: "Image", property, ...image });
+      // Fields spelled out, not spread: a field the helper gains must not
+      // reach `ImageFact` at runtime, where no type check would see it.
+      out.push({ _tag: "Image", property, filename: image.filename, iri: image.iri });
     }
   }
   return out;
