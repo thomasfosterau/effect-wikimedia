@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. This repo publishes `@thomasfosterau/effect-wikimedia`, one package with a single `.` entry point: Effect clients for Wikipedia, Wikidata, Commons, WDQS, wikitext and dumps. It was extracted from `thomasfosterau/website` with `git subtree split`, so `git log` / `git blame` reach back through it; a bare `#NNN` in a comment ported from there names a **website** issue, not one in this tracker (write new ones as `website#NNN`).
 
-Toolchain differences from the other library repos: single package, so the tasks are `vp run test` / `vp run build` (no `-r`, no `test:unit`); the type check runs inside `vp check` (tsgolint), so there is no separate `vp run check`, and the patched native `tsc -p tsconfig.json` is the Effect-diagnostics gate; no fallow gate. The docs gate is TypeDoc (`vp run docgen`), not `@effect/docgen`: TypeDoc checks that `{@link}`s resolve, and `@effect/docgen` does not.
+Toolchain differences from the other library repos: single package, so the tasks keep the other repos' names (`check`, `test:unit`, `build`) but run without `-r` (`vp run check`, not `vp run -r check`); no fallow gate. The docs gate is TypeDoc (`vp run docgen`), not `@effect/docgen`: TypeDoc checks that `{@link}`s resolve, and `@effect/docgen` does not. `vp check` and `vp run check` are different commands: `vp check` is Vite+'s built-in format + lint + type-check (tsgolint), and `vp run check` is this repo's `check` task in `vite.config.ts`, the patched native `tsc -p tsconfig.json` that reports Effect diagnostics.
 
 ## Common pitfalls
 
@@ -25,24 +25,24 @@ Toolchain differences from the other library repos: single package, so the tasks
 ## Commands
 
 - `pnpm install --frozen-lockfile` — install exactly as CI does.
-- `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix.
-- `tsc -p tsconfig.json` — Effect diagnostics: the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these.
-- `vp run test` — the Vitest suite.
+- `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix. A Vite+ built-in, not the `check` task below.
+- `vp run check` — Effect diagnostics: runs `tsc -p tsconfig.json` with the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these. Cached; a change to `src/`, `tests/`, `tsconfig.json` or `node_modules` (the patched binary included) reruns it.
+- `vp run test:unit` — the Vitest suite.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
 - `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
 - `vp run docgen` — the docs gate: TypeDoc renders the API reference from the doc comments reachable from `src/index.ts` into the gitignored `api-docs/`, and fails on an undocumented export or method or a `{@link}` that resolves to nothing in the published surface (`typedoc.json`; `tsdoc.json` registers `@copyright`). Needs no build. Properties aren't required yet (#79).
 - `pnpm audit --audit-level high` — the supply-chain gate (network: needs the npm registry).
 - `pnpm changeset` — add a changeset.
 
-Use `./node_modules/.bin/vp` if `vp` is not on PATH. Run `tsc` as `./node_modules/.bin/tsc` unless `node_modules/.bin` leads PATH (as CI arranges): a global `tsc` is not the patched one and reports no Effect diagnostics.
+Use `./node_modules/.bin/vp` if `vp` is not on PATH. `vp run` puts this package's `node_modules/.bin` first on PATH, so its tasks always get the patched `tsc`. Run a bare `tsc` yourself only as `./node_modules/.bin/tsc`: a global `tsc` is not the patched one and reports no Effect diagnostics.
 
 ## Verification
 
 Before you report work as done, run these in CI's order (`.github/workflows/ci.yml`) and quote each command with its final pass/fail:
 
 1. `vp check`
-2. `tsc -p tsconfig.json`
-3. `vp run test`
+2. `vp run check`
+3. `vp run test:unit`
 4. `vp run build`
 5. `vp run check:dist`
 6. `vp run docgen`

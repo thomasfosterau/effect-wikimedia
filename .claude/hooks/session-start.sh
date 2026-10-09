@@ -8,9 +8,10 @@
 #
 # ## The problem it solves
 #
-# Every documented command here goes through `vp` (`vp check`, `vp run test`,
-# `vp run build`), and `vp` is a devDependency: it exists only in
-# `node_modules/.bin`, which is on nobody's PATH, and only after an install.
+# Every documented command here goes through `vp` (`vp check`,
+# `vp run check`, `vp run test:unit`, `vp run build`), and `vp` is a
+# devDependency: it exists only in `node_modules/.bin`, which is on nobody's
+# PATH, and only after an install.
 # In the Vite+ devcontainer image the global launcher is put on PATH by
 # `~/.bashrc` *below* Debian's interactive guard, so it is correct for a human
 # at a prompt and missing for every non-interactive shell, which is what an

@@ -3,15 +3,26 @@ import { defineConfig } from "vite-plus";
 /**
  * Vite+ configuration for the single package in this repository.
  *
- * `build` / `test` are Vite+ tasks rather than package.json scripts: a
- * package.json script can never be cached, however pure it is.
+ * The gates are Vite+ tasks rather than package.json scripts: a package.json
+ * script can never be cached, however pure it is. The task names (`check`,
+ * `test:unit`, `build`) match the other library repos (#20).
  */
 export default defineConfig({
   run: {
     cache: true,
     tasks: {
+      // The Effect-diagnostics gate (#20, #31). `vp check` type-checks with
+      // tsgolint, which reports no Effect diagnostics; `prepare` patches the
+      // native `tsc` (`@typescript/native`) with `effect-tsgo`, so this is the
+      // gate that fails on an Effect `error` diagnostic (warnings and
+      // suggestions print but don't fail it: `ignoreEffectWarningsInTscExitCode`
+      // in tsconfig.json). `vp run` puts this package's `node_modules/.bin`
+      // first on PATH, so the bare `tsc` is always the patched one. Not to be
+      // confused with `vp check`, the Vite+ built-in (Oxfmt + Oxlint +
+      // tsgolint).
+      check: "tsc -p tsconfig.json",
       build: "vp pack",
-      test: "vp test run",
+      "test:unit": "vp test run",
       // The dist-consumer declaration check (#20): type-check
       // `tests/dist-consumer/` against the emitted `dist/*.d.ts`, so broken
       // published types fail even when the source type-check passes. Both
@@ -79,7 +90,7 @@ export default defineConfig({
     ignorePatterns: ["**/dist/**", "api-docs/**"],
   },
 
-  /** `vp test` (Vitest) */
+  /** `vp test` (Vitest), which the `test:unit` task runs */
   test: {
     include: ["tests/**/*.test.ts"],
     testTimeout: 30_000,
