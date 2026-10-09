@@ -5,9 +5,9 @@
  *
  * Its lookups are anonymous: they go through the Action API, which `Core`
  * calls with `origin=*`, so MediaWiki ignores any session cookies or
- * `Authorization` header (see {@link "../core".WikimediaRequest}).
+ * `Authorization` header (see {@link Core.WikimediaRequest}).
  *
- * @module reconciliation
+ * @module
  */
 
 export * from "./candidate.ts";

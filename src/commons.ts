@@ -5,14 +5,14 @@
  * `getFileInfo` requests are anonymous: `Core` sends every `/w/api.php` request with
  * `origin=*`, so a browser page on another origin can read the response,
  * and MediaWiki then ignores any session cookies or `Authorization` header
- * (see {@link "./core".WikimediaRequest}).
+ * (see {@link Core.WikimediaRequest}).
  *
- * Imports only {@link "./core"} — never `Action` or `Rest` — so a consumer
+ * Imports only {@link Core} — never `Action` or `Rest` — so a consumer
  * that imports only `Commons` from the package barrel never pulls those
  * modules' code into a bundle.
  *
  * @copyright Thomas Foster
- * @module commons
+ * @module
  */
 
 import * as Effect from "effect/Effect";

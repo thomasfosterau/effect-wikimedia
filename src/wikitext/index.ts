@@ -13,7 +13,7 @@
  * ```
  *
  * @copyright Thomas Foster
- * @module wikitext
+ * @module
  */
 
 export * from "./ast.ts";

@@ -16,19 +16,19 @@
  * service's 60-second timeout and earn a rate-limit; {@link query} therefore
  * requires the SPARQL text to carry a `LIMIT` clause (or an explicit opt-out
  * for a query that is intrinsically bounded) and fails
- * {@link "./core".InvalidRequest} before any request when it does not.
+ * {@link InvalidRequest} before any request when it does not.
  *
- * Etiquette is inherited from {@link "./core"}: the polite `User-Agent` and
+ * Etiquette is inherited from {@link Core}: the polite `User-Agent` and
  * `Api-User-Agent` on every request, and WDQS's `429` / `503` +
  * `Retry-After` backoff handled by the shared retry loop. `maxlag` — an
  * Action-API parameter WDQS does not accept — is omitted.
  *
- * Imports only {@link "./core"} — never `Action`, `Rest`, `Commons`, or
+ * Imports only {@link Core} — never `Action`, `Rest`, `Commons`, or
  * `Wikidata` — so a consumer that imports only `Sparql` from the package
  * barrel never pulls those modules' code into a bundle.
  *
  * @copyright Thomas Foster
- * @module sparql
+ * @module
  */
 
 import * as Effect from "effect/Effect";
@@ -253,7 +253,7 @@ export interface QueryOptions {
 /**
  * Runs a SPARQL query against WDQS and decodes the JSON results into typed
  * terms. Enforces the LIMIT discipline: unless `allowUnbounded` is set, a
- * query with no `LIMIT` clause fails {@link "./core".InvalidRequest} before
+ * query with no `LIMIT` clause fails {@link InvalidRequest} before
  * any request is made. The query text is sent as a percent-encoded query
  * parameter (never interpolated into the path), over the shared client's UA
  * and retry etiquette; `format=json` is forced.

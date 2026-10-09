@@ -27,6 +27,13 @@ export default defineConfig({
         ],
         dependsOn: ["build"],
       },
+      // The docs gate (#20): TypeDoc renders the API reference from the doc
+      // comments reachable from `src/index.ts` into the gitignored `api-docs/`
+      // and fails on an undocumented export or a `{@link}` that resolves to
+      // nothing in the published surface. Settings live in `typedoc.json`;
+      // `tsdoc.json` registers the `@copyright` tag. Reads `src/` through the
+      // TS 6 JS API, so it needs no build.
+      docgen: "typedoc",
     },
   },
 
@@ -60,7 +67,7 @@ export default defineConfig({
     // `tests/dist-consumer/` resolves the package through the built `dist/`,
     // which doesn't exist yet when `vp check` runs; `check:dist` type-checks it
     // after the build instead.
-    ignorePatterns: ["**/dist/**", "tests/dist-consumer/**"],
+    ignorePatterns: ["**/dist/**", "api-docs/**", "tests/dist-consumer/**"],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -69,7 +76,7 @@ export default defineConfig({
 
   /** `vp check` (Oxfmt) */
   fmt: {
-    ignorePatterns: ["**/dist/**"],
+    ignorePatterns: ["**/dist/**", "api-docs/**"],
   },
 
   /** `vp test` (Vitest) */

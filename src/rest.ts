@@ -3,17 +3,17 @@
  * (`/w/rest.php/v1/...`) — typed page and revision metadata, and parsed
  * HTML for a title or revision.
  *
- * Imports only {@link "./core"} — never `Action` or `Commons` — so a
+ * Imports only {@link Core} — never `Action` or `Commons` — so a
  * consumer that imports only `Rest` from the package barrel never pulls
  * those modules' code into a bundle.
  *
- * The `/html` endpoints answer `text/html`, not JSON — {@link WikimediaClient.getText}
+ * The `/html` endpoints answer `text/html`, not JSON — {@link WikimediaClient}'s `getText`
  * reads the raw body rather than decoding it through a schema; there is
- * nothing to validate beyond the transport-level checks {@link "./core"}
+ * nothing to validate beyond the transport-level checks {@link Core}
  * already applies (status, UA, maxlag/retry).
  *
  * @copyright Thomas Foster
- * @module rest
+ * @module
  */
 
 import * as Effect from "effect/Effect";

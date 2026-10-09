@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. This repo publishes `@thomasfosterau/effect-wikimedia`, one package with a single `.` entry point: Effect clients for Wikipedia, Wikidata, Commons, WDQS, wikitext and dumps. It was extracted from `thomasfosterau/website` with `git subtree split`, so `git log` / `git blame` reach back through it; a bare `#NNN` in a comment ported from there names a **website** issue, not one in this tracker (write new ones as `website#NNN`).
 
-Toolchain differences from the other library repos: single package, so the tasks are `vp run test` / `vp run build` (no `-r`, no `test:unit`); the type check runs inside `vp check` (tsgolint), so there is no separate `vp run check`, and the patched native `tsc -p tsconfig.json` is the Effect-diagnostics gate; no fallow gate and no docgen.
+Toolchain differences from the other library repos: single package, so the tasks are `vp run test` / `vp run build` (no `-r`, no `test:unit`); the type check runs inside `vp check` (tsgolint), so there is no separate `vp run check`, and the patched native `tsc -p tsconfig.json` is the Effect-diagnostics gate; no fallow gate. The docs gate is TypeDoc (`vp run docgen`), not `@effect/docgen`: TypeDoc checks that `{@link}`s resolve, and `@effect/docgen` does not.
 
 ## Common pitfalls
 
@@ -18,6 +18,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 - `exactOptionalPropertyTypes` is on: spell an optional a caller may pass `undefined` for as `?: T | undefined`.
 - Tests import from `vite-plus/test`, never `vitest` or `@effect/vitest`.
 - Every export has a doc comment whose first sentence says what it is for and stands alone in a hover; state the error channel, units and invariants the signature can't. Put the description before any tag (`@copyright`, `@module`): only text before the first tag shows as the summary.
+- A `{@link}` must resolve within the published surface, or `vp run docgen` fails: link a name in scope (`{@link WikimediaRequest}`) or a barrel path (`{@link Core.WikimediaRequest}`, `{@link Core}`), never a module path (`{@link "./core"}`) or a helper the barrel doesn't export (write that as a code span). A namespace's module comment ends in a bare `@module`, so the docs name it as the barrel does (`Core`, not `core`).
 - Errors are `Schema.TaggedError<Self>()(tag, fields)` classes (the pinned `effect` has no `Schema.TaggedErrorClass`).
 - Services are keyed `"effect-wikimedia/<Name>"` (e.g. `"effect-wikimedia/Client"`), not an app-style `"@app/<Name>"` (that slip was #19).
 
@@ -29,6 +30,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 - `vp run test` — the Vitest suite.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
 - `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
+- `vp run docgen` — the docs gate: TypeDoc renders the API reference from the doc comments reachable from `src/index.ts` into the gitignored `api-docs/`, and fails on an undocumented export or method or a `{@link}` that resolves to nothing in the published surface (`typedoc.json`; `tsdoc.json` registers `@copyright`). Needs no build. Properties aren't required yet (#79).
 - `pnpm audit --audit-level high` — the supply-chain gate (network: needs the npm registry).
 - `pnpm changeset` — add a changeset.
 
@@ -43,7 +45,8 @@ Before you report work as done, run these in CI's order (`.github/workflows/ci.y
 3. `vp run test`
 4. `vp run build`
 5. `vp run check:dist`
-6. `pnpm audit --audit-level high`
+6. `vp run docgen`
+7. `pnpm audit --audit-level high`
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 
@@ -75,4 +78,4 @@ The SessionStart hook (`.claude/hooks/session-start.sh`) installs dependencies a
 
 ## Documentation surfaces
 
-`README.md` is the npm-facing API reference; `docs/RELEASING.md` holds the release pipeline and the one-time owner setup; decisions go in issue comments.
+`README.md` is the npm-facing API reference; `vp run docgen` renders the per-export reference from the doc comments into `api-docs/` (gitignored, not published); `docs/RELEASING.md` holds the release pipeline and the one-time owner setup; decisions go in issue comments.

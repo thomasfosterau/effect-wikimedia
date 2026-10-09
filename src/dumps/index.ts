@@ -1,24 +1,24 @@
 /**
- * The **Dumps** surface: Wikimedia dump processing as Effect {@link Stream}
+ * The **Dumps** surface: Wikimedia dump processing as Effect `Stream`
  * pipelines — constant-memory, backpressured, interruptible, typed. Three
  * dump families, one namespace:
  *
- * - **Wikidata JSON entity dumps** ({@link "./entities"}) — the `.json.gz` /
+ * - **Wikidata JSON entity dumps** ({@link entityRecords}) — the `.json.gz` /
  *   `.json.bz2` entity dump as a stream of typed
- *   {@link "../wikidata".WikidataItem}s, decoded through `Wikidata`'s model, lenient
- *   per line. Filter combinators {@link byType} / {@link withClaim} /
+ *   {@link Wikidata.WikidataItem}s, decoded through `Wikidata`'s model,
+ *   lenient per line. Filter combinators {@link byType} / {@link withClaim} /
  *   {@link withSitelink}.
- * - **XML pages dumps** ({@link "./xml"}) — `pages-articles` /
+ * - **XML pages dumps** ({@link pageRecords}) — `pages-articles` /
  *   `pages-meta-history` streamed to typed page/revision records without
  *   materialising a document, via a scoped SAX-style scanner.
  * - **Incremental dumps** ({@link incrementalRecords}) — the daily
  *   `add/changes` stream, the same XML schema and the same typed surface.
  *
- * Byte sources and decompression ({@link "./sources"}) are the one Node-only
- * corner of the package; the pipelines themselves are runtime-agnostic and
- * operate on any `Stream<Uint8Array>`. Even the byte sources' declarations
- * type their Node streams structurally, so type-checking the package needs
- * no `@types/node`.
+ * Byte sources and decompression ({@link fromFile}, {@link fromHttpRange},
+ * {@link decompressWith}) are the one Node-only corner of the package; the
+ * pipelines themselves are runtime-agnostic and operate on any
+ * `Stream<Uint8Array>`. Even the byte sources' declarations type their Node
+ * streams structurally, so type-checking the package needs no `@types/node`.
  *
  * ## Two decisions recorded here
  *
@@ -26,10 +26,10 @@
  * no effect-native streaming XML parser, and the package's lean-dependency
  * posture rules out a heavy general parser for one fixed, tiny grammar; a
  * full-history page is also unbounded, so the decode must emit per-revision
- * and never build a document. {@link "./xml"} therefore ships a minimal
- * SAX-style scanner scoped to the MediaWiki export schema, leaning on that
- * format's guarantee that all text is entity-escaped (so `<` always opens a
- * tag, and there is no CDATA).
+ * and never build a document. The XML decoder ({@link XmlPageReader})
+ * therefore ships a minimal SAX-style scanner scoped to the MediaWiki export
+ * schema, leaning on that format's guarantee that all text is entity-escaped
+ * (so `<` always opens a tag, and there is no CDATA).
  *
  * **bz2 — a pluggable stage, not a bundled decoder.** Node `zlib` covers gzip
  * ({@link gunzip}); it has no bzip2, and pure-JS bzip2 decoders are heavy.
@@ -61,7 +61,7 @@
  * `Effect` tears the file read (and any decompression) down immediately.
  *
  * @copyright Thomas Foster
- * @module dumps
+ * @module
  */
 
 export {

@@ -67,5 +67,14 @@ jobs:
       - name: Dist-consumer declaration check
         run: vp run check:dist
 
+      # Renders the API reference from the doc comments with TypeDoc and fails
+      # on an undocumented export or a `{@link}` that resolves to nothing in the
+      # published surface (`typedoc.json`'s validation, warnings as errors)
+      # (#20). It reads `src/` and needs no build; it sits after the
+      # declaration check with the other published-surface gates, and the
+      # audit stays last as the one step that needs the npm registry.
+      - name: API docs
+        run: vp run docgen
+
       - name: Audit
         run: pnpm audit --audit-level high

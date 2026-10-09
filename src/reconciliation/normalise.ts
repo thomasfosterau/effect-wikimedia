@@ -219,7 +219,7 @@ function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
 /**
  * Builds the {@link WikidataFacts} the enrich operation returns for a
  * confirmed, already-fetched item: the {@link ItemFact} for `qid`, then the
- * {@link identifierFacts}, {@link dateFacts} and {@link imageFacts} branches.
+ * `identifierFacts`, `dateFacts` and `imageFacts` branches.
  * Each branch is bounded and re-validates the upstream value, so a hostile
  * response can at worst yield fewer facts — never an injection or an
  * arbitrary host in a returned IRI. Presence (the `wbgetentities` miss /
