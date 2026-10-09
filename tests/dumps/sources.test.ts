@@ -199,6 +199,16 @@ describe("a decompressor that is not a Node stream", () => {
     expect(outcome).toBe("closed");
     expect(readable.destroyed).toBe(true);
   });
+
+  it("fails without an unhandled rejection when the upstream has already failed", async () => {
+    // A source that fails as it starts leaves the bridged web stream errored,
+    // so cancelling it rejects; that rejection must not escape (Vitest fails
+    // the run on an unhandled rejection, and Node would exit).
+    const exit = await runTestExit(
+      Stream.runDrain(Stream.fail("boom").pipe(Dumps.decompressWith(fakeDuplex))),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
 });
 
 // ── Interruption teardown ────────────────────────────────────────────────

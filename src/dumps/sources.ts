@@ -191,12 +191,16 @@ export const decompressWith =
         fromNodeReadable(() => {
           // Building `web` already started the source, so a rejected stage
           // must cancel it, or the upstream (an HTTP body, a file) stays open.
-          // Cancel only here: once `webToNode` has run, `web` is locked.
+          // Cancel only here: once `webToNode` has run, `web` is locked. If
+          // the source has already failed, `web` is errored and `cancel()`
+          // rejects with that error; swallow it, since the stage rejection is
+          // what this stream reports, and an unhandled rejection would crash
+          // the process.
           let stage: Duplex;
           try {
             stage = asNodeDuplex(transform());
           } catch (error) {
-            void web.cancel();
+            web.cancel().catch(() => undefined);
             throw error;
           }
           return compose(webToNode(web), stage);
