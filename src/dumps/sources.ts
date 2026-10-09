@@ -93,9 +93,9 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
  * structurally so the package's declarations need no `node:stream` types.
  * At runtime the value must be a real Node `Duplex` or `Transform` (such as
  * `zlib.createGunzip()` or a bzip2 transform from a library), which this type
- * can't express: it is passed to Node's `stream.compose`. Any other value that
- * fits the type fails the stream with a {@link SourceError} before anything
- * is composed.
+ * can't express: it is passed to Node's `stream.compose`. A value that
+ * `node:stream` doesn't recognise as a stream fails the stream with a
+ * {@link SourceError}; pass a real Node stream.
  */
 export interface NodeDuplexLike extends NodeReadableLike {
   /** Writes a chunk of compressed input. */
@@ -110,9 +110,11 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * that the value is a real Node stream, but the type admits a plain object,
  * and `compose` doesn't reject one: the composed stream never settles. So
  * this checks first and throws, which {@link fromNodeReadable} turns into a
- * {@link SourceError}. `isReadable` / `isWritable` return `null` only for a
- * value that is not a Node (or web) stream; a destroyed or ended Node stream
- * gives `false`.
+ * {@link SourceError}. The check is a heuristic, not a proof: `isReadable` /
+ * `isWritable` return `null` only when the value's `readable` / `writable`
+ * aren't booleans (a destroyed or ended Node stream gives `false`), so a
+ * plain object with `readable: true, writable: true` still passes it and
+ * hangs in `compose`.
  */
 const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
   const duplex = stream as unknown as Duplex;
@@ -160,8 +162,9 @@ export const fromNodeReadable = (
 /**
  * A decompression stage: a factory for a fresh Node `Transform` (bytes →
  * bytes), called once per stream. Typed as {@link NodeDuplexLike}, so any
- * Node `Duplex` or `Transform` fits; it must return a real Node stream, or the
- * stream it feeds fails with a {@link SourceError}.
+ * Node `Duplex` or `Transform` fits. Pass a real Node stream: a value that
+ * `node:stream` doesn't recognise as a stream fails the stream it feeds with
+ * a {@link SourceError}.
  */
 export type Decompressor = () => NodeDuplexLike;
 
@@ -171,8 +174,8 @@ export const gunzipTransform: Decompressor = () => createGunzip();
 /**
  * Lifts a {@link Decompressor} into a `Stream` stage: `Stream<Uint8Array>` →
  * `Stream<Uint8Array>`, pushing the bytes through a fresh Node transform. A
- * decompressor that returns something other than a Node stream fails the
- * stage with a {@link SourceError}. Use
+ * decompressor that returns a value `node:stream` doesn't recognise as a
+ * stream fails the stage with a {@link SourceError} and cancels the source. Use
  * it to decompress a source that is *not* a local file — e.g. an
  * {@link fromHttpRange} download — or to inject a bzip2 transform the package
  * does not ship. Composes with any byte source.
@@ -186,9 +189,16 @@ export const decompressWith =
       // decompression work behind.
       Effect.map(Stream.toReadableStreamEffect(source), (web) =>
         fromNodeReadable(() => {
-          // Check the stage before bridging the source, so a rejected one
-          // leaves nothing open.
-          const stage = asNodeDuplex(transform());
+          // Building `web` already started the source, so a rejected stage
+          // must cancel it, or the upstream (an HTTP body, a file) stays open.
+          // Cancel only here: once `webToNode` has run, `web` is locked.
+          let stage: Duplex;
+          try {
+            stage = asNodeDuplex(transform());
+          } catch (error) {
+            void web.cancel();
+            throw error;
+          }
           return compose(webToNode(web), stage);
         }),
       ),
@@ -237,8 +247,14 @@ export const fromFile = (
     // Check the stage before opening the file, so a rejected one leaks no fd.
     const stage = asNodeDuplex(decompressor());
     // `compose` so destroying the decompressor also destroys the file read —
-    // the fd is closed on interruption, not orphaned.
-    return compose(createReadStream(path), stage);
+    // the fd is closed on interruption, not orphaned. If opening the file
+    // throws, destroy the stage, which nothing else owns yet.
+    try {
+      return compose(createReadStream(path), stage);
+    } catch (error) {
+      stage.destroy();
+      throw error;
+    }
   });
 };
 
