@@ -35,7 +35,7 @@
  */
 
 import { createReadStream } from "node:fs";
-import { compose, Readable } from "node:stream";
+import { compose, isReadable, isWritable, Readable } from "node:stream";
 import type { Duplex } from "node:stream";
 import { createGunzip } from "node:zlib";
 import * as Effect from "effect/Effect";
@@ -92,9 +92,10 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
  * (compressed bytes in) and readable (decompressed bytes out). Declared
  * structurally so the package's declarations need no `node:stream` types.
  * At runtime the value must be a real Node `Duplex` or `Transform` (such as
- * `zlib.createGunzip()` or a bzip2 transform from a library): it is passed to
- * Node's `stream.compose`, which checks for Node stream internals that this
- * type can't express.
+ * `zlib.createGunzip()` or a bzip2 transform from a library), which this type
+ * can't express: it is passed to Node's `stream.compose`. Any other value that
+ * fits the type fails the stream with a {@link SourceError} before anything
+ * is composed.
  */
 export interface NodeDuplexLike extends NodeReadableLike {
   /** Writes a chunk of compressed input. */
@@ -106,16 +107,29 @@ export interface NodeDuplexLike extends NodeReadableLike {
 /**
  * Recovers the Node `Duplex` a {@link Decompressor} returns from its
  * structural type, for `compose`. The contract on {@link NodeDuplexLike} is
- * that the value is a real Node stream; `compose` throws on anything else.
+ * that the value is a real Node stream, but the type admits a plain object,
+ * and `compose` doesn't reject one: the composed stream never settles. So
+ * this checks first and throws, which {@link fromNodeReadable} turns into a
+ * {@link SourceError}. `isReadable` / `isWritable` return `null` only for a
+ * value that is not a Node (or web) stream; a destroyed or ended Node stream
+ * gives `false`.
  */
-const asNodeDuplex = (stream: NodeDuplexLike): Duplex => stream as unknown as Duplex;
+const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
+  const duplex = stream as unknown as Duplex;
+  if (isReadable(duplex) === null || isWritable(duplex) === null) {
+    throw new TypeError(
+      "the decompressor must return a Node stream Duplex or Transform, not a plain object",
+    );
+  }
+  return duplex;
+};
 
 // ── Node Readable → Stream<Uint8Array> ───────────────────────────────────
 
 /**
  * Wraps any Node `Readable` ({@link NodeReadableLike}) as a
- * `Stream<Uint8Array>`; a read failure fails the stream with a
- * {@link SourceError}. The bytes are pulled through the Readable's **async
+ * `Stream<Uint8Array>`; a read failure, or `evaluate` throwing, fails the
+ * stream with a {@link SourceError}. The bytes are pulled through the Readable's **async
  * iterator**, one chunk at a time — that is the constant-memory guarantee:
  * async iteration applies native backpressure, so a fast producer (a gunzip
  * decompressing a tiny `.gz` into hundreds of MB) is paused between pulls and
@@ -131,7 +145,7 @@ export const fromNodeReadable = (
 ): Stream.Stream<Uint8Array, SourceError> =>
   Stream.unwrap(
     Effect.gen(function* () {
-      const readable = evaluate();
+      const readable = yield* Effect.try({ try: evaluate, catch: sourceError });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           if (!readable.destroyed) readable.destroy();
@@ -146,7 +160,8 @@ export const fromNodeReadable = (
 /**
  * A decompression stage: a factory for a fresh Node `Transform` (bytes →
  * bytes), called once per stream. Typed as {@link NodeDuplexLike}, so any
- * Node `Duplex` or `Transform` fits.
+ * Node `Duplex` or `Transform` fits; it must return a real Node stream, or the
+ * stream it feeds fails with a {@link SourceError}.
  */
 export type Decompressor = () => NodeDuplexLike;
 
@@ -155,7 +170,9 @@ export const gunzipTransform: Decompressor = () => createGunzip();
 
 /**
  * Lifts a {@link Decompressor} into a `Stream` stage: `Stream<Uint8Array>` →
- * `Stream<Uint8Array>`, pushing the bytes through a fresh Node transform. Use
+ * `Stream<Uint8Array>`, pushing the bytes through a fresh Node transform. A
+ * decompressor that returns something other than a Node stream fails the
+ * stage with a {@link SourceError}. Use
  * it to decompress a source that is *not* a local file — e.g. an
  * {@link fromHttpRange} download — or to inject a bzip2 transform the package
  * does not ship. Composes with any byte source.
@@ -168,7 +185,12 @@ export const decompressWith =
       // chain — the web-source reader and the transform — leaving no orphaned
       // decompression work behind.
       Effect.map(Stream.toReadableStreamEffect(source), (web) =>
-        fromNodeReadable(() => compose(webToNode(web), asNodeDuplex(transform()))),
+        fromNodeReadable(() => {
+          // Check the stage before bridging the source, so a rejected one
+          // leaves nothing open.
+          const stage = asNodeDuplex(transform());
+          return compose(webToNode(web), stage);
+        }),
       ),
     );
 
@@ -211,10 +233,12 @@ export const fromFile = (
 ): Stream.Stream<Uint8Array, SourceError> => {
   const decompressor = decompressorFor(path, options?.decompressor);
   return fromNodeReadable(() => {
-    const file = createReadStream(path);
+    if (decompressor === null) return createReadStream(path);
+    // Check the stage before opening the file, so a rejected one leaks no fd.
+    const stage = asNodeDuplex(decompressor());
     // `compose` so destroying the decompressor also destroys the file read —
     // the fd is closed on interruption, not orphaned.
-    return decompressor === null ? file : compose(file, asNodeDuplex(decompressor()));
+    return compose(createReadStream(path), stage);
   });
 };
 

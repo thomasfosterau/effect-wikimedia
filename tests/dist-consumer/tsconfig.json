@@ -11,8 +11,8 @@
   "compilerOptions": {
     "target": "ES2022",
     // A browser consumer's lib, and what effect's own declarations need:
-    // `DOM` for the web types they name, `ESNext.Disposable` for `Disposable`
-    // / `AsyncDisposable` (`ES2025` or later also has them). The package's
+    // `DOM` for the web types they name, `ESNext.Disposable` (or `ESNext`) for
+    // `Disposable` / `AsyncDisposable`, which `ES2025` lacks. The package's
     // own declarations need nothing beyond `ES2022`.
     "lib": ["ES2022", "DOM", "ESNext.Disposable"],
     // `nodenext` is the strictest consumer resolution: it requires the `types`

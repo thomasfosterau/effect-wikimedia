@@ -21,7 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { Core, Dumps } from "../../src/index.ts";
-import { runTest, runTestExit } from "../helpers/effect.ts";
+import { expectFailureInstanceOf, runTest, runTestExit } from "../helpers/effect.ts";
 
 const DUMP = '[\n{"type":"item","id":"Q1"},\n{"type":"item","id":"Q2"}\n]\n';
 
@@ -113,6 +113,47 @@ describe("structural stream types", () => {
       Stream.runCollect(source.pipe(Dumps.decompressWith(() => new PassThrough()))),
     );
     expect(decodeUtf8(bytes)).toBe(DUMP);
+  });
+});
+
+/**
+ * A value that fits {@link Dumps.NodeDuplexLike} but is not a Node stream: it
+ * has none of the internals `stream.compose` relies on, so composing it would
+ * hang rather than fail.
+ */
+const fakeDuplex = (): Dumps.NodeDuplexLike => ({
+  destroyed: false,
+  destroy: () => undefined,
+  write: () => true,
+  end: () => undefined,
+  async *[Symbol.asyncIterator]() {},
+});
+
+describe("a decompressor that is not a Node stream", () => {
+  // The structural type admits it, so the runtime must reject it. Without
+  // that check the stream never settles and ignores interruption, so
+  // `Effect.timeout` can't bound it; racing a timer turns a regression into
+  // a prompt failure instead of a test timeout.
+  const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
+    const outcome = await Promise.race([
+      runTestExit(Stream.runDrain(stream)),
+      wait(1000).then(() => "hung" as const),
+    ]);
+    if (outcome === "hung") throw new Error("the stream hung instead of failing");
+    return expectFailureInstanceOf(outcome, Dumps.SourceError);
+  };
+
+  it("fails fromFile with a SourceError", async () => {
+    const path = join(tmp, "fake-decompressor.bin");
+    writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+    const error = await failsPromptly(Dumps.fromFile(path, { decompressor: fakeDuplex }));
+    expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
+  });
+
+  it("fails decompressWith with a SourceError", async () => {
+    const source = Dumps.fromNodeReadable(() => Readable.from([gzipSync(Buffer.from(DUMP))]));
+    const error = await failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
+    expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
   });
 });
 
