@@ -18,11 +18,14 @@
  * - empty upstream result -> empty list (not an error);
  * - malformed input rejected before any request is built;
  * - field sanitisation (whitespace collapse) and non-QID entries dropped;
- * - upstream transport / rate-limit / invalid-request faults -> LookupFailed.
+ * - upstream transport / rate-limit / invalid-request faults -> LookupFailed;
+ * - enrich facts, including a date's precision and calendar model.
  *
  * @module tests/lookup
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -44,6 +47,11 @@ import {
   wikidataLookupClientLayer,
 } from "../../src/reconciliation/index.ts";
 import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
+
+/** The recorded `wbgetentities` body for Q42 (Douglas Adams), as the wire carries it. */
+const q42Fixture = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
+) as unknown;
 
 // ── WikimediaClient stub ────────────────────────────────────────────────
 
@@ -433,7 +441,11 @@ describe("WikidataLookup.enrich", () => {
                 datatype: "time",
                 datavalue: {
                   type: "time",
-                  value: { time: "+1952-03-11T00:00:00Z", precision: 11 },
+                  value: {
+                    time: "+1952-03-11T00:00:00Z",
+                    precision: 11,
+                    calendarmodel: "http://www.wikidata.org/entity/Q1985727",
+                  },
                 },
               },
             },
@@ -560,7 +572,7 @@ describe("WikidataLookup.enrich", () => {
     ).toBe(true);
   });
 
-  it("returns the birth date as a Date fact with its label and precision", async () => {
+  it("returns the birth date as a Date fact with its label, precision and calendar", async () => {
     const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
     const facts = await loadFacts(layer, "Q42");
 
@@ -571,7 +583,88 @@ describe("WikidataLookup.enrich", () => {
         label: "date of birth",
         time: "1952-03-11T00:00:00Z",
         precision: 11,
+        calendar: "gregorian",
       },
+    ]);
+  });
+
+  it("reads the calendar from the recorded Q42 fixture's calendar model", async () => {
+    const { layer } = stubClient({ "action=wbgetentities": { body: q42Fixture } });
+    const facts = await loadFacts(layer, "Q42");
+
+    // The recorded P569 carries `http://www.wikidata.org/entity/Q1985727`.
+    expect(facts.facts.filter(WikidataFact.guards.Date)).toEqual([
+      {
+        _tag: "Date",
+        property: "P569",
+        label: "date of birth",
+        time: "1952-03-11T00:00:00Z",
+        precision: 11,
+        calendar: "gregorian",
+      },
+    ]);
+  });
+
+  it("maps the calendar model to gregorian, julian or null", async () => {
+    const timeClaim = (calendarmodel: unknown) => ({
+      mainsnak: {
+        snaktype: "value",
+        property: "P569",
+        datatype: "time",
+        datavalue: {
+          type: "time",
+          value: {
+            time: "+1452-04-15T00:00:00Z",
+            precision: 11,
+            ...(calendarmodel === undefined ? {} : { calendarmodel }),
+          },
+        },
+      },
+    });
+    const { layer } = stubClient({
+      "action=wbgetentities": {
+        body: {
+          entities: {
+            Q1: {
+              id: "Q1",
+              claims: {
+                P569: [
+                  // Proleptic Gregorian and proleptic Julian, as Wikibase
+                  // spells them (its `http` concept URI)…
+                  timeClaim("http://www.wikidata.org/entity/Q1985727"),
+                  timeClaim("http://www.wikidata.org/entity/Q1985786"),
+                  // …and as `https` entity IRIs.
+                  timeClaim("https://www.wikidata.org/entity/Q1985727"),
+                  timeClaim("https://www.wikidata.org/entity/Q1985786"),
+                  // No calendar model at all.
+                  timeClaim(undefined),
+                  // Another entity (Q12138, the non-proleptic Gregorian
+                  // calendar item), a bare QID, another host, a page URL,
+                  // and a non-string.
+                  timeClaim("http://www.wikidata.org/entity/Q12138"),
+                  timeClaim("Q1985727"),
+                  timeClaim("http://test.wikidata.org/entity/Q1985727"),
+                  timeClaim("https://www.wikidata.org/wiki/Q1985786"),
+                  timeClaim(1985727),
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+    const facts = await loadFacts(layer, "Q1");
+    expect(facts.facts.filter(WikidataFact.guards.Date).map((fact) => fact.calendar)).toEqual([
+      "gregorian",
+      "julian",
+      "gregorian",
+      "julian",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
     ]);
   });
 

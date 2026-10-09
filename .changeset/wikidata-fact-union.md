@@ -8,5 +8,5 @@ To migrate, branch on `_tag` instead of `authority` and `notes`:
 
 - QID self-link (`authority: "wikidata"`, `mappingKind: "exact"`): now `{ _tag: "Item", qid, iri }`, where `qid` was `externalId` and `iri` was `externalIri`.
 - `sameAs` identifier (`mappingKind: "exact"`): now `{ _tag: "Identifier", property, authority, value, iri }`, where `value` was `externalId`, `iri` was `externalIri`, and `property` (e.g. `"P214"`) is new.
-- Date (`notes` such as `"date of birth"`): now `{ _tag: "Date", property, label, time, precision }`, where `time` was `externalId`, `label` was `notes`, and `property` replaces `externalIri` (`wikidataEntityIri(property)` rebuilds the old value). `precision` is new: Wikibase's 0–14 precision code (9 = year, 11 = day), or `null`.
+- Date (`notes` such as `"date of birth"`): now `{ _tag: "Date", property, label, time, precision, calendar }`, where `time` was `externalId`, `label` was `notes`, and `property` replaces `externalIri` (`wikidataEntityIri(property)` rebuilds the old value). `precision` is new: Wikibase's 0–14 precision code (9 = year, 11 = day), or `null`. `calendar` is new: `"gregorian"`, `"julian"` or `null`.
 - Image (`authority: "wikimedia-commons"`, `notes: "image"`): now `{ _tag: "Image", property, filename, iri }`, where `filename` was `externalId` and `iri` was `externalIri`.
