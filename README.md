@@ -78,8 +78,8 @@ Questions, bug reports, and reports from Wikimedia operators about this client's
 
 ## Development
 
-Commands and conventions: [AGENTS.md](AGENTS.md). Releases: [docs/RELEASING.md](docs/RELEASING.md).
+Commands and conventions: `AGENTS.md`; releases: `docs/RELEASING.md` (both in the source repository, not the npm package).
 
 ## License
 
-[MIT](LICENSE)
+MIT — see the `LICENSE` file in the package.
