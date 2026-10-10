@@ -9,12 +9,21 @@
  * @module tests/dumps/sources
  */
 
-import { createReadStream, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  closeSync,
+  createReadStream,
+  mkdtempSync,
+  openSync,
+  ReadStream,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compose, Duplex, PassThrough, Readable, Transform } from "node:stream";
 import { createGunzip, gzipSync } from "node:zlib";
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -258,10 +267,12 @@ describe("interruption teardown", () => {
    * `read()`. Node's async iterator calls `read()` from inside `next()`, so
    * once `reading` settles a `next()` is pending that no data will settle.
    */
-  const stalledReadable = (): { readonly readable: Readable; readonly reading: Promise<void> } => {
+  const stalledReadable = (
+    options: { readonly emitClose?: boolean } = {},
+  ): { readonly readable: Readable; readonly reading: Promise<void> } => {
     let onRead = (): void => undefined;
     const reading = new Promise<void>((resolve) => (onRead = resolve));
-    return { readable: new Readable({ read: () => onRead() }), reading };
+    return { readable: new Readable({ ...options, read: () => onRead() }), reading };
   };
 
   // A stalled Readable's async iterator queues `return()` behind the pending
@@ -293,6 +304,114 @@ describe("interruption teardown", () => {
     const { readable, reading } = stalledReadable();
     await interruptsPromptly(Dumps.fromNodeReadable(() => readable).pipe(Dumps.gunzip), reading);
     expect(readable.destroyed).toBe(true);
+  });
+
+  // Node's iterator settles its pending `next()`, and so the queued
+  // `return()`, only on `close`. A source whose `destroy()` never gets there
+  // would hold the interrupt up for good, so teardown waits for `close` only
+  // up to a bound (#94); these fail with "hung" without it.
+  it("completes the interrupt within a bound when the stalled Readable's destroy() never emits close", async () => {
+    const { readable, reading } = stalledReadable({ emitClose: false });
+    await interruptsPromptly(
+      Dumps.fromNodeReadable(() => readable),
+      reading,
+    );
+    expect(readable.destroyed).toBe(true);
+  });
+
+  // `mkfifo` is POSIX-only; CI runs on Linux.
+  it.skipIf(process.platform === "win32")(
+    "completes the interrupt within a bound on a fromFile read of a FIFO whose writer is idle",
+    async () => {
+      // `fs.ReadStream`'s `destroy()` waits for its in-flight read, which an
+      // open writer that writes nothing never lets return. Opening the FIFO
+      // read-write first holds a writer, so the source's open doesn't block.
+      const fifo = join(tmp, "idle.fifo");
+      execFileSync("mkfifo", [fifo]);
+      const writer = openSync(fifo, "r+");
+      // `_read` dispatches the blocking read, so once it has been called a read
+      // is in flight and the drain's `next()` is pending on it.
+      const read = vi.spyOn(ReadStream.prototype, "_read");
+      const reading = vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 5000 });
+      const stream = (): ReadStream | undefined => {
+        const context = read.mock.contexts[0];
+        return context instanceof ReadStream ? context : undefined;
+      };
+      try {
+        await interruptsPromptly(
+          Dumps.fromFile(fifo),
+          reading.then(() => undefined),
+        );
+        expect(stream()?.destroyed).toBe(true);
+      } finally {
+        const source = stream();
+        read.mockRestore();
+        // With no writer left the read returns end-of-file and the stream
+        // finishes closing: the fd is released after all, just not before the
+        // interrupt returned.
+        const closed =
+          source === undefined || source.closed
+            ? Promise.resolve("closed" as const)
+            : new Promise<"closed">((resolve) => source.once("close", () => resolve("closed")));
+        closeSync(writer);
+        expect(await orHung(closed)).toBe("closed");
+      }
+    },
+  );
+
+  it("waits for a slow-closing Readable to close before the interrupt returns", async () => {
+    // `_destroy` finishes 200 ms after `destroy()`: inside the bound, so the
+    // interrupt must wait for it; a near-zero bound would return first.
+    let onRead = (): void => undefined;
+    const reading = new Promise<void>((resolve) => (onRead = resolve));
+    const readable = new Readable({
+      read: () => onRead(),
+      destroy: (error, callback) => void setTimeout(() => callback(error), 200),
+    });
+    await interruptsPromptly(
+      Dumps.fromNodeReadable(() => readable),
+      reading,
+    );
+    expect(readable.closed).toBe(true);
+  });
+
+  it("swallows the delegated return()'s rejection when it settles after the bound", async () => {
+    // A source whose `return()` outlives the bound and then rejects: the
+    // interrupt has already completed, so the rejection has nowhere to go and
+    // must not escape as an unhandled rejection.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      let destroyed = false;
+      let rejectReturn: (error: Error) => void = () => undefined;
+      let onRead = (): void => undefined;
+      const reading = new Promise<void>((resolve) => (onRead = resolve));
+      const source: Dumps.NodeReadableLike = {
+        get destroyed() {
+          return destroyed;
+        },
+        destroy: () => (destroyed = true),
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            onRead();
+            return new Promise<IteratorResult<Uint8Array>>(() => undefined);
+          },
+          return: () =>
+            new Promise<IteratorResult<Uint8Array>>((_, reject) => (rejectReturn = reject)),
+        }),
+      };
+      await interruptsPromptly(
+        Dumps.fromNodeReadable(() => source),
+        reading,
+      );
+      expect(destroyed).toBe(true);
+      rejectReturn(new Error("closed too late"));
+      await wait(20); // let any rejection surface
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("destroys the Readable when interrupted before the iterator's return() is registered", async () => {

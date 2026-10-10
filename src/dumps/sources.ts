@@ -132,12 +132,43 @@ const destroyReadable = (readable: NodeReadableLike): void => {
 };
 
 /**
+ * How long, in milliseconds, stream teardown waits for a destroyed Readable to
+ * finish closing before it gives up (#94). A well-behaved Readable (a file
+ * read, a gunzip, an HTTP body) closes within milliseconds of `destroy()`,
+ * far inside this bound, so it is released before the interruption returns;
+ * the bound only stops the interruption hanging on a Readable that never
+ * emits `close`, while staying short enough that an `Effect.timeout` over
+ * such a source still returns promptly. Internal, so it can be retuned in a
+ * patch; `fromNodeReadable` documents it.
+ */
+const CLOSE_WAIT_MS = 1000;
+
+/**
+ * Settles as `promise` does if it settles within `ms`, or with `fallback`
+ * after that. The timer is cleared once the race settles. A rejection of
+ * `promise` after the bound is swallowed rather than crashing the process as
+ * an unhandled rejection: `Promise.race` has already subscribed to `promise`,
+ * so that rejection is handled even though the race has settled.
+ */
+const settleWithin = <A>(promise: Promise<A>, ms: number, fallback: A): Promise<A> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const elapsed = new Promise<A>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, elapsed]).finally(() => clearTimeout(timer));
+};
+
+/**
  * Iterates `readable` through an iterator whose `return()` destroys the
  * Readable before delegating. `Stream.fromAsyncIterable` awaits `return()` on
  * teardown, and a Node Readable's iterator queues `return()` behind a pending
  * `next()`; while the Readable is stalled that `next()` never settles, so
- * teardown would hang (#83). Destroying first settles the pending `next()`,
- * and the queued `return()` then completes.
+ * teardown would hang (#83). Destroying first settles the pending `next()`
+ * once the Readable emits `close`, and the queued `return()` then completes.
+ * A Readable that never emits `close` (`emitClose: false`, or a file read
+ * blocked on a FIFO whose writer is idle) would still hang it, so the wait
+ * for the delegated `return()` is bounded by `CLOSE_WAIT_MS`, after
+ * which teardown carries on without it (#94).
  */
 const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> => ({
   [Symbol.asyncIterator]: () => {
@@ -146,9 +177,10 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
       next: () => iterator.next(),
       return: (value?: unknown) => {
         destroyReadable(readable);
+        const done: IteratorReturnResult<unknown> = { done: true, value };
         return iterator.return !== undefined
-          ? iterator.return(value)
-          : Promise.resolve({ done: true, value });
+          ? settleWithin(iterator.return(value), CLOSE_WAIT_MS, done)
+          : Promise.resolve(done);
       },
     };
   },
@@ -169,9 +201,13 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
  * in-flight gunzip — so no decompression work is orphaned. It holds while the
  * Readable is stalled waiting for data, too: the interruption completes once
  * the Readable's own `destroy()` does (it emits `close`), without waiting for
- * that data. A Readable whose `destroy()` never finishes still holds the
- * interruption up: one built with `emitClose: false`, or a {@link fromFile}
- * read of a FIFO whose writer is open but idle.
+ * that data. That wait is bounded at one second: if the Readable hasn't
+ * emitted `close` by then, the interruption completes anyway, and the
+ * Readable, already destroyed, may not have released what it holds yet. A
+ * well-behaved Readable closes within milliseconds; the bound is for one
+ * whose `destroy()` never finishes, such as one built with `emitClose: false`,
+ * or a {@link fromFile} read of a FIFO whose writer is open but idle, which
+ * keeps its file descriptor until the writer writes or closes.
  */
 export const fromNodeReadable = (
   evaluate: () => NodeReadableLike,
