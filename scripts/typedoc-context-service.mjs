@@ -43,9 +43,12 @@ function extendsContextService(reflection) {
 export function load(app) {
   app.converter.on(Converter.EVENT_RESOLVE_BEGIN, (context) => {
     const { project } = context;
+    let matched = 0;
     for (const reflection of project.getReflectionsByKind(ReflectionKind.Class)) {
       const cls = /** @type {import("typedoc").DeclarationReflection} */ (reflection);
       if (!extendsContextService(cls)) continue;
+      matched++;
+      let kept = false;
       // A copy: `removeReflection` splices `cls.children` as this loop runs.
       for (const member of (cls.children ?? []).slice()) {
         const inherited =
@@ -56,11 +59,26 @@ export function load(app) {
           delete member.inheritedFrom;
           member.setFlag(ReflectionFlag.Inherited, false);
           member.setFlag(ReflectionFlag.External, false);
-          if (cls.sources) member.sources = cls.sources;
+          if (cls.sources) member.sources = [...cls.sources];
+          kept = true;
           continue;
         }
         project.removeReflection(member);
       }
+      // Effect renamed or moved the instance `Service` property: the shape's
+      // documented methods would silently stop rendering.
+      if (!kept) {
+        app.logger.error(
+          `typedoc-context-service: ${cls.getFriendlyFullName()} inherits no instance \`Service\` property; update the plugin (#87).`,
+        );
+      }
+    }
+    // Effect or TypeDoc changed how the base is recorded: without this the
+    // plugin would silently stop trimming anything.
+    if (matched === 0) {
+      app.logger.error(
+        "typedoc-context-service: no class extends effect's `ServiceClass.Shape`; update or remove the plugin (#87).",
+      );
     }
   });
 }
