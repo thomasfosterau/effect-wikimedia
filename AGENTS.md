@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. This repo publishes `@thomasfosterau/effect-wikimedia`, one package with a single `.` entry point: Effect clients for Wikipedia, Wikidata, Commons, WDQS, wikitext and dumps. It was extracted from `thomasfosterau/website` with `git subtree split`, so `git log` / `git blame` reach back through it; a bare `#NNN` in a comment ported from there names a **website** issue, not one in this tracker (write new ones as `website#NNN`).
 
-Toolchain differences from the other library repos: single package, so the tasks keep the other repos' names (`check`, `test:unit`, `build`) but run without `-r` (`vp run check`, not `vp run -r check`); no fallow gate. The docs gate is TypeDoc (`vp run docgen`), not `@effect/docgen`: TypeDoc checks that `{@link}`s resolve, and `@effect/docgen` does not. `vp check` and `vp run check` are different commands: `vp check` is Vite+'s built-in format + lint + type-check (tsgolint), and `vp run check` is this repo's `check` task in `vite.config.ts`, the patched native `tsc -p tsconfig.json` that reports Effect diagnostics.
+Toolchain differences from the other library repos: single package, so the tasks keep the other repos' names (`check`, `test:unit`, `build`) but run without `-r` (`vp run check`, not `vp run -r check`). The docs gate is TypeDoc (`vp run docgen`), not `@effect/docgen`: TypeDoc checks that `{@link}`s resolve, and `@effect/docgen` does not. `vp check` and `vp run check` are different commands: `vp check` is Vite+'s built-in format + lint + type-check (tsgolint), and `vp run check` is this repo's `check` task in `vite.config.ts`, the patched native `tsc -p tsconfig.json` that reports Effect diagnostics.
 
 ## Common pitfalls
 
@@ -27,6 +27,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 - `pnpm install --frozen-lockfile` — install exactly as CI does.
 - `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix. A Vite+ built-in, not the `check` task below.
 - `vp run check` — the TS 7 type check plus Effect diagnostics: runs `tsc -p tsconfig.json` with the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these. Cached; a change to anything it reads (`src/`, `tests/`, `vite.config.ts`, `tsconfig.json`, `node_modules`, the patched binary included) reruns it.
+- `vp run fallow` — the dead-code gate: `fallow dead-code` (not bare `fallow`: `dupes` and `health` aren't gated, #102) fails on an unused file, export, type, devDependency or catalog entry, a duplicate export, an unresolved import or a circular dependency. `.fallowrc.json` adds the entry points fallow's plugins can't see (`tests/dist-consumer/`, the TypeDoc plugin in `scripts/`) and holds the documented exemptions; everything reachable from `src/index.ts` is the published surface and counts as used. Delete what it reports as dead; exempt something in `.fallowrc.json` only with a comment saying why it is live (or, for a duplicate export, why the duplication is intended). A devDependency used only as a bin from a `vite.config.ts` task needs an `ignoreDependencies` entry, because fallow reads commands from package.json `scripts`, not from `run.tasks`. Needs no build.
 - `vp run test:unit` — the Vitest suite.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
 - `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
@@ -42,11 +43,12 @@ Before you report work as done, run these in CI's order (`.github/workflows/ci.y
 
 1. `vp check`
 2. `vp run check`
-3. `vp run test:unit`
-4. `vp run build`
-5. `vp run check:dist`
-6. `vp run docgen`
-7. `pnpm audit --audit-level high`
+3. `vp run fallow`
+4. `vp run test:unit`
+5. `vp run build`
+6. `vp run check:dist`
+7. `vp run docgen`
+8. `pnpm audit --audit-level high`
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 

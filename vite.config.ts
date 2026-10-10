@@ -45,6 +45,16 @@ export default defineConfig({
       // `tsdoc.json` registers the `@copyright` tag. Reads `src/` through the
       // TS 6 JS API, so it needs no build.
       docgen: "typedoc",
+      // The dead-code gate (#20): fallow's static analysis fails on an unused
+      // file, export, type, devDependency or catalog entry, a duplicate
+      // export, an unresolved import or a circular dependency. Entry points
+      // and the documented exemptions live in `.fallowrc.json`; the exports on
+      // `src/index.ts` are the published surface, so they always count as
+      // used. `dead-code` only: the `dupes` and `health` analyses that bare
+      // `fallow` adds aren't gated (#102). `--no-cache` keeps fallow's own
+      // cache out of the tree, so the Vite+ task cache alone decides what
+      // reruns.
+      fallow: "fallow dead-code --no-cache",
     },
   },
 
