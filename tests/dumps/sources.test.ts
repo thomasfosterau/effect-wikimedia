@@ -319,40 +319,60 @@ describe("interruption teardown", () => {
     expect(readable.destroyed).toBe(true);
   });
 
-  it("completes the interrupt within a bound on a fromFile read of a FIFO whose writer is idle", async () => {
-    // `fs.ReadStream`'s `destroy()` waits for its in-flight read, which an
-    // open writer that writes nothing never lets return. Opening the FIFO
-    // read-write first holds a writer, so the source's open doesn't block.
-    const fifo = join(tmp, "idle.fifo");
-    execFileSync("mkfifo", [fifo]);
-    const writer = openSync(fifo, "r+");
-    // `_read` dispatches the blocking read, so once it has been called a read
-    // is in flight and the drain's `next()` is pending on it.
-    const read = vi.spyOn(ReadStream.prototype, "_read");
-    const reading = vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 5000 });
-    const stream = (): ReadStream | undefined => {
-      const context = read.mock.contexts[0];
-      return context instanceof ReadStream ? context : undefined;
-    };
-    try {
-      await interruptsPromptly(
-        Dumps.fromFile(fifo),
-        reading.then(() => undefined),
-      );
-      expect(stream()?.destroyed).toBe(true);
-    } finally {
-      const source = stream();
-      read.mockRestore();
-      // With no writer left the read returns end-of-file and the stream
-      // finishes closing: the fd is released after all, just not before the
-      // interrupt returned.
-      const closed =
-        source === undefined || source.closed
-          ? Promise.resolve("closed" as const)
-          : new Promise<"closed">((resolve) => source.once("close", () => resolve("closed")));
-      closeSync(writer);
-      expect(await orHung(closed)).toBe("closed");
-    }
+  // `mkfifo` is POSIX-only; CI runs on Linux.
+  it.skipIf(process.platform === "win32")(
+    "completes the interrupt within a bound on a fromFile read of a FIFO whose writer is idle",
+    async () => {
+      // `fs.ReadStream`'s `destroy()` waits for its in-flight read, which an
+      // open writer that writes nothing never lets return. Opening the FIFO
+      // read-write first holds a writer, so the source's open doesn't block.
+      const fifo = join(tmp, "idle.fifo");
+      execFileSync("mkfifo", [fifo]);
+      const writer = openSync(fifo, "r+");
+      // `_read` dispatches the blocking read, so once it has been called a read
+      // is in flight and the drain's `next()` is pending on it.
+      const read = vi.spyOn(ReadStream.prototype, "_read");
+      const reading = vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 5000 });
+      const stream = (): ReadStream | undefined => {
+        const context = read.mock.contexts[0];
+        return context instanceof ReadStream ? context : undefined;
+      };
+      try {
+        await interruptsPromptly(
+          Dumps.fromFile(fifo),
+          reading.then(() => undefined),
+        );
+        expect(stream()?.destroyed).toBe(true);
+      } finally {
+        const source = stream();
+        read.mockRestore();
+        // With no writer left the read returns end-of-file and the stream
+        // finishes closing: the fd is released after all, just not before the
+        // interrupt returned.
+        const closed =
+          source === undefined || source.closed
+            ? Promise.resolve("closed" as const)
+            : new Promise<"closed">((resolve) => source.once("close", () => resolve("closed")));
+        closeSync(writer);
+        expect(await orHung(closed)).toBe("closed");
+      }
+    },
+  );
+
+  it("waits for a slow-closing Readable to close before the interrupt returns", async () => {
+    // `_destroy` finishes 200 ms after `destroy()`: inside the bound, so the
+    // interrupt must wait for it; a near-zero bound would return first.
+    let onRead = (): void => undefined;
+    const reading = new Promise<void>((resolve) => (onRead = resolve));
+    const readable = new Readable({
+      read: () => onRead(),
+      destroy: (error, callback) => void setTimeout(() => callback(error), 200),
+    });
+    await interruptsPromptly(
+      Dumps.fromNodeReadable(() => readable),
+      reading,
+    );
+    expect(readable.closed).toBe(true);
   });
 
   it("swallows the delegated return()'s rejection when it settles after the bound", async () => {

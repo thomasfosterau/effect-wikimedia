@@ -146,15 +146,15 @@ const CLOSE_WAIT_MS = 1000;
 /**
  * Settles as `promise` does if it settles within `ms`, or with `fallback`
  * after that. The timer is cleared once the race settles. A rejection of
- * `promise` after the bound is swallowed: the race has already settled, and
- * an unhandled rejection would crash the process.
+ * `promise` after the bound is swallowed rather than crashing the process as
+ * an unhandled rejection: `Promise.race` has already subscribed to `promise`,
+ * so that rejection is handled even though the race has settled.
  */
 const settleWithin = <A>(promise: Promise<A>, ms: number, fallback: A): Promise<A> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const elapsed = new Promise<A>((resolve) => {
     timer = setTimeout(() => resolve(fallback), ms);
   });
-  promise.catch(() => undefined);
   return Promise.race([promise, elapsed]).finally(() => clearTimeout(timer));
 };
 
