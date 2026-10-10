@@ -11,15 +11,15 @@ export default defineConfig({
   run: {
     cache: true,
     tasks: {
-      // The Effect-diagnostics gate (#20, #31). `vp check` type-checks with
-      // tsgolint, which reports no Effect diagnostics; `prepare` patches the
-      // native `tsc` (`@typescript/native`) with `effect-tsgo`, so this is the
-      // gate that fails on an Effect `error` diagnostic (warnings and
-      // suggestions print but don't fail it: `ignoreEffectWarningsInTscExitCode`
-      // in tsconfig.json). `vp run` puts this package's `node_modules/.bin`
-      // first on PATH, so the bare `tsc` is always the patched one. Not to be
-      // confused with `vp check`, the Vite+ built-in (Oxfmt + Oxlint +
-      // tsgolint).
+      // The TS 7 type check plus Effect diagnostics (#20, #31). `vp check`
+      // type-checks with tsgolint, which reports no Effect diagnostics;
+      // `prepare` patches the native `tsc` (`@typescript/native`) with
+      // `effect-tsgo`, so this is the gate that fails on an Effect `error`
+      // diagnostic (warnings and suggestions print but don't fail it:
+      // `ignoreEffectWarningsInTscExitCode` in tsconfig.json). `vp run` puts
+      // this package's `node_modules/.bin` first on PATH, so the bare `tsc` is
+      // always the patched one. Not to be confused with `vp check`, the Vite+
+      // built-in (Oxfmt + Oxlint + tsgolint).
       check: "tsc -p tsconfig.json",
       build: "vp pack",
       "test:unit": "vp test run",

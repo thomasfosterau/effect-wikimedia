@@ -26,7 +26,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 
 - `pnpm install --frozen-lockfile` — install exactly as CI does.
 - `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix. A Vite+ built-in, not the `check` task below.
-- `vp run check` — Effect diagnostics: runs `tsc -p tsconfig.json` with the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these. Cached; a change to `src/`, `tests/`, `tsconfig.json` or `node_modules` (the patched binary included) reruns it.
+- `vp run check` — the TS 7 type check plus Effect diagnostics: runs `tsc -p tsconfig.json` with the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these. Cached; a change to anything it reads (`src/`, `tests/`, `vite.config.ts`, `tsconfig.json`, `node_modules`, the patched binary included) reruns it.
 - `vp run test:unit` — the Vitest suite.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
 - `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
