@@ -39,6 +39,12 @@ catalog:
   effect: 4.0.0
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
+  # The dead-code gate (`vp run fallow`, #20): fallow's static analysis reports
+  # unused files, exports, types and dependencies, circular imports and
+  # duplication, with `.fallowrc.json` declaring the entry points. A native
+  # (Rust) binary, delivered through per-platform `@fallow-cli/*` optional
+  # dependencies, with no install script.
+  fallow: ^3.32.0
   # The docs gate (`vp run docgen`, #20): TypeDoc renders the API reference from
   # the doc comments reachable from `src/index.ts` and, under `typedoc.json`'s
   # validation, fails on an undocumented export or an unresolved `{@link}`.

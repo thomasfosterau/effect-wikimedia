@@ -1,0 +1,49 @@
+// The dead-code gate (`vp run fallow`, #20): `fallow dead-code` fails on an
+// unused file, export, type or dependency, a duplicate export, an unresolved
+// import or a circular dependency. fallow's vite, vitest, typescript, typedoc
+// and changesets plugins find most entry points on their own (`fallow list
+// --entry-points`); `entry` adds the ones loaded in a way they can't see.
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": [
+    // The published surface: the package's one entry point. package.json
+    // `main` already makes it one; listing it here keeps every export on the
+    // barrel counted as used whatever fallow's manifest detection does.
+    "src/index.ts",
+    // Type-checked against the emitted `dist/` by `vp run check:dist`
+    // (tests/dist-consumer/tsconfig.json), never imported.
+    "tests/dist-consumer/index.ts",
+    // A TypeDoc plugin, loaded by path from typedoc.json's `plugin` list.
+    "scripts/typedoc-context-service.mjs"
+  ],
+  // Only devDependencies whose bins the Vite+ tasks in vite.config.ts run:
+  // fallow reads commands from package.json `scripts`, not from `run.tasks`.
+  "ignoreDependencies": [
+    // `tsc` (the patched TS 7 compiler) in the `check` and `check:dist` tasks.
+    "@typescript/native",
+    // `fallow` in the `fallow` task.
+    "fallow"
+  ],
+  "ignoreExports": [
+    // Exempt from the duplicate-exports check: `Action.MAX_SEARCH_RESULTS` /
+    // `Action.normaliseSearch` and their `Wikidata` namesakes are separate
+    // public API on separate namespaces (`export * as` in src/index.ts), so no
+    // import resolves ambiguously, and neither module may import the other
+    // (module-per-surface, AGENTS.md).
+    {
+      "file": "src/{action,wikidata}.ts",
+      "exports": ["MAX_SEARCH_RESULTS", "normaliseSearch"]
+    }
+  ],
+  "rules": {
+    // fallow defaults both to `warn`, which prints without failing. Every
+    // dependency here is a devDependency (`effect` is also the one peer), and
+    // every version lives in the strict catalog, so at `warn` the gate would
+    // check no dependency at all.
+    "unused-dev-dependencies": "error",
+    "unused-catalog-entries": "error"
+  },
+  // A file fallow can't parse is a file it can't vouch for: fail rather than
+  // pass on a partial graph.
+  "failOnParseError": true
+}

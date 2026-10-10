@@ -4,7 +4,9 @@
 #
 # The Claude Code SessionStart hook (see .claude/settings.json). Copied in
 # shape from `thomasfosterau/effect-drizzle-ext`, the shared library standard,
-# minus the tools this single-package repo does not carry (fallow, tsx).
+# minus the tools this single-package repo does not carry (tsx). fallow is a
+# devDependency here, but it runs only as `vp run fallow`, and `vp run` puts
+# `node_modules/.bin` on PATH itself, so this script provisions nothing for it.
 #
 # ## The problem it solves
 #

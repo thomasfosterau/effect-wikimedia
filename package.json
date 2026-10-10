@@ -58,6 +58,7 @@
     "@typescript/native": "catalog:",
     "effect": "catalog:",
     "esbuild": "catalog:",
+    "fallow": "catalog:",
     "typedoc": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
