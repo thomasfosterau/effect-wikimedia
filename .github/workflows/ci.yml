@@ -32,9 +32,9 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # `vp run` tasks (`test`, `build`, `check:dist`, `docgen`) are
-      # content-addressed (`run.cache` in vite.config.ts); restoring the cache
-      # lets an unchanged task replay.
+      # `vp run` tasks (`check`, `test:unit`, `build`, `check:dist`, `docgen`)
+      # are content-addressed (`run.cache` in vite.config.ts); restoring the
+      # cache lets an unchanged task replay.
       - name: Restore the Vite+ task cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -43,19 +43,21 @@ jobs:
           restore-keys: |
             vp-task-v1-${{ runner.os }}-
 
+      # Vite+'s built-in `vp check`, not the `check` task below.
       - name: Format, lint and type-check
         run: vp check
 
       # `vp check` type-checks with tsgolint, which reports no Effect
-      # diagnostics. `prepare` patches the native `tsc` (`@typescript/native`)
-      # with `effect-tsgo`, so this step is the one that fails on an Effect
-      # `error` diagnostic; warnings and suggestions don't affect its exit
-      # code (`ignoreEffectWarningsInTscExitCode` in tsconfig.json) (#31).
+      # diagnostics. The `check` task runs `tsc -p tsconfig.json` with the
+      # native `tsc` that `prepare` patches with `effect-tsgo`, so this step is
+      # the one that fails on an Effect `error` diagnostic; warnings and
+      # suggestions don't affect its exit code
+      # (`ignoreEffectWarningsInTscExitCode` in tsconfig.json) (#31, #20).
       - name: Effect diagnostics
-        run: tsc -p tsconfig.json
+        run: vp run check
 
       - name: Test
-        run: vp run test
+        run: vp run test:unit
 
       - name: Build
         run: vp run build
