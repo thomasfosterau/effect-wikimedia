@@ -209,6 +209,8 @@ export const DateFact = Schema.TaggedStruct("Date", {
    * The Wikibase timestamp without its leading `+`, e.g.
    * `"1952-03-11T00:00:00Z"` (see {@link normaliseTimeValue}). Read it with
    * `precision`: a year-precision date is stored as `"1952-00-00T00:00:00Z"`.
+   * Read it with `calendar` too: a Julian `time` is not the Gregorian day
+   * with the same digits.
    */
   time: Schema.String,
   /**
@@ -238,7 +240,10 @@ export type DateFact = typeof DateFact.Type;
 export const ImageFact = Schema.TaggedStruct("Image", {
   /** The Wikidata image property, e.g. `"P18"`. */
   property: Schema.String,
-  /** The Commons filename as the claim spells it, without the `File:` prefix. */
+  /**
+   * The Commons filename as the claim spells it. Wikibase `commonsMedia`
+   * values carry no `File:` prefix; {@link normaliseCommonsImage} doesn't strip one.
+   */
   filename: Schema.String,
   /** The file's `Special:FilePath` URL on Commons (see {@link normaliseCommonsImage}). */
   iri: Schema.String,
