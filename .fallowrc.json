@@ -25,9 +25,11 @@
     "fallow"
   ],
   "ignoreExports": [
-    // Exempt from the duplicate-exports check: `Action.MAX_SEARCH_RESULTS` /
-    // `Action.normaliseSearch` and their `Wikidata` namesakes are separate
-    // public API on separate namespaces (`export * as` in src/index.ts), so no
+    // Exempt from the duplicate-exports check (`ignoreExports` also exempts
+    // them from unused-exports, a no-op while both namespaces are public):
+    // `Action.MAX_SEARCH_RESULTS` / `Action.normaliseSearch` and their
+    // `Wikidata` namesakes are separate public API on separate namespaces
+    // (`export * as` in src/index.ts), so no
     // import resolves ambiguously, and neither module may import the other
     // (module-per-surface, AGENTS.md).
     {

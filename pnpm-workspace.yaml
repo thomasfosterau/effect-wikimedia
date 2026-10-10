@@ -40,8 +40,8 @@ catalog:
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
   # The dead-code gate (`vp run fallow`, #20): fallow's static analysis reports
-  # unused files, exports, types and dependencies, circular imports and
-  # duplication, with `.fallowrc.json` declaring the entry points. A native
+  # unused files, exports, types and dependencies, duplicate exports and
+  # circular imports, with `.fallowrc.json` declaring the entry points. A native
   # (Rust) binary, delivered through per-platform `@fallow-cli/*` optional
   # dependencies, with no install script.
   fallow: ^3.32.0
