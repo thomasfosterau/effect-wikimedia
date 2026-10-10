@@ -16,6 +16,7 @@ import { compose, Duplex, PassThrough, Readable, Transform } from "node:stream";
 import { createGunzip, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -33,6 +34,18 @@ const decodeUtf8 = (bytes: ReadonlyArray<Uint8Array>): string =>
   Buffer.concat(bytes.map((b) => Buffer.from(b))).toString("utf8");
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Settles as `promise` does, or with `"hung"` after 5 s, and clears the timer
+ * either way: a regression that hangs fails promptly instead of timing out.
+ */
+const orHung = <A>(promise: Promise<A>): Promise<A | "hung"> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const hung = new Promise<"hung">((resolve) => {
+    timer = setTimeout(() => resolve("hung"), 5000);
+  });
+  return Promise.race([promise, hung]).finally(() => clearTimeout(timer));
+};
 
 // ── File source + decompression ──────────────────────────────────────────
 
@@ -150,10 +163,7 @@ describe("a decompressor that is not a Node stream", () => {
   // `Effect.timeout` can't bound it; racing a timer turns a regression into
   // a prompt failure instead of a test timeout.
   const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
-    const outcome = await Promise.race([
-      runTestExit(Stream.runDrain(stream)),
-      wait(5000).then(() => "hung" as const),
-    ]);
+    const outcome = await orHung(runTestExit(Stream.runDrain(stream)));
     if (outcome === "hung") throw new Error("the stream hung instead of failing");
     return expectFailureInstanceOf(outcome, Dumps.SourceError);
   };
@@ -186,7 +196,7 @@ describe("a decompressor that is not a Node stream", () => {
       return readable;
     });
     await failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
-    const outcome = await Promise.race([closed, wait(5000).then(() => "open" as const)]);
+    const outcome = await orHung(closed);
     expect(opened).toBe(true);
     expect(outcome).toBe("closed");
     expect(readable.destroyed).toBe(true);
@@ -243,29 +253,66 @@ describe("interruption teardown", () => {
     expect(source.destroyedFlag).toBe(true);
   });
 
-  // A stalled Readable has a pending `next()` that no data will settle, and
-  // its async iterator queues `return()` behind it, so a teardown that waits
-  // on `return()` before destroying hangs (#83). Racing a timer turns that
-  // regression into a prompt failure instead of a test timeout.
-  const interruptsPromptly = async (stream: Stream.Stream<unknown, unknown>): Promise<void> => {
+  /**
+   * A Readable that never pushes, and a promise that settles on its first
+   * `read()`. Node's async iterator calls `read()` from inside `next()`, so
+   * once `reading` settles a `next()` is pending that no data will settle.
+   */
+  const stalledReadable = (): { readonly readable: Readable; readonly reading: Promise<void> } => {
+    let onRead = (): void => undefined;
+    const reading = new Promise<void>((resolve) => (onRead = resolve));
+    return { readable: new Readable({ read: () => onRead() }), reading };
+  };
+
+  // A stalled Readable's async iterator queues `return()` behind the pending
+  // `next()`, so a teardown that waits on `return()` before destroying hangs
+  // (#83). Interrupting only once `reading` settles makes the test exercise
+  // that pending `next()` rather than pass before the drain reaches it.
+  const interruptsPromptly = async (
+    stream: Stream.Stream<unknown, unknown>,
+    reading: Promise<void>,
+  ): Promise<void> => {
     const fiber = Effect.runFork(Stream.runDrain(stream));
-    await wait(50); // let the drain reach the pending `next()`
-    const outcome = await Promise.race([
+    expect(await orHung(reading)).toBeUndefined();
+    const outcome = await orHung(
       runTest(Fiber.interrupt(fiber)).then(() => "interrupted" as const),
-      wait(5000).then(() => "hung" as const),
-    ]);
+    );
     expect(outcome).toBe("interrupted");
   };
 
   it("destroys a stalled Readable when the Effect is interrupted", async () => {
-    const readable = new Readable({ read() {} });
-    await interruptsPromptly(Dumps.fromNodeReadable(() => readable));
+    const { readable, reading } = stalledReadable();
+    await interruptsPromptly(
+      Dumps.fromNodeReadable(() => readable),
+      reading,
+    );
     expect(readable.destroyed).toBe(true);
   });
 
   it("destroys a stalled source behind a decompression stage when the Effect is interrupted", async () => {
-    const readable = new Readable({ read() {} });
-    await interruptsPromptly(Dumps.fromNodeReadable(() => readable).pipe(Dumps.gunzip));
+    const { readable, reading } = stalledReadable();
+    await interruptsPromptly(Dumps.fromNodeReadable(() => readable).pipe(Dumps.gunzip), reading);
+    expect(readable.destroyed).toBe(true);
+  });
+
+  it("destroys the Readable when interrupted before the iterator's return() is registered", async () => {
+    // `Stream.fromAsyncIterable` registers `return()` as a finalizer only
+    // after creating the iterator, so an interruption that lands between
+    // `fromNodeReadable`'s own finalizer and that registration is covered by
+    // the scope finalizer alone. Interrupting from inside the iterator's
+    // creation lands it there deterministically: the fiber observes it at its
+    // next step, before the registration.
+    class InterruptsOnIterate extends Readable {
+      override [Symbol.asyncIterator]() {
+        Fiber.getCurrent()?.interruptUnsafe();
+        return super[Symbol.asyncIterator]();
+      }
+    }
+    const readable = new InterruptsOnIterate({ read() {} });
+    const exit = await orHung(runTestExit(Stream.runDrain(Dumps.fromNodeReadable(() => readable))));
+    expect(exit).not.toBe("hung");
+    if (exit === "hung") return;
+    expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(readable.destroyed).toBe(true);
   });
 });

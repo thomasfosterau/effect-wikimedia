@@ -4,14 +4,13 @@
  * `@thomasfosterau/effect-wikimedia`. A dump is ultimately a
  * `Stream<Uint8Array>`; this module supplies that byte stream from a local
  * file or a resumable HTTP range download, and the pluggable decompression
- * stages that sit in front of the {@link "./entities"} / {@link "./xml"}
- * pipelines.
+ * stages that sit in front of the `Dumps` entity / XML pipelines.
  *
  * **Why Node-only, and why it is quarantined here.** Streaming a
  * multi-gigabyte compressed dump wants `node:fs` / `node:zlib` / `node:stream`
  * — capabilities a Worker / browser build does not have. Node imports are
  * confined to this module; the rest of the package (including the
- * {@link "./entities"} and {@link "./xml"} pipelines themselves) stays
+ * `dumps/entities` and `dumps/xml` pipelines themselves) stays
  * runtime-agnostic, so a consumer that brings its **own** `Stream<Uint8Array>`
  * never pulls these Node imports.
  *
@@ -168,8 +167,11 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
  * interruption guarantee: cancelling the consuming Effect destroys the
  * Readable and anything composed into it — an open file descriptor, an
  * in-flight gunzip — so no decompression work is orphaned. It holds while the
- * Readable is stalled waiting for data, too: the interruption completes
- * without waiting for that data.
+ * Readable is stalled waiting for data, too: the interruption completes once
+ * the Readable's own `destroy()` does (it emits `close`), without waiting for
+ * that data. A Readable whose `destroy()` never finishes still holds the
+ * interruption up: one built with `emitClose: false`, or a {@link fromFile}
+ * read of a FIFO whose writer is open but idle.
  */
 export const fromNodeReadable = (
   evaluate: () => NodeReadableLike,
@@ -177,8 +179,9 @@ export const fromNodeReadable = (
   Stream.unwrap(
     Effect.gen(function* () {
       const readable = yield* Effect.try({ try: evaluate, catch: sourceError });
-      // Covers teardown before the stream is first pulled, when no iterator
-      // exists for `destroyOnReturn` to destroy through.
+      // Covers teardown that lands before `Stream.fromAsyncIterable` has
+      // created the iterator and registered its `return()` as a finalizer: an
+      // interruption the fiber observes between this step and that one.
       yield* Effect.addFinalizer(() => Effect.sync(() => destroyReadable(readable)));
       return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
     }),
