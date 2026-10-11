@@ -1,5 +1,7 @@
 # @thomasfosterau/effect-wikimedia
 
+**Disclaimer:** This is an experimental library mostly written using Claude Code. Not extensively tested, still a work in progress, use at your own risk.
+
 A strongly typed, Effect-idiomatic client family for Wikimedia properties — Wikipedia, Wikidata, Commons, WDQS, wikitext, and dumps.
 
 Every surface is a namespace on the package's single `.` entry point (`import { Action, Core } from "@thomasfosterau/effect-wikimedia"`), and each namespace is a tree-shakeable slice built on `Core` (except the pure `Wikitext`): importing `Action` never pulls `Rest` or `Commons` into a bundle.
