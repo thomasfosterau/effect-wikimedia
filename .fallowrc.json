@@ -1,7 +1,9 @@
-// The dead-code gate (`vp run fallow`, #20): `fallow dead-code` fails on an
-// unused file, export, type or dependency, a duplicate export, an unresolved
-// import or a circular dependency. fallow's vite, vitest, typescript, typedoc
-// and changesets plugins find most entry points on their own (`fallow list
+// fallow's three gates: dead code and duplication (`vp run fallow`) and
+// complexity (`vp run fallow:health`), each described at its settings below.
+// The dead-code gate (#20): `fallow dead-code` fails on an unused file,
+// export, type or dependency, a duplicate export, an unresolved import or a
+// circular dependency. fallow's vite, vitest, typescript, typedoc and
+// changesets plugins find most entry points on their own (`fallow list
 // --entry-points`); `entry` adds the ones loaded in a way they can't see.
 {
   "$schema": "./node_modules/fallow/schema.json",
@@ -44,6 +46,78 @@
     // check no dependency at all.
     "unused-dev-dependencies": "error",
     "unused-catalog-entries": "error"
+  },
+  // The complexity ratchet (`vp run fallow:health`, #102). Every function is
+  // held to fallow's default ceilings (cyclomatic 20, cognitive 15, CRAP 30);
+  // the functions already over one on 2026-10-14 are pinned below at today's
+  // value instead, so none of them may get worse and no new one may join
+  // them. CRAP is `CC^2 * (1 - coverage)^3 + CC`, computed from the Istanbul
+  // coverage `vp run test:unit` writes; without that file fallow exits 2
+  // rather than fall back to its estimate, which disagrees with these limits.
+  "health": {
+    "coverage": "coverage/coverage-final.json",
+    // One entry per function, keyed by file and name, raising only the limit
+    // it breaches: its other limits stay at the defaults. After a refactor
+    // brings a function down, lower its limit to the new value, or delete the
+    // entry once the function is within the defaults (AGENTS.md). CRAP fails
+    // at or above its ceiling, so a CRAP ceiling is today's score plus 0.1;
+    // cyclomatic and cognitive fail only above theirs.
+    "thresholdOverrides": [
+      {
+        "files": ["src/core.ts"],
+        "functions": ["normaliseTitle"],
+        "maxCognitive": 18
+      },
+      {
+        "files": ["src/wikitext/parse.ts"],
+        "functions": ["parseFragment"],
+        "maxCognitive": 16
+      },
+      {
+        "files": ["src/wikitext/parse.ts"],
+        "functions": ["tryTag"],
+        "maxCognitive": 18
+      },
+      {
+        "files": ["src/wikitext/parse.ts"],
+        "functions": ["tryEntity"],
+        "maxCognitive": 26
+      },
+      {
+        "files": ["src/wikitext/query.ts"],
+        "functions": ["decodeEntity"],
+        "maxCrap": 44.4
+      },
+      {
+        "files": ["src/wikitext/quotes.ts"],
+        "functions": ["resolveLine"],
+        "maxCognitive": 35
+      },
+      // The `Context.Service` reflection hook, an anonymous arrow. fallow
+      // names every arrow `<arrow>`, so this also covers the file's one other
+      // arrow, a 4-line callback well under both limits. No test loads the
+      // TypeDoc plugin, so its CRAP is fallow's estimate (0% coverage).
+      {
+        "files": ["scripts/typedoc-context-service.mjs"],
+        "functions": ["<arrow>"],
+        "maxCognitive": 22,
+        "maxCrap": 182.1
+      }
+    ]
+  },
+  // The duplication ratchet (also `vp run fallow`, #102): `fallow dupes
+  // --fail-on-issues` fails on any clone group (5+ lines, 50+ tokens) not
+  // listed here. Each entry is a group's content fingerprint and instance
+  // count, so moving the code keeps it ignored, while editing either copy or
+  // adding a third makes it a new group that fails. After removing a clone,
+  // delete its entry (AGENTS.md).
+  "duplicates": {
+    "ignoredClones": [
+      // src/reconciliation/candidate.ts:145-158 and :430-441 (14 lines).
+      "dup:2bff87a3:2",
+      // src/action.ts:112-122 and :200-208 (11 lines).
+      "dup:f34feed5:2"
+    ]
   },
   // A file fallow can't parse is a file it can't vouch for: fail rather than
   // pass on a partial graph.

@@ -32,8 +32,8 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # `vp run` tasks (`check`, `fallow`, `test:unit`, `build`, `check:dist`,
-      # `docgen`) are content-addressed (`run.cache` in vite.config.ts);
+      # `vp run` tasks (`check`, `fallow`, `test:unit`, `fallow:health`,
+      # `build`, `check:dist`, `docgen`) are content-addressed (`run.cache` in vite.config.ts);
       # restoring the cache lets an unchanged task replay.
       - name: Restore the Vite+ task cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -59,14 +59,25 @@ jobs:
       # fallow's dead-code analysis: fails on an unused file, export, type,
       # devDependency or catalog entry, a duplicate export, an unresolved
       # import or a circular dependency (`.fallowrc.json` holds the entry
-      # points and the documented exemptions) (#20). Like the two steps above
-      # it reads only the source tree and needs no build, and it takes well
-      # under a second, so it runs with the static checks, before the tests.
-      - name: Dead code
+      # points and the documented exemptions) (#20). Then its duplication
+      # analysis: fails on a clone group not in `duplicates.ignoredClones`
+      # (#102). Like the two steps above it reads only the source tree and
+      # needs no build, and it takes well under a second, so it runs with the
+      # static checks, before the tests.
+      - name: Dead code and duplication
         run: vp run fallow
 
+      # Also writes coverage/coverage-final.json for the complexity step.
       - name: Test
         run: vp run test:unit
+
+      # fallow's complexity analysis: fails on a function over a cyclomatic,
+      # cognitive or CRAP ceiling (`health` in `.fallowrc.json`: the defaults,
+      # and today's value for each function already over one) (#102). CRAP is
+      # computed from the Test step's coverage, so it runs straight after it;
+      # its `test:unit` dependency replays from that step's cache entry.
+      - name: Complexity
+        run: vp run fallow:health
 
       - name: Build
         run: vp run build

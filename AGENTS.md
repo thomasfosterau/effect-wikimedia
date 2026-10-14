@@ -10,7 +10,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 - **No subpath exports.** Namespaces on the one barrel give the tree-shaking property without fragmenting the API.
 - **No live network in tests.** Use the recorded fixtures in `tests/fixtures/` and stub at `FetchHttpClient.Fetch` or under `Core.wikimediaClientLayer`. Wikimedia's etiquette rules (polite `User-Agent`, `maxlag`) exist because the projects are donation-funded.
 - **Node imports stay in `src/dumps/sources.ts`.** The build is `platform: "neutral"` (`vite.config.ts`); everything else must run in a browser or a Worker.
-- **Never edit a version in `package.json`.** Edit the strict catalog in `pnpm-workspace.yaml`, run `pnpm install`, and commit `pnpm-lock.yaml` (CI installs with `--frozen-lockfile`). `vite-plus`, `vite` and `vitest` move together; see the catalog comment.
+- **Never edit a version in `package.json`.** Edit the strict catalog in `pnpm-workspace.yaml`, run `pnpm install`, and commit `pnpm-lock.yaml` (CI installs with `--frozen-lockfile`). `vite-plus`, `vite`, `vitest` and `@vitest/coverage-istanbul` move together; see the catalog comment.
 
 ## Conventions
 
@@ -27,8 +27,9 @@ Toolchain differences from the other library repos: single package, so the tasks
 - `pnpm install --frozen-lockfile` — install exactly as CI does.
 - `vp check` — format (Oxfmt) + lint (Oxlint) + type-check (tsgolint); `--fix` to autofix. A Vite+ built-in, not the `check` task below.
 - `vp run check` — the TS 7 type check plus Effect diagnostics: runs `tsc -p tsconfig.json` with the native `tsc` that `prepare` patches with `effect-tsgo`. Only `error` fails it; warnings (`ignoreEffectWarningsInTscExitCode`) and suggestions print without affecting the exit code. tsgolint reports none of these. Cached; a change to anything it reads (`src/`, `tests/`, `vite.config.ts`, `tsconfig.json`, `node_modules`, the patched binary included) reruns it.
-- `vp run fallow` — the dead-code gate: `fallow dead-code` (not bare `fallow`: `dupes` and `health` aren't gated, #102) fails on an unused file, export, type, devDependency or catalog entry, a duplicate export, an unresolved import or a circular dependency. `.fallowrc.json` adds the entry points fallow's plugins can't see (`tests/dist-consumer/`, the TypeDoc plugin in `scripts/`) and holds the documented exemptions; everything reachable from `src/index.ts` is the published surface and counts as used. Delete what it reports as dead; exempt something in `.fallowrc.json` only with a comment saying why it is live (or, for a duplicate export, why the duplication is intended). A devDependency used only as a bin from a `vite.config.ts` task needs an `ignoreDependencies` entry, because fallow reads commands from package.json `scripts`, not from `run.tasks`. Needs no build.
-- `vp run test:unit` — the Vitest suite.
+- `vp run fallow` — the dead-code and duplication gate, fallow's static analyses. `fallow dead-code` fails on an unused file, export, type, devDependency or catalog entry, a duplicate export, an unresolved import or a circular dependency. `.fallowrc.json` adds the entry points fallow's plugins can't see (`tests/dist-consumer/`, the TypeDoc plugin in `scripts/`) and holds the documented exemptions; everything reachable from `src/index.ts` is the published surface and counts as used. Delete what it reports as dead; exempt something in `.fallowrc.json` only with a comment saying why it is live (or, for a duplicate export, why the duplication is intended). A devDependency used only as a bin from a `vite.config.ts` task needs an `ignoreDependencies` entry, because fallow reads commands from package.json `scripts`, not from `run.tasks`. `fallow dupes --fail-on-issues` then fails on any clone group (5+ lines, 50+ tokens; test files are skipped) not listed in `duplicates.ignoredClones`. Each entry is the content fingerprint and instance count of a clone that predates the gate (#102): moving the code keeps it ignored, while editing a copy or adding another makes it a new group that fails. Extract a shared helper rather than add an entry. After removing a listed clone, delete its entry. Needs no build.
+- `vp run test:unit` — the Vitest suite, with Istanbul coverage: it writes `coverage/coverage-final.json` (gitignored), which `fallow:health` reads.
+- `vp run fallow:health` — the complexity ratchet (#102): `fallow health` fails on a function over a cyclomatic, cognitive or CRAP ceiling. CRAP (`CC² × (1 − coverage)³ + CC`) uses the coverage `test:unit` writes, so the task depends on `test:unit` (a cache hit when the tests just ran). A missing coverage file is an error (exit 2), not a fallback to fallow's estimate. Every function is held to fallow's defaults (cyclomatic 20, cognitive 15, CRAP 30); the functions already over one when the gate landed are pinned at their measured value by `health.thresholdOverrides` in `.fallowrc.json`, one entry per function, raising only the limit it breaches. So no pinned function may get worse and no new one may join them. Bring a new over-limit function under the defaults (split it, or test it to lower its CRAP); don't add an override. After a refactor or new tests lower a pinned function, lower its ceiling to the value `fallow:health` now prints under "Health threshold overrides" (CRAP fails _at_ its ceiling, so set a CRAP ceiling 0.1 above the score), or delete the entry once the function is within the defaults. Renaming or moving a pinned function to another file drops its pin, so move the entry with it.
 - `vp run build` — `vp pack` (tsdown) into `dist/`.
 - `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
 - `vp run docgen` — the docs gate: TypeDoc renders the API reference from the doc comments reachable from `src/index.ts` into the gitignored `api-docs/`, and fails on an undocumented export or method or a `{@link}` that resolves to nothing in the published surface (`typedoc.json`; `tsdoc.json` registers `@copyright`). Needs no build. Properties aren't required yet (#79).
@@ -45,10 +46,11 @@ Before you report work as done, run these in CI's order (`.github/workflows/ci.y
 2. `vp run check`
 3. `vp run fallow`
 4. `vp run test:unit`
-5. `vp run build`
-6. `vp run check:dist`
-7. `vp run docgen`
-8. `pnpm audit --audit-level high`
+5. `vp run fallow:health`
+6. `vp run build`
+7. `vp run check:dist`
+8. `vp run docgen`
+9. `pnpm audit --audit-level high`
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 
