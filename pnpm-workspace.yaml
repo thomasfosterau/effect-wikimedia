@@ -29,6 +29,11 @@ catalog:
   # run the Effect oxlint preset, so `vite-plus` is not tied to its oxlint.
   "@effect/tsgo": 0.47.2
   "@types/node": ^26.1.2
+  # Vitest's Istanbul coverage provider, which `vp run test:unit` loads to write
+  # coverage/coverage-final.json for the coverage-backed CRAP scores in `vp run
+  # fallow:health` (#102). It peers on vitest at the exact version, so it moves
+  # with `vite-plus` / `vite` / `vitest` (see the comment on those below).
+  "@vitest/coverage-istanbul": 4.1.11
   # `effect` is a peerDependency of the published package and a devDependency
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
@@ -39,12 +44,16 @@ catalog:
   effect: 4.0.0
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
-  # The dead-code gate (`vp run fallow`, #20): fallow's static analysis reports
-  # unused files, exports, types and dependencies, duplicate exports and
-  # circular imports, with `.fallowrc.json` declaring the entry points. A native
-  # (Rust) binary, delivered through per-platform `@fallow-cli/*` optional
-  # dependencies, with no install script.
-  fallow: ^3.32.0
+  # The dead-code, duplication and complexity gates (`vp run fallow` and `vp
+  # run fallow:health`, #20, #102): fallow's static analysis reports unused
+  # files, exports, types and dependencies, duplicate exports, circular
+  # imports, clone groups and over-complex functions, configured in
+  # `.fallowrc.json`. A native (Rust) binary, delivered through per-platform
+  # `@fallow-cli/*` optional dependencies, with no install script. At least
+  # 3.33.1: 3.32.0 gave nearly every clone group the same fingerprint (a rank
+  # suffix told them apart), so a `duplicates.ignoredClones` entry could hide
+  # a different clone (#102).
+  fallow: ^3.33.1
   # The docs gate (`vp run docgen`, #20): TypeDoc renders the API reference from
   # the doc comments reachable from `src/index.ts` and, under `typedoc.json`'s
   # validation, fails on an undocumented export or an unresolved `{@link}`.
@@ -63,7 +72,8 @@ catalog:
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override below
-  # forces every resolution to the catalog singleton. Bump the three together.
+  # forces every resolution to the catalog singleton. Bump the three together,
+  # with `@vitest/coverage-istanbul` above, which peers on that exact `vitest`.
   vite-plus: 0.3.3
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11

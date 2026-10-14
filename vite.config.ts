@@ -22,7 +22,18 @@ export default defineConfig({
       // built-in (Oxfmt + Oxlint + tsgolint).
       check: "tsc -p tsconfig.json",
       build: "vp pack",
-      "test:unit": "vp test run",
+      // `--coverage` writes coverage/coverage-final.json (the `json` reporter
+      // below), which `fallow:health` reads for its CRAP scores. Istanbul's
+      // instrumentation adds about a second to the suite. Vitest reads back
+      // its own `coverage/.tmp/` shards, and a task that reads what it wrote
+      // is never cached, so `coverage/` is left out of the fingerprint; it is
+      // still archived as output and restored on a cache hit. Vitest also
+      // lists the root directory, so a run that starts without `coverage/`
+      // (a fresh CI checkout) misses once; `fallow:health` then hits.
+      "test:unit": {
+        command: "vp test run --coverage",
+        input: [{ auto: true }, "!coverage/**"],
+      },
       // The dist-consumer declaration check (#20): type-check
       // `tests/dist-consumer/` against the emitted `dist/*.d.ts`, so broken
       // published types fail even when the source type-check passes. Both
@@ -45,16 +56,31 @@ export default defineConfig({
       // `tsdoc.json` registers the `@copyright` tag. Reads `src/` through the
       // TS 6 JS API, so it needs no build.
       docgen: "typedoc",
-      // The dead-code gate (#20): fallow's static analysis fails on an unused
-      // file, export, type, devDependency or catalog entry, a duplicate
-      // export, an unresolved import or a circular dependency. Entry points
-      // and the documented exemptions live in `.fallowrc.json`; the exports on
-      // `src/index.ts` are the published surface, so they always count as
-      // used. `dead-code` only: the `dupes` and `health` analyses that bare
-      // `fallow` adds aren't gated (#102). `--no-cache` keeps fallow's own
-      // cache out of the tree, so the Vite+ task cache alone decides what
-      // reruns.
-      fallow: "fallow dead-code --no-cache",
+      // The dead-code and duplication gate (#20, #102), fallow's static
+      // analyses. `dead-code` fails on an unused file, export, type,
+      // devDependency or catalog entry, a duplicate export, an unresolved
+      // import or a circular dependency; entry points and the documented
+      // exemptions live in `.fallowrc.json`, and the exports on `src/index.ts`
+      // are the published surface, so they always count as used. `dupes`
+      // exits 0 on findings unless given `--fail-on-issues`; with it, any
+      // clone group not in `duplicates.ignoredClones` fails. `--no-cache` keeps
+      // fallow's own cache out of the tree, so the Vite+ task cache alone
+      // decides what reruns.
+      fallow: {
+        command: ["fallow dead-code --no-cache", "fallow dupes --no-cache --fail-on-issues"],
+      },
+      // The complexity ratchet (#102): fails on a function over a cyclomatic,
+      // cognitive or CRAP ceiling (`health` in `.fallowrc.json`: the defaults,
+      // plus a pinned ceiling for each function already over one). CRAP needs
+      // the coverage that `test:unit` writes, hence the dependency; in CI it
+      // replays from the Test step, cached outputs included. `--complexity`
+      // limits the run to the function findings that decide the exit code:
+      // the default report adds git-churn hotspots, which read history the
+      // task cache doesn't fingerprint.
+      "fallow:health": {
+        command: "fallow health --no-cache --complexity",
+        dependsOn: ["test:unit"],
+      },
     },
   },
 
@@ -106,7 +132,8 @@ export default defineConfig({
     testTimeout: 30_000,
     coverage: {
       provider: "istanbul",
-      reporter: ["text-summary", "json-summary"],
+      // `json` writes coverage-final.json for `fallow:health`.
+      reporter: ["text-summary", "json-summary", "json"],
       reportsDirectory: "./coverage",
       include: ["src/**/*.ts"],
       exclude: ["**/*.d.ts"],
