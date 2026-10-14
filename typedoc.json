@@ -7,9 +7,12 @@
   "entryPoints": ["src/index.ts"],
   "out": "api-docs",
   "tsconfig": "tsconfig.json",
-  // Drops the members `Core.WikimediaClient` and `Reconciliation.WikidataLookup`
-  // inherit from Effect's `Context.Service`, keeping the `Service` shape (#87).
-  "plugin": ["./scripts/typedoc-context-service.mjs"],
+  // Drops the members our classes inherit from Effect's base classes, keeping
+  // what a consumer uses: the `Service` shape of `Core.WikimediaClient` and
+  // `Reconciliation.WikidataLookup` (`Context.Service`, #87), and the
+  // constructor, `_tag`, fields, `message` and `makeEffect` of the error
+  // classes (`Schema.TaggedError`, #99).
+  "plugin": ["./scripts/typedoc-effect-bases.mjs"],
   // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
   // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
   "skipErrorChecking": true,
