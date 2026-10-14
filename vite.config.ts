@@ -24,12 +24,13 @@ export default defineConfig({
       build: "vp pack",
       // `--coverage` writes coverage/coverage-final.json (the `json` reporter
       // below), which `fallow:health` reads for its CRAP scores. Istanbul's
-      // instrumentation adds about a second to the suite. Vitest reads back
-      // its own `coverage/.tmp/` shards, and a task that reads what it wrote
-      // is never cached, so `coverage/` is left out of the fingerprint; it is
-      // still archived as output and restored on a cache hit. Vitest also
-      // lists the root directory, so a run that starts without `coverage/`
-      // (a fresh CI checkout) misses once; `fallow:health` then hits.
+      // instrumentation adds about two seconds to the suite. Vitest reads
+      // back its own `coverage/.tmp/` shards, and a task that reads what it
+      // wrote is never cached, so `coverage/` is left out of the fingerprint;
+      // it is still archived as output and restored on a cache hit. Vitest
+      // also lists the root directory, so a run that starts without
+      // `coverage/` misses: in CI, where every checkout starts without it,
+      // the Test step always reruns the suite, and `fallow:health` then hits.
       "test:unit": {
         command: "vp test run --coverage",
         input: [{ auto: true }, "!coverage/**"],
