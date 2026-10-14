@@ -129,12 +129,13 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
 
 /**
  * Destroys `readable` for teardown, unless it already is. Teardown passes no
- * error, but a `stream.compose` chain (what {@link fromFile} and
- * {@link decompressWith} open) emits an `AbortError` when it is destroyed
- * before it finishes. Before the stream is first pulled nothing listens for
- * it, and Node throws an `error` event nobody listens for as an uncaught
- * exception, which crashes the process (#109). The stream's outcome is
- * already settled, so a listener that drops the error goes on first.
+ * error, but a `stream.compose` chain (what {@link fromFile} opens with a
+ * decompressor, and what {@link decompressWith} opens) emits an `AbortError`
+ * when it is destroyed before it finishes. Before the stream is first pulled
+ * nothing listens for it, and Node throws an `error` event nobody listens for
+ * as an uncaught exception, which crashes the process (#109). The stream's
+ * outcome is already settled, so a listener that drops the error goes on
+ * first.
  */
 const destroyReadable = (readable: NodeReadableLike): void => {
   if (readable.destroyed) return;
