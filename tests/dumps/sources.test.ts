@@ -434,6 +434,64 @@ describe("interruption teardown", () => {
     expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(readable.destroyed).toBe(true);
   });
+
+  it("destroys a hand-built source whose iterator's return() doesn't, exactly once", async () => {
+    // A Node Readable's own iterator destroys the stream in `return()`, which
+    // would mask a teardown that never calls `destroy()` (#80). This source's
+    // `return()` leaves it open, so only `fromNodeReadable`'s teardown can
+    // destroy it; and its iterator's `return()` and its scope finalizer both
+    // run, so the `destroyed` guard is what keeps it to one `destroy()`.
+    let destroyCalls = 0;
+    let pulled = 0;
+    let onThirdPull = (): void => undefined;
+    const thirdPull = new Promise<void>((resolve) => (onThirdPull = resolve));
+    const source: Dumps.NodeReadableLike = {
+      get destroyed() {
+        return destroyCalls > 0;
+      },
+      destroy: () => (destroyCalls += 1),
+      [Symbol.asyncIterator]: () => ({
+        next: async () => {
+          pulled += 1;
+          if (pulled === 3) onThirdPull();
+          await wait(5);
+          return { done: false, value: new Uint8Array([pulled]) };
+        },
+        return: (value?: unknown) => Promise.resolve({ done: true as const, value }),
+      }),
+    };
+    const fiber = Effect.runFork(Stream.runDrain(Dumps.fromNodeReadable(() => source)));
+    expect(await orHung(thirdPull)).toBeUndefined();
+    const exit = await orHung(
+      runTest(Fiber.interrupt(fiber).pipe(Effect.andThen(Fiber.await(fiber)))),
+    );
+    expect(exit).not.toBe("hung");
+    if (exit === "hung") return;
+    expect(Exit.hasInterrupts(exit)).toBe(true);
+    expect(destroyCalls).toBe(1);
+  });
+
+  it("destroys the Readable when interrupted as soon as evaluate returns it", async () => {
+    // An interruption the fiber observes right after `evaluate` returns, before
+    // anything else runs, must still destroy the Readable: opening it and
+    // registering its teardown are one uninterruptible step (#95). Interrupting
+    // from inside `evaluate` lands it there deterministically.
+    const readable = new Readable({ read() {} });
+    const exit = await orHung(
+      runTestExit(
+        Stream.runDrain(
+          Dumps.fromNodeReadable(() => {
+            Fiber.getCurrent()?.interruptUnsafe();
+            return readable;
+          }),
+        ),
+      ),
+    );
+    expect(exit).not.toBe("hung");
+    if (exit === "hung") return;
+    expect(Exit.hasInterrupts(exit)).toBe(true);
+    expect(readable.destroyed).toBe(true);
+  });
 });
 
 // ── Resumable HTTP range download ────────────────────────────────────────

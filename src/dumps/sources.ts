@@ -214,11 +214,17 @@ export const fromNodeReadable = (
 ): Stream.Stream<Uint8Array, SourceError> =>
   Stream.unwrap(
     Effect.gen(function* () {
-      const readable = yield* Effect.try({ try: evaluate, catch: sourceError });
-      // Covers teardown that lands before `Stream.fromAsyncIterable` has
-      // created the iterator and registered its `return()` as a finalizer: an
-      // interruption the fiber observes between this step and that one.
-      yield* Effect.addFinalizer(() => Effect.sync(() => destroyReadable(readable)));
+      // Opening the Readable and registering its `destroy()` as a scope
+      // finalizer are one uninterruptible step, so no interruption can land
+      // between them and leave it open (#95); `evaluate` is synchronous, so
+      // that costs nothing. The finalizer covers teardown that lands before
+      // `Stream.fromAsyncIterable` has created the iterator and registered its
+      // `return()` as a finalizer: an interruption the fiber observes between
+      // this step and that one.
+      const readable = yield* Effect.acquireRelease(
+        Effect.try({ try: evaluate, catch: sourceError }),
+        (readable) => Effect.sync(() => destroyReadable(readable)),
+      );
       return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
     }),
   );
