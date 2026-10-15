@@ -17,11 +17,12 @@
  * **bz2 decompression is a pluggable stage, not a dependency.** Node's `zlib`
  * ships gzip ({@link gunzipTransform}) but no bzip2, and pure-JS bzip2
  * decoders are heavy and slow — against the package's lean-dependency
- * posture. So decompression is modelled as an injectable Node `Transform`
+ * posture. So decompression is modelled as an injectable Node stream
  * factory ({@link Decompressor}): gzip is built in, and a caller who needs the
- * `.json.bz2` variant supplies their own bzip2 transform to {@link fromFile}
- * or {@link decompressWith}. No bzip2 code, and no bzip2 dependency, ships
- * here.
+ * `.json.bz2` variant supplies their own bzip2 decoder, such as
+ * `unbzip2-stream`, to {@link fromFile} or {@link decompressWith} (the
+ * {@link Decompressor} docs show how). No bzip2 code, and no bzip2
+ * dependency, ships here.
  *
  * **Node at runtime, not in the declarations.** The stream parameters are
  * typed structurally ({@link NodeReadableLike}, {@link NodeDuplexLike}), so
@@ -34,8 +35,7 @@
  */
 
 import { createReadStream } from "node:fs";
-import { compose, isReadable, isWritable, Readable } from "node:stream";
-import type { Duplex } from "node:stream";
+import { compose, Duplex, isReadable, isWritable, Readable } from "node:stream";
 import { createGunzip } from "node:zlib";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -91,11 +91,12 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
  * (compressed bytes in) and readable (decompressed bytes out). Declared
  * structurally so the package's declarations need no `node:stream` types.
  * At runtime the value must be a fresh Node `Duplex` or `Transform` (such as
- * `zlib.createGunzip()` or a bzip2 transform from a library), which this type
- * can't express: it is passed to Node's `stream.compose`. A value that
- * `node:stream` doesn't recognise as a stream, or a stream already destroyed
- * or ended, fails the stream with a {@link SourceError}; pass a new Node
- * stream each time.
+ * `zlib.createGunzip()`), or a fresh classic duplex stream (such as the one
+ * `unbzip2-stream` returns), which this type can't express: it is passed to
+ * Node's `stream.compose`, a classic stream after it has been adapted into a
+ * `Duplex`. A value that `node:stream` doesn't recognise as a stream, or a
+ * stream already destroyed or ended, fails the stream with a
+ * {@link SourceError}; pass a new Node stream each time.
  */
 export interface NodeDuplexLike extends NodeReadableLike {
   /** Writes a chunk of compressed input. */
@@ -106,7 +107,8 @@ export interface NodeDuplexLike extends NodeReadableLike {
 
 /**
  * Recovers the Node `Duplex` a {@link Decompressor} returns from its
- * structural type, for `compose`, and throws unless it is a fresh one. The
+ * structural type, for `compose`, and throws unless it is a fresh one; a
+ * classic stream is adapted into a `Duplex` once it has passed the check. The
  * contract on {@link NodeDuplexLike} is that the value is a real Node stream,
  * but the type admits a plain object, and `compose` doesn't reject one: the
  * composed stream never settles. Nor is a used stream safe: `compose` throws
@@ -122,16 +124,97 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * stage with the same `isWritable`, so a stage that passes here passes there.
  * The check is a heuristic, not a proof: a plain object with
  * `readable: true`, `writable: true` and `pipe` / `write` / `on` functions
- * still passes it and hangs in `compose`.
+ * still passes it, is adapted as a classic stream, and hangs in `compose`.
  */
 const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
   const duplex = stream as unknown as Duplex;
   if (isReadable(duplex) !== true || isWritable(duplex) !== true) {
     throw new TypeError(
-      "the decompressor must return a fresh Node stream Duplex or Transform, not a plain object or a stream already destroyed or ended",
+      "the decompressor must return a fresh Node stream (a Duplex, a Transform or a classic duplex stream), not a plain object or a stream already destroyed or ended",
     );
   }
-  return duplex;
+  return hasStreamState(duplex) ? duplex : adaptClassicDuplex(duplex);
+};
+
+/**
+ * Whether `stream` is a streams2 `Duplex` (a `Transform`, a `zlib` stream, a
+ * `readable-stream` one), which keeps its state in `_readableState` and
+ * `_writableState`, rather than a classic stream, which has neither. Node's
+ * stream utilities tell the two apart by the same fields; `compose` needs
+ * both sides, as it reads the stage with `read()` and waits for its `finish`.
+ */
+const hasStreamState = (stream: Duplex): boolean => {
+  const state = stream as unknown as Partial<Record<"_readableState" | "_writableState", unknown>>;
+  return (
+    typeof state._readableState === "object" &&
+    state._readableState !== null &&
+    typeof state._writableState === "object" &&
+    state._writableState !== null
+  );
+};
+
+/**
+ * Returns what `step` returns, or passes what it throws to `callback` and
+ * returns `undefined`: a classic stream's `write()` may throw, and a throw
+ * from a Duplex's `_write` would escape the stream.
+ */
+const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefined => {
+  try {
+    return step();
+  } catch (error) {
+    callback(error instanceof Error ? error : new Error(describe(error)));
+    return undefined;
+  }
+};
+
+/**
+ * Adapts a classic (pre-streams2) duplex, such as the `through` stream that
+ * `unbzip2-stream` returns, into a streams2 `Duplex` for `compose` (#128). A
+ * classic stream has no `read()` and emits `data`, `end` and `close` but never
+ * `finish`, so `compose` fails it with "Premature close"; Node's
+ * `Duplex.from` doesn't help, as it treats one as readable only. Compressed
+ * bytes go in through the classic stream's `write()`, waiting for its `drain`
+ * when it returns `false`, and `end()`. Its `data` is pushed out, pausing it
+ * while the adapter's buffer is full and resuming it on the next read, and
+ * its `end` ends the output. Its `error` destroys the adapter with that
+ * error, as does a throwing `write()` or `end()` (Node reports the latter
+ * itself), and a `close` before its
+ * `end` fails the adapter rather than leaving it waiting. Destroying the
+ * adapter destroys the classic stream. Its own `error` listener means an
+ * error the classic stream emits after teardown is dropped, not thrown.
+ */
+const adaptClassicDuplex = (classic: Duplex): Duplex => {
+  let ended = false;
+  const adapter = new Duplex({
+    write: (chunk: Uint8Array, _encoding, callback) => {
+      const written = attempt(() => classic.write(chunk) !== false, callback);
+      if (written === true) callback();
+      else if (written === false) classic.once("drain", () => callback());
+    },
+    // Node turns a synchronous throw from `_final` into an `error` event, so
+    // a throwing `end()` needs no guard here.
+    final: (callback) => {
+      classic.end();
+      callback();
+    },
+    read: () => void classic.resume(),
+    destroy: (error, callback) => {
+      classic.destroy();
+      callback(error);
+    },
+  });
+  classic.on("data", (chunk: Uint8Array) => {
+    if (!adapter.push(chunk)) classic.pause();
+  });
+  classic.on("end", () => {
+    ended = true;
+    adapter.push(null);
+  });
+  classic.on("error", (error: Error) => adapter.destroy(error));
+  classic.on("close", () => {
+    if (!ended) adapter.destroy(new Error("the decompressor closed before its output ended"));
+  });
+  return adapter;
 };
 
 /**
@@ -277,11 +360,36 @@ export const fromNodeReadable = (
 // ── Decompression stages ─────────────────────────────────────────────────
 
 /**
- * A decompression stage: a factory for a fresh Node `Transform` (bytes →
- * bytes), called once per stream. Typed as {@link NodeDuplexLike}, so any
- * Node `Duplex` or `Transform` fits. Return a new Node stream on each call: a
- * value that `node:stream` doesn't recognise as a stream, or a stream already
- * destroyed or ended, fails the stream it feeds with a {@link SourceError}.
+ * A decompression stage: a factory for a fresh Node stream that turns
+ * compressed bytes into bytes, called once per stream. Typed as {@link NodeDuplexLike}, so any
+ * Node `Duplex` or `Transform` fits, and so does a classic (pre-streams2)
+ * duplex stream, which is adapted for Node's `stream.compose`. Return a new
+ * Node stream on each call: a value that `node:stream` doesn't recognise as a
+ * stream, or a stream already destroyed or ended, fails the stream it feeds
+ * with a {@link SourceError}.
+ *
+ * For bzip2 (Wikidata's `.json.bz2` entity dumps), which Node's `zlib` lacks,
+ * pass a bzip2 decoder from a library. `unbzip2-stream` works, though its
+ * stream is a classic one rather than the `Transform` that
+ * `@types/unbzip2-stream` declares:
+ *
+ * ```ts
+ * import unbzip2 from "unbzip2-stream";
+ *
+ * const items = Dumps.fromFile("latest-all.json.bz2", {
+ *   decompressor: () => unbzip2(),
+ * }).pipe(Dumps.entityRecords, Dumps.onlyEntities);
+ *
+ * // Or over a download, or any other byte stream:
+ * const remote = Dumps.fromHttpRange(
+ *   "https://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2",
+ * ).pipe(Dumps.decompressWith(() => unbzip2()));
+ * ```
+ *
+ * A decoding failure (corrupt or truncated input) fails the stream with a
+ * {@link SourceError}. `unbzip2-stream` is pure JavaScript and decodes on the
+ * event loop, so where a dump is also published as `.json.gz` the built-in
+ * {@link gunzipTransform} avoids that cost.
  */
 export type Decompressor = () => NodeDuplexLike;
 
@@ -295,8 +403,8 @@ export const gunzipTransform: Decompressor = () => createGunzip();
  * stream, or a stream already destroyed or ended, fails the stage with a
  * {@link SourceError} and cancels the source. Use
  * it to decompress a source that is *not* a local file — e.g. an
- * {@link fromHttpRange} download — or to inject a bzip2 transform the package
- * does not ship. Composes with any byte source.
+ * {@link fromHttpRange} download — or to inject a bzip2 decoder the package
+ * does not ship (see {@link Decompressor}). Composes with any byte source.
  */
 export const decompressWith =
   (transform: Decompressor) =>
@@ -345,7 +453,7 @@ export interface FromFileOptions {
    * Decompression stage to pipe the file through. Omit to auto-detect from
    * the path extension (`.gz` → gzip; anything else → no decompression). Pass
    * an explicit {@link Decompressor} for `.bz2` (supply your own bzip2
-   * transform) or to force a codec.
+   * decoder, as the {@link Decompressor} docs show) or to force a codec.
    */
   readonly decompressor?: Decompressor;
 }
@@ -363,7 +471,7 @@ function decompressorFor(path: string, override: Decompressor | undefined): Deco
  * decompression are piped in Node land and wrapped once, so interruption
  * tears the whole chain down (see {@link fromNodeReadable}). A `.json.gz`
  * dump needs no options; a `.json.bz2` dump needs an injected bzip2
- * {@link Decompressor}.
+ * {@link Decompressor} (its docs show one).
  */
 export const fromFile = (
   path: string,
