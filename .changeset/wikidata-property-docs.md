@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-wikimedia": patch
----
-
-Document every `Wikidata` property. Each field of the item model (`WikidataItem`, `Statement`, `Reference`, `Sitelink`, the `Snak` members and the `DataValue` members), of `SearchHit`, and of the lenient `WbGetEntitiesResponse` and `WbSearchResponse` schemas now has a doc comment. Each says what the field holds, when it is `null` or empty, and what Wikibase means by it: `TimeValue.precision` is Wikibase's 0–14 precision code (`9` year, `11` day), `GlobeCoordinateValue` latitude, longitude and precision are in degrees, a quantity's amount and bounds are decimal strings, and a `somevalue` snak is Wikibase's "unknown value" while a `novalue` snak asserts that there is none. No type is hidden from the docs: the two response schemas are the parameter types of the exported `normaliseEntities` and `normaliseSearch`, so a consumer can type against them. Nothing else changes; the comments on the schema fields also appear in the built JavaScript.
