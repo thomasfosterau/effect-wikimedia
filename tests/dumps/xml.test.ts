@@ -103,9 +103,9 @@ describe("decodeXmlEntities", () => {
     ["&#xA;", "\n"],
     ["&#xD;", "\r"],
     ["&#x20;", " "],
-    ["&#xD7FF;", "퟿"],
-    ["&#xE000;", ""],
-    ["&#xFFFD;", "�"],
+    ["&#xD7FF;", "\uD7FF"],
+    ["&#xE000;", "\uE000"],
+    ["&#xFFFD;", "\uFFFD"],
     ["&#x10000;", "\u{10000}"],
     ["&#x10FFFF;", "\u{10FFFF}"],
     ["&#0065;", "A"],
@@ -142,7 +142,17 @@ describe("decodeXmlEntities", () => {
 
   // Only a whole decimal or hex reference decodes; the leading digits of a
   // malformed one never do.
-  for (const input of ["&#65a;", "&#9f;", "&#12.5;", "&#x41g;", "&#x;", "&#;", "&#-65;"]) {
+  for (const input of [
+    "&#65a;",
+    "&#9f;",
+    "&#12.5;",
+    "&#1e2;",
+    "&#65.0;",
+    "&#x41g;",
+    "&#x;",
+    "&#;",
+    "&#-65;",
+  ]) {
     it(`keeps the malformed reference ${input} as written`, () => {
       expect(Dumps.decodeXmlEntities(input)).toBe(input);
     });

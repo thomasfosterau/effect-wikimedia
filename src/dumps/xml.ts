@@ -215,8 +215,8 @@ function isXmlChar(code: number): boolean {
  * covers any other name (`&nbsp;`, `&constructor;`), a reference to a code
  * point XML 1.0's `Char` production forbids (NUL and the other C0 controls
  * except tab, LF and CR, a surrogate, U+FFFE, U+FFFF, or past U+10FFFF), and
- * a malformed reference such as `&#65a;` or `&#12.5;`. So the result is always
- * well-formed UTF-16.
+ * a malformed reference such as `&#65a;` or `&#12.5;`. So a decoded reference
+ * never makes the result malformed UTF-16.
  */
 export function decodeXmlEntities(text: string): string {
   if (!text.includes("&")) return text;
