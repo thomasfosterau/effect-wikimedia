@@ -1,0 +1,7 @@
+---
+"@thomasfosterau/effect-wikimedia": minor
+---
+
+`Wikitext.parse` no longer splits a table cell or caption inside a template, argument, wikilink, comment or extension tag (#132). Until now the cell structure was found by plain text search, so `| {{flag|France}}` parsed with `attrs: " {{flag"` and the plain text `France}}`, with no `Template` node, and `findTemplates`, `getParam`, `walk` and `stripToText` all missed the template. The same search split `| a || {{flagicon|FRA}}` and `| Paris<ref>{{cite web|url=x}}</ref>` at the template's pipe, read `| {{x||y}}` as two cells, and read each `|a=b` line of a multi-line `{{Infobox …}}` in a cell as a new cell. Now a `|` inside one of those constructs never splits attributes from content, a `||` or `!!` inside one never separates cells, and a line break inside one never starts a table line. So the template stays whole in the cell's `content`, and `attrs` holds only the text before a `|` outside them.
+
+This changes the tree for common tables: `TableCell.attrs` and `TableCaption.attrs` are now `undefined` for cells like the ones above, and a cell or row that held a multi-line template is now one cell or row. `serialize(parse(x)) === x` still holds for every input. A bracket that never closes is still ordinary text, so a stray `{{` in a cell doesn't hide the rest of the table. `[[` keeps its guard: a wikilink before the first `|` outside those constructs still means the cell has no attributes, and now a `||` inside a wikilink doesn't split the cell either.

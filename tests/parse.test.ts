@@ -15,13 +15,18 @@ import {
   type AutoLink,
   type ExternalLink,
   filter,
+  findTemplates,
+  getParam,
   type Heading,
   type Node,
   parse,
   serialize,
+  serializeNode,
+  stripToText,
   type Table,
   type Tag,
   type Template,
+  walk,
   type Wikilink,
 } from "../src/wikitext/index.ts";
 import { serializeNodes } from "../src/wikitext/index.ts";
@@ -443,6 +448,183 @@ describe("wikitables (issue #1287)", () => {
     const src =
       '{| class="wikitable"\n|+ Caption\n! A !! B\n|-\n| 1 || style="x" | 2\n|-\n| 3\n| 4\n|}';
     expect(serialize(parse(src))).toBe(src);
+  });
+});
+
+describe("wikitables: nested constructs in cells and captions (#132)", () => {
+  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
+  function table(src: string): Table {
+    const doc = parse(src);
+    expect(serialize(doc)).toBe(src);
+    walk(doc, (n) => {
+      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+        src.slice(n.span.start, n.span.end),
+      );
+    });
+    return only(src, "Table") as Table;
+  }
+
+  const names = (nodes: readonly Node[]): string[] =>
+    findTemplates(nodes).map((t) => text(t.name).trim());
+
+  it("keeps a template's own pipe out of the attribute split (the issue's example)", () => {
+    const doc = parse("{|\n| {{flag|France}}\n|}");
+    const cell = (only("{|\n| {{flag|France}}\n|}", "Table") as Table).rows[0].cells[0];
+    expect(cell.attrs).toBeUndefined();
+    expect(text(cell.content)).toBe(" {{flag|France}}\n");
+    expect(names(cell.content)).toEqual(["flag"]);
+    expect(findTemplates(doc)).toHaveLength(1);
+    expect(stripToText(doc)).toBe(" \n");
+  });
+
+  it("(A) keeps a citation in a cell whole, with and without attributes", () => {
+    const bare = table("{|\n| Paris<ref>{{cite web|url=x}}</ref> {{efn|a=b}}\n|}").rows[0].cells[0];
+    expect(bare.attrs).toBeUndefined();
+    const ref = bare.content.find((n) => n._tag === "Tag") as Tag;
+    expect(ref).toMatchObject({ name: "ref", rawContent: "{{cite web|url=x}}" });
+    expect(names(bare.content)).toEqual(["efn"]);
+    expect(stripToText(bare.content)).toBe(" Paris \n");
+
+    const withAttrs = table('{|\n| style="x" | Paris<ref>{{cite web|url=x}}</ref>\n|}').rows[0]
+      .cells[0];
+    expect(withAttrs.attrs).toBe(' style="x" ');
+    expect(text(withAttrs.content)).toBe(" Paris<ref>{{cite web|url=x}}</ref>\n");
+  });
+
+  it("(B) keeps a template in an inline cell whole", () => {
+    const cells = table("{|\n| a || {{flagicon|FRA}} b\n|}").rows[0].cells;
+    expect(cells).toHaveLength(2);
+    expect(cells[1]).toMatchObject({ inline: true, attrs: undefined });
+    const [flag] = findTemplates(cells[1].content, "flagicon");
+    expect(getParam(flag, 1)).toBe("FRA");
+    expect(stripToText(cells[1].content)).toBe("  b\n");
+  });
+
+  it("(C) doesn't read a template's empty parameter as a cell separator", () => {
+    const cells = table("{|\n| {{x||y}} || z\n|}").rows[0].cells;
+    expect(cells.map((c) => text(c.content))).toEqual([" {{x||y}} ", " z\n"]);
+    const [x] = findTemplates(cells[0].content, "x");
+    expect(x.params.map((p) => text(p.value))).toEqual(["", "y"]);
+  });
+
+  it("(D) doesn't read a line inside a multi-line template as a new cell", () => {
+    const t = table("{|\n| {{Infobox\n|a=b\n|c=d\n}}\n| next\n|}");
+    expect(t.rows).toHaveLength(1);
+    const [first, second] = t.rows[0].cells;
+    expect(t.rows[0].cells).toHaveLength(2);
+    expect(first.attrs).toBeUndefined();
+    const [infobox] = findTemplates(first.content, "Infobox");
+    expect(getParam(infobox, "a")).toBe("b");
+    expect(getParam(infobox, "c")).toBe("d");
+    expect(text(second.content)).toBe(" next\n");
+  });
+
+  it("(D) doesn't read a |- or |} line inside a multi-line template as table structure", () => {
+    const t = table("{|\n| {{a\n|-\n|}}\n|}");
+    expect(t.rows).toHaveLength(1);
+    expect(t.rows[0].cells).toHaveLength(1);
+    expect(names(t.rows[0].cells[0].content)).toEqual(["a"]);
+  });
+
+  it("splits header cells on !! and attributes on | outside templates", () => {
+    const cells = table('{|\n! scope="col" | {{abbr|A|Alpha}} !! {{abbr|B|Beta}}\n|}').rows[0]
+      .cells;
+    expect(cells.map((c) => [c.header, c.inline, c.attrs])).toEqual([
+      [true, false, ' scope="col" '],
+      [true, true, undefined],
+    ]);
+    expect(names(cells[0].content)).toEqual(["abbr"]);
+    expect(names(cells[1].content)).toEqual(["abbr"]);
+  });
+
+  it("doesn't split a header cell on a template parameter that starts with !", () => {
+    const cells = table("{|\n! {{x|!!y}}\n|}").rows[0].cells;
+    expect(cells).toHaveLength(1);
+    expect(names(cells[0].content)).toEqual(["x"]);
+  });
+
+  it("keeps a template in a caption whole, with and without attributes", () => {
+    const bare = table("{|\n|+ {{flag|France}} results\n| a\n|}").captions[0];
+    expect(bare.attrs).toBeUndefined();
+    expect(names(bare.content)).toEqual(["flag"]);
+    const withAttrs = table('{|\n|+ style="x" | {{a|b}}\n| a\n|}').captions[0];
+    expect(withAttrs.attrs).toBe(' style="x" ');
+    expect(names(withAttrs.content)).toEqual(["a"]);
+  });
+
+  it("steps over arguments, wikilinks, comments and extension tags in every scan", () => {
+    const cells = table(
+      "{|\n| {{{1|a||b}}} [[A||B]] <!-- x || y\n| z --> <nowiki>||\n|</nowiki> <ref name=a/> || w\n|}",
+    ).rows[0].cells;
+    expect(cells).toHaveLength(2);
+    expect(cells[0].attrs).toBeUndefined();
+    expect(cells[0].content.map((n) => n._tag)).toEqual(
+      expect.arrayContaining(["Argument", "Wikilink", "Comment", "Tag"]),
+    );
+    expect(text(cells[1].content)).toBe(" w\n");
+  });
+
+  it("keeps the [[ guard: a wikilink before the first pipe means there are no attributes", () => {
+    const cell = table("{|\n| [[A]] | b\n|}").rows[0].cells[0];
+    expect(cell.attrs).toBeUndefined();
+    expect(text(cell.content)).toBe(" [[A]] | b\n");
+  });
+
+  it("puts a template written in the attributes into attrs", () => {
+    const cell = table('{|\n| style="{{x|y}}" | b\n|}').rows[0].cells[0];
+    expect(cell.attrs).toBe(' style="{{x|y}}" ');
+    expect(text(cell.content)).toBe(" b\n");
+  });
+
+  it("finds every template across a table's cells and captions", () => {
+    const doc = parse(
+      "{|\n|+ {{cap|1}}\n! {{h|a}} !! {{h|b}}\n|-\n| {{x||y}} || {{flagicon|FRA}}\n| {{Infobox\n|a=b\n}}\n|}",
+    );
+    expect(findTemplates(doc).map((t) => text(t.name).trim())).toEqual([
+      "cap",
+      "h",
+      "h",
+      "x",
+      "flagicon",
+      "Infobox",
+    ]);
+    expect(stripToText(doc)).not.toMatch(/[|}=]/);
+  });
+
+  it("matches unbalanced brackets as the rest of the parser does", () => {
+    // A closer matches the nearest opener of its kind; an opener of the other
+    // kind left open inside it stays literal, as recursive descent leaves it.
+    const cells = (src: string) => table(src).rows[0].cells;
+    const [braces] = cells("{|\n| {{a|[[b}} || c\n|}");
+    expect(braces.attrs).toBeUndefined();
+    expect(names(braces.content)).toEqual(["a"]);
+    const [link] = cells("{|\n| [[a|{{b]] || c\n|}");
+    expect(link.attrs).toBeUndefined();
+    expect(link.content.some((n) => n._tag === "Wikilink")).toBe(true);
+    // Three braces closed by two: the first is literal, the rest a template.
+    const [three] = cells("{|\n| {{{a|b}} || c\n|}");
+    expect(three.attrs).toBeUndefined();
+    expect(text(three.content)).toBe(" {{{a|b}} ");
+    // A single `}` or `]` closes nothing.
+    expect(cells("{|\n| {{a|b} || c\n|}").map((c) => c.attrs)).toEqual([" {{a", undefined]);
+    // Five braces closed by five: an argument inside a template.
+    const [five] = cells("{|\n| {{{{{a|b}}}}} || c\n|}");
+    expect(five.attrs).toBeUndefined();
+    expect(text(five.content)).toBe(" {{{{{a|b}}}}} ");
+  });
+
+  it("treats an unclosed {{, [[, <!-- or <ref> as literal text without swallowing the table", () => {
+    for (const open of ["{{", "{{{", "[[", "<!--", "<ref>"]) {
+      const src = `{|\n| ${open}stray\n| b || {{t|c}}\n|-\n| d\n|}\nafter`;
+      const t = table(src);
+      expect(
+        t.rows.map((r) => r.cells.length),
+        open,
+      ).toEqual([3, 1]);
+      expect(t.rows[0].cells[2].attrs, open).toBeUndefined();
+      expect(names(t.rows[0].cells[2].content), open).toEqual(["t"]);
+      expect(text(t.rows[1].cells[0].content), open).toBe(" d\n");
+    }
   });
 });
 
