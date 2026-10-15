@@ -108,12 +108,21 @@ const MAX_TEXT_FIELD_LENGTH = 4000;
 
 /**
  * Cap on how many entries of each list built from a response are kept: aliases
- * per language, sitelinks per entity, badges per sitelink, statements per
- * property, references per statement, and snaks per property in a qualifier or
- * reference block. Each list keeps its first usable entries, in Wikibase's
- * order; an entry that is dropped as unusable does not count towards the cap.
+ * per language, badges per sitelink, statements per property, references per
+ * statement, and snaks per property in a qualifier or reference block.
+ * Sitelinks have their own, higher cap, {@link MAX_SITELINKS}. Each list keeps
+ * its first usable entries, in Wikibase's order; an entry that is dropped as
+ * unusable does not count towards the cap.
  */
 export const MAX_LIST_ENTRIES = 500;
+
+/**
+ * Cap on how many sitelinks an entity keeps, counted and chosen as for
+ * {@link MAX_LIST_ENTRIES}. Wikibase allows one sitelink per wiki, and
+ * Wikimedia has fewer linkable wikis than this, so no real item is cut; the
+ * cap only bounds a hostile or malformed response.
+ */
+export const MAX_SITELINKS = 2000;
 
 /** The most ids `wbgetentities` accepts per request (Wikibase's documented limit). */
 export const MAX_IDS_PER_REQUEST = 50;
@@ -533,8 +542,8 @@ export interface WikidataItem {
   /**
    * The pages linked to the entity on other Wikimedia wikis, keyed by
    * global site id (`"enwiki"`), in Wikibase's order and at most
-   * {@link MAX_LIST_ENTRIES}. A sitelink without a title is dropped, and the
-   * map is empty when sitelinks were not fetched.
+   * {@link MAX_SITELINKS}. A sitelink without a title is dropped, and the map
+   * is empty when sitelinks were not fetched.
    */
   readonly sitelinks: Readonly<Record<string, Sitelink>>;
   /**
@@ -835,14 +844,14 @@ function normaliseBadges(raw: readonly unknown[] | undefined): ItemId[] {
   return badges;
 }
 
-/** Keeps the first {@link MAX_LIST_ENTRIES} sitelinks that carry a title. */
+/** Keeps the first {@link MAX_SITELINKS} sitelinks that carry a title. */
 function normaliseSitelinks(
   raw: Readonly<Record<string, RawSitelink>> | undefined,
 ): Record<string, Sitelink> {
   const out: Record<string, Sitelink> = {};
   let kept = 0;
   for (const [site, link] of Object.entries(raw ?? {})) {
-    if (kept >= MAX_LIST_ENTRIES) break;
+    if (kept >= MAX_SITELINKS) break;
     const title = sanitiseText(link.title);
     if (title === null) continue;
     out[site] = {
