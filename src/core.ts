@@ -118,25 +118,68 @@ const ACTION_API_PATH = "/w/api.php";
 
 // ── Typed error family ───────────────────────────────────────────────────
 
-/** A bad input the caller supplied (host or path segment) — fix the input, don't retry. */
+/**
+ * A bad input the caller supplied (a host, title, id, query or option),
+ * rejected before any request is sent — fix the input, don't retry.
+ */
 export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {
+  /**
+   * Which input was rejected. This package uses `"host"` (a host outside the
+   * Wikimedia families {@link normaliseWikimediaHost} accepts), `"title"` and
+   * `"filename"` (a page title or Commons filename {@link normaliseTitle}
+   * rejects), `"revisionId"` (not a positive integer), `"entityId"` (not a
+   * Wikidata entity id), `"query"` (a blank search or SPARQL query),
+   * `"language"` and `"type"` (a malformed language code or entity type
+   * for a Wikidata search), `"queryLength"` (a SPARQL query over the length limit) and
+   * `"missingLimit"` (a SPARQL query with no `LIMIT` clause, sent without
+   * `allowUnbounded`). Typed as `string`, so a caller of {@link requireTitle}
+   * can pass its own.
+   */
   kind: Schema.String,
+  /**
+   * The rejected input as the caller passed it, before trimming or
+   * lower-casing; a `"revisionId"` number is converted with `String`, and a
+   * `"filename"` has any leading `File:` prefix removed first. Two kinds carry
+   * a stand-in instead: `"queryLength"` holds the query's length in UTF-16
+   * code units, and `"missingLimit"` holds the query's first 120 code
+   * units.
+   */
   value: Schema.String,
 }) {}
 
-/** An upstream transport / decode failure (network, non-2xx, malformed body). */
+/** An upstream transport / decode failure (network, non-2xx, malformed body). Not retried. */
 export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestFailed", {
+  /**
+   * A human-readable account of the failure, for logs rather than parsing:
+   * `wikimedia returned HTTP <status>` for a non-2xx status other than `429`
+   * and `503`; `request failed: …` for a transport error or a body that
+   * can't be read or isn't valid JSON; and
+   * `wikimedia response did not match the expected shape: …` for a JSON
+   * body the caller's schema rejects. The status code and the underlying
+   * error are not kept as separate fields.
+   */
   description: Schema.String,
 }) {}
 
 /**
- * The server declined the request as lagged (`maxlag`) or rate-limited
- * (`429`/`503` + `Retry-After`). Carries the number of seconds the server
- * asked the caller to wait before retrying. {@link withMaxlagRetry} handles
- * this automatically; it only escapes to the caller once retries are
- * exhausted.
+ * The server declined the request as lagged (a `maxlag` error body) or
+ * rate-limited (HTTP `429` or `503`, with or without `Retry-After`). Carries
+ * the number of seconds to wait before retrying. {@link withMaxlagRetry}
+ * handles this automatically; it only escapes to the caller once retries
+ * are exhausted.
  */
 export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
+  /**
+   * Seconds to wait before retrying: finite, non-negative, and possibly
+   * fractional. For a `429` or `503` it is the `Retry-After` header's value
+   * when that is a number of seconds ({@link parseRetryAfterHeader}), and
+   * {@link DEFAULT_MAXLAG_SECONDS} when the header is absent or an HTTP
+   * date. For a `maxlag` error body, whose `Retry-After` header is not read,
+   * it is always {@link DEFAULT_MAXLAG_SECONDS}. It is the server's figure,
+   * uncapped: {@link RetryOptions.maxDelaySeconds} caps only how long
+   * {@link withMaxlagRetry} sleeps. Once retries are exhausted, the error
+   * that escapes carries the last attempt's value.
+   */
   retryAfterSeconds: Schema.Finite,
 }) {}
 
@@ -339,9 +382,20 @@ export function detectMaxlagSignal(body: unknown): number | null {
 
 /** Bounds how many extra attempts / how long a single wait can be for {@link withMaxlagRetry}. */
 export interface RetryOptions {
-  /** Extra attempts after the first, once a {@link RateLimited} signal is seen. */
+  /**
+   * Extra attempts after the first, made only after a {@link RateLimited}
+   * failure; `0` (or less) disables retrying. {@link DEFAULT_RETRY_OPTIONS}
+   * sets 3.
+   */
   readonly maxRetries: number;
-  /** Upper bound on any single wait, regardless of what the server asked for. */
+  /**
+   * Upper bound, in seconds, on any single wait, regardless of what the
+   * server asked for: each wait is the smaller of this and
+   * {@link RateLimited.retryAfterSeconds}, so the waits for one request total
+   * at most `maxRetries × maxDelaySeconds` (a function that splits its work
+   * into several requests gives each its own retries). {@link DEFAULT_RETRY_OPTIONS}
+   * sets 30.
+   */
   readonly maxDelaySeconds: number;
 }
 
