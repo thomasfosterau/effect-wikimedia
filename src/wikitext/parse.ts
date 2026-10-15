@@ -191,7 +191,6 @@ class Parser {
    * the current {@link limit}, or end of input. `block` enables heading
    * recognition (document level only); `depth` bounds recursion.
    */
-  // reason: the scanner's central char-dispatch loop; CRAP is estimate-inflated because the audit runs without unit coverage — this is exercised by the parse/roundtrip suites.
   parseFragment(stop: Stop, depth: number, block: boolean): Node[] {
     const nodes: Node[] = [];
     let textStart = this.pos;
@@ -252,7 +251,7 @@ class Parser {
     return pos === 0 || this.src.charCodeAt(pos - 1) === 0x0a; // \n
   }
 
-  // reason: delimiter-stop dispatch over a fixed char set; CRAP is estimate-inflated because the audit runs without unit coverage — covered by the parse/roundtrip suites.
+  // Delimiter-stop dispatch over a fixed char set.
   private atStop(stop: Stop): boolean {
     switch (this.src.charCodeAt(this.pos)) {
       case 0x7c: // |
@@ -524,7 +523,6 @@ class Parser {
    * non-marker lines, and appends them to `into`. Leaves the cursor at the
    * next table marker line (or `this.limit`).
    */
-  // reason: cell/line splitting with attrs detection and multi-line content extension; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
   private parseTableLineCells(header: boolean, depth: number, into: TableCell[]): void {
     const sep = header ? "!!" : "||";
     const lineEnd = this.tableLineEnd(this.pos);
@@ -598,7 +596,7 @@ class Parser {
     return null;
   }
 
-  // reason: URL scan plus fail-soft cursor reset; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
+  // URL scan plus a fail-soft cursor reset.
   private tryExternalLink(depth: number): ExternalLink | null {
     const start = this.pos;
     const key = this.failKey(start, 3);
@@ -642,7 +640,7 @@ class Parser {
 
   // ── bare url autolinking ─────────────────────────────────────────────
 
-  // reason: URL body scan plus MediaWiki's trailing-punctuation trim; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
+  // URL body scan plus MediaWiki's trailing-punctuation trim.
   private tryAutoLink(): AutoLink | null {
     const start = this.pos;
     const protoMatch = AUTOLINK_PROTOCOL_RE.exec(
@@ -691,7 +689,7 @@ class Parser {
     return { _tag: "Comment", span: this.span(start), text, closed: true };
   }
 
-  // reason: tag name / attribute / extension-body scan with several fail-soft exits; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
+  // Tag name / attribute / extension-body scan with several fail-soft exits.
   private tryTag(_depth: number): Tag | null {
     const start = this.pos;
     let i = start + 1;
@@ -783,7 +781,7 @@ class Parser {
 
   // ── entities ────────────────────────────────────────────────────────
 
-  // reason: named / decimal / hex entity scan; CRAP is estimate-inflated because the audit runs without unit coverage — covered by parse.test.ts.
+  // Named / decimal / hex entity scan.
   private tryEntity(): HtmlEntity | null {
     const start = this.pos;
     let i = start + 1;

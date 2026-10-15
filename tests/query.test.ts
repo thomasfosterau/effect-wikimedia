@@ -134,6 +134,112 @@ describe("strip to plain text", () => {
   });
 });
 
+describe("strip to plain text: entities (#107)", () => {
+  /** Strips `src`, first checking the parser read all of it as entities. */
+  const stripEntities = (src: string): string => {
+    const doc = parse(src);
+    expect(doc.children.map((n) => n._tag)).toEqual(doc.children.map(() => "HtmlEntity"));
+    return stripToText(doc);
+  };
+
+  it.each([
+    ["&#65;", "A"],
+    ["&#0065;", "A"],
+    ["&#x41;", "A"],
+    ["&#X41;", "A"],
+    ["&#xe9;", "\u00e9"],
+    ["&#xE9;", "\u00e9"],
+    ["&#233;", "\u00e9"],
+    ["&#x1F600;", "\u{1F600}"],
+    ["&#128512;", "\u{1F600}"],
+  ])("decodes the numeric reference %s", (src, text) => {
+    expect(stripEntities(src)).toBe(text);
+  });
+
+  // The edges of MediaWiki's `Sanitizer::validateCodepoint`.
+  it.each([
+    ["&#9;", "\t"],
+    ["&#10;", "\n"],
+    ["&#x20;", " "],
+    ["&#x7E;", "~"],
+    ["&#xA0;", "\u00a0"],
+    ["&#xD7FF;", "\ud7ff"],
+    ["&#xE000;", "\ue000"],
+    ["&#xFFFD;", "\ufffd"],
+    ["&#x10000;", "\u{10000}"],
+    ["&#x10FFFF;", "\u{10FFFF}"],
+  ])("decodes %s, the edge of a renderable range", (src, text) => {
+    expect(stripEntities(src)).toBe(text);
+  });
+
+  // MediaWiki renders these as the literal reference, so a reader sees it as
+  // written. Decoding would put a control character or a lone surrogate (not
+  // well-formed UTF-16) into the text.
+  it.each([
+    ["NUL", "&#0;"],
+    ["a C0 control", "&#x1F;"],
+    ["carriage return", "&#13;"],
+    ["DEL", "&#x7F;"],
+    ["a C1 control", "&#x9F;"],
+    ["a high surrogate", "&#xD800;"],
+    ["a low surrogate", "&#xDFFF;"],
+    ["a noncharacter", "&#xFFFE;"],
+    ["the last BMP noncharacter", "&#xFFFF;"],
+    ["a code point past U+10FFFF", "&#x110000;"],
+    ["a decimal past U+10FFFF", "&#1114112;"],
+    ["a decimal too long for a double", `&#${"9".repeat(400)};`],
+    ["a hex reference too long for a double", `&#x${"F".repeat(300)};`],
+  ])("keeps a reference to %s as written", (_, src) => {
+    expect(stripEntities(src)).toBe(src);
+  });
+
+  it("keeps a surrogate pair spelt as two references as written, not joined", () => {
+    expect(stripEntities("&#55357;&#56832;")).toBe("&#55357;&#56832;");
+  });
+
+  it.each([
+    ["&amp;", "&"],
+    ["&lt;", "<"],
+    ["&gt;", ">"],
+    ["&quot;", '"'],
+    ["&apos;", "'"],
+    ["&nbsp;", "\u00a0"],
+    ["&ndash;", "\u2013"],
+    ["&mdash;", "\u2014"],
+    ["&hellip;", "\u2026"],
+    ["&times;", "\u00d7"],
+    ["&deg;", "\u00b0"],
+  ])("decodes the named entity %s", (src, text) => {
+    expect(stripEntities(src)).toBe(text);
+  });
+
+  // Each is a well-formed entity to the parser; a lookup on a plain object
+  // would find the inherited `Object.prototype` member and print its source.
+  it.each(["&unknown;", "&constructor;", "&toString;", "&valueOf;", "&hasOwnProperty;"])(
+    "keeps the unknown named entity %s as written",
+    (src) => {
+      expect(stripEntities(src)).toBe(src);
+    },
+  );
+
+  it.each(["&#;", "&#x;", "&#xZZ;", "&#12", "&#-5;", "&#12.5;"])(
+    "leaves the malformed reference %s as literal text",
+    (src) => {
+      expect(stripToText(parse(src))).toBe(src);
+    },
+  );
+
+  // An `HtmlEntity` built by hand rather than parsed: only a whole decimal
+  // or hex reference decodes.
+  it.each(["&#-5;", "&#12.5;", "&#x41g;", "&#+65;", "&# 65;"])(
+    "keeps a hand-built malformed reference %s as written",
+    (raw) => {
+      const node = { _tag: "HtmlEntity", span: { start: 0, end: raw.length }, raw } as const;
+      expect(stripToText(node)).toBe(raw);
+    },
+  );
+});
+
 describe("tables and autolinks reachable via walk/filter (issue #1287)", () => {
   it("finds an AutoLink node at any depth", () => {
     const doc = parse("'''bold''' http://example.org more");
