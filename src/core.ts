@@ -138,10 +138,11 @@ export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("Invali
   kind: Schema.String,
   /**
    * The rejected input as the caller passed it, before trimming or
-   * lower-casing; a `"revisionId"` number is converted with `String`. Two
-   * kinds carry a stand-in instead: `"queryLength"` holds the query's length
-   * in UTF-16 code units, and `"missingLimit"` holds the query's first 120
-   * code units.
+   * lower-casing; a `"revisionId"` number is converted with `String`, and a
+   * `"filename"` has any leading `File:` prefix removed first. Two kinds carry
+   * a stand-in instead: `"queryLength"` holds the query's length in UTF-16
+   * code units, and `"missingLimit"` holds the query's first 120 code
+   * units.
    */
   value: Schema.String,
 }) {}
@@ -173,8 +174,8 @@ export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited"
    * fractional. For a `429` or `503` it is the `Retry-After` header's value
    * when that is a number of seconds ({@link parseRetryAfterHeader}), and
    * {@link DEFAULT_MAXLAG_SECONDS} when the header is absent or an HTTP
-   * date. For a `maxlag` error body, which comes without the header, it is
-   * always {@link DEFAULT_MAXLAG_SECONDS}. It is the server's figure,
+   * date. For a `maxlag` error body, whose `Retry-After` header is not read,
+   * it is always {@link DEFAULT_MAXLAG_SECONDS}. It is the server's figure,
    * uncapped: {@link RetryOptions.maxDelaySeconds} caps only how long
    * {@link withMaxlagRetry} sleeps. Once retries are exhausted, the error
    * that escapes carries the last attempt's value.
@@ -390,8 +391,9 @@ export interface RetryOptions {
   /**
    * Upper bound, in seconds, on any single wait, regardless of what the
    * server asked for: each wait is the smaller of this and
-   * {@link RateLimited.retryAfterSeconds}, so the waits for one call total
-   * at most `maxRetries × maxDelaySeconds`. {@link DEFAULT_RETRY_OPTIONS}
+   * {@link RateLimited.retryAfterSeconds}, so the waits for one request total
+   * at most `maxRetries × maxDelaySeconds` (a function that splits its work
+   * into several requests gives each its own retries). {@link DEFAULT_RETRY_OPTIONS}
    * sets 30.
    */
   readonly maxDelaySeconds: number;
