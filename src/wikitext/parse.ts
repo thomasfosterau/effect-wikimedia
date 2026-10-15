@@ -800,7 +800,7 @@ class Parser {
       }
     } else {
       const nameStart = i;
-      while (i < this.limit && isAlnum(this.src.charCodeAt(i))) i++;
+      while (i < this.limit && isEntityNameChar(this.src.charCodeAt(i))) i++;
       if (i === nameStart) return null;
     }
     if (this.src.charCodeAt(i) !== 0x3b) return null; // ;
@@ -880,6 +880,16 @@ function isAlpha(c: number): boolean {
 
 function isAlnum(c: number): boolean {
   return isAlpha(c) || isDigit(c);
+}
+
+/**
+ * Named-entity characters, as MediaWiki's `Sanitizer::CHAR_REFS_REGEX` reads
+ * them (`[A-Za-z0-9\x80-\xff]` over UTF-8 bytes): an ASCII letter or digit,
+ * or any non-ASCII character. Every HTML5 name is ASCII, but MediaWiki's
+ * aliases for `&rlm;` are spelt in Hebrew and in Arabic letters.
+ */
+function isEntityNameChar(c: number): boolean {
+  return isAlnum(c) || c >= 0x80;
 }
 
 /** Tag-name characters: a letter, then letters/digits. */

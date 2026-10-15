@@ -228,6 +228,28 @@ describe("html entities", () => {
     ]);
   });
 
+  // MediaWiki's `CHAR_REFS_REGEX` reads a name as ASCII letters and digits or
+  // any non-ASCII character, so its Hebrew and Arabic aliases for `&rlm;`
+  // are entities (#118).
+  it("parses a named entity whose name has non-ASCII letters", () => {
+    const doc = parse("a&רלמ;b&café;c");
+    expect(doc.children.map((n) => [n._tag, serializeNodes([n])])).toEqual([
+      ["Text", "a"],
+      ["HtmlEntity", "&רלמ;"],
+      ["Text", "b"],
+      ["HtmlEntity", "&café;"],
+      ["Text", "c"],
+    ]);
+  });
+
+  it.each(["&é b", "&café", "&_x;", "&a-b;"])(
+    "leaves %s, which is no well-formed named entity, as text",
+    (src) => {
+      const doc = parse(src);
+      expect(doc.children.every((n) => n._tag === "Text")).toBe(true);
+    },
+  );
+
   it("leaves a bare ampersand as text", () => {
     const doc = parse("a & b");
     expect(doc.children.every((n) => n._tag === "Text")).toBe(true);
