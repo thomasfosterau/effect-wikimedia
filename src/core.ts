@@ -105,7 +105,9 @@ export const UserAgent: Context.Reference<string> = Context.Reference<string>(
  * recommended default for bots/scripts). A replica lagged past this many
  * seconds declines the request outright (HTTP 200 with an
  * `error.code: "maxlag"` body, or occasionally a `5xx`) rather than serving
- * stale data — see {@link detectMaxlagSignal}.
+ * stale data — see {@link detectMaxlagSignal}. It is also the wait, in
+ * seconds, a {@link RateLimited} carries when the response has no
+ * `Retry-After` header in seconds.
  */
 export const DEFAULT_MAXLAG_SECONDS = 5;
 
@@ -171,11 +173,12 @@ export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestF
 export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
   /**
    * Seconds to wait before retrying: finite, non-negative, and possibly
-   * fractional. For a `429` or `503` it is the `Retry-After` header's value
-   * when that is a number of seconds ({@link parseRetryAfterHeader}), and
+   * fractional. For a `429`, a `503` or a `maxlag` error body alike it is
+   * the response's `Retry-After` header value when that is a number of
+   * seconds ({@link parseRetryAfterHeader}), and
    * {@link DEFAULT_MAXLAG_SECONDS} when the header is absent or an HTTP
-   * date. For a `maxlag` error body, whose `Retry-After` header is not read,
-   * it is always {@link DEFAULT_MAXLAG_SECONDS}. It is the server's figure,
+   * date. (MediaWiki answers a `maxlag` error with `Retry-After` set to the
+   * larger of the replica lag and 5 seconds.) It is the server's figure,
    * uncapped: {@link RetryOptions.maxDelaySeconds} caps only how long
    * {@link withMaxlagRetry} sleeps. Once retries are exhausted, the error
    * that escapes carries the last attempt's value.
@@ -368,9 +371,13 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * JSON body is `{ error: { code: "maxlag", ... } }` (the REST/Parsoid
  * surface signals lag via HTTP status instead — see
  * {@link parseRetryAfterHeader}). Returns the etiquette-recommended backoff
- * ({@link DEFAULT_MAXLAG_SECONDS}) when detected — the Action API does not
- * send a `Retry-After` header alongside this body — or `null` when the body
- * carries no maxlag signal.
+ * in seconds ({@link DEFAULT_MAXLAG_SECONDS}) when detected, or `null` when
+ * the body carries no maxlag signal. It reads only the body: MediaWiki also
+ * sends a `Retry-After` header with this error (the larger of the replica
+ * lag and 5 seconds), and {@link WikimediaClient} waits for that header's
+ * value (capped by {@link RetryOptions.maxDelaySeconds}) when it is a number
+ * of seconds, using this function's figure only when the header is absent
+ * or an HTTP date.
  */
 export function detectMaxlagSignal(body: unknown): number | null {
   if (typeof body !== "object" || body === null) return null;
@@ -498,6 +505,17 @@ function buildUrl(request: WikimediaRequest): string {
   return url.toString();
 }
 
+/**
+ * The seconds a {@link RateLimited} response asks the client to wait, given
+ * its `Retry-After` header: the header's value when that is a number of
+ * seconds, otherwise {@link DEFAULT_MAXLAG_SECONDS}. Shared by the
+ * `429` / `503` path and the `maxlag` error-body path, so both honour the
+ * server's figure the same way.
+ */
+function retryAfterSeconds(retryAfterHeader: string | undefined): number {
+  return parseRetryAfterHeader(retryAfterHeader) ?? DEFAULT_MAXLAG_SECONDS;
+}
+
 function describeHttpError(error: HttpClientError.HttpClientError): string {
   return error.reason._tag === "StatusCodeError"
     ? `wikimedia returned HTTP ${error.reason.response.status}`
@@ -593,9 +611,9 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
           ),
         );
       if (response.status === 429 || response.status === 503) {
-        const retryAfterSeconds =
-          parseRetryAfterHeader(response.headers["retry-after"]) ?? DEFAULT_MAXLAG_SECONDS;
-        return yield* new RateLimited({ retryAfterSeconds });
+        return yield* new RateLimited({
+          retryAfterSeconds: retryAfterSeconds(response.headers["retry-after"]),
+        });
       }
       if (response.status < 200 || response.status >= 300) {
         return yield* new RequestFailed({
@@ -616,9 +634,10 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
           Effect.fail(new RequestFailed({ description: describeHttpError(error) })),
         ),
       );
-      const maxlagSeconds = detectMaxlagSignal(body);
-      if (maxlagSeconds !== null)
-        return yield* new RateLimited({ retryAfterSeconds: maxlagSeconds });
+      if (detectMaxlagSignal(body) !== null)
+        return yield* new RateLimited({
+          retryAfterSeconds: retryAfterSeconds(response.headers["retry-after"]),
+        });
       return yield* Schema.decodeUnknownEffect(schema)(body).pipe(
         Effect.catchTag("SchemaError", (error) =>
           Effect.fail(
