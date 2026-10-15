@@ -139,7 +139,8 @@ export interface WikibaseEntityIdValue {
   readonly _tag: "wikibase-entityid";
   /**
    * The referenced entity's branded id, upper-cased. A value whose `id` is
-   * not a plain `Q`/`P`/`L` id (a lexeme form or sense such as `L1-F1`)
+   * not a plain `Q`/`P`/`L` id (a lexeme form or sense such as `L1-F1`, an
+   * entity schema such as `E10`, or a legacy value with only a `numeric-id`)
    * degrades to {@link UnknownValue} instead.
    */
   readonly id: EntityId;
@@ -187,19 +188,19 @@ export interface TimeValue {
   readonly calendarModel: string | null;
   /**
    * The time zone offset from UTC, in minutes. Wikibase does not use it yet
-   * and sends `0`; `null` when absent or not a finite number.
+   * and normally sends `0`; `null` when absent or not a finite number.
    */
   readonly timezone: number | null;
   /**
    * How far the true time may lie before {@link TimeValue.time}, in units
-   * of {@link TimeValue.precision}. Wikibase does not use it yet and sends
-   * `0`; `null` when absent or not a finite number.
+   * of {@link TimeValue.precision}. Wikibase does not use it yet and
+   * normally sends `0`; `null` when absent or not a finite number.
    */
   readonly before: number | null;
   /**
    * How far the true time may lie after {@link TimeValue.time}, in units
-   * of {@link TimeValue.precision}. Wikibase does not use it yet and sends
-   * `0`; `null` when absent or not a finite number.
+   * of {@link TimeValue.precision}. Wikibase does not use it yet and
+   * normally sends `0`; `null` when absent or not a finite number.
    */
   readonly after: number | null;
 }
@@ -424,7 +425,8 @@ export type Snak = ValueSnak | SomeValueSnak | NoValueSnak;
  * A statement's epistemic rank; `"preferred"` values win when a consumer
  * wants "the" value. Wikibase's "best" statements for a property are the
  * preferred ones, or the normal ones when none is preferred; a
- * `"deprecated"` statement is recorded but known to be wrong or superseded.
+ * `"deprecated"` statement is recorded but known to be wrong (an erroneous
+ * or disproven claim; an outdated but once-true value stays `"normal"`).
  */
 export type StatementRank = "preferred" | "normal" | "deprecated";
 
@@ -584,7 +586,11 @@ const RawStatement = Schema.Struct({
 type RawStatement = typeof RawStatement.Type;
 
 const RawTermValue = Schema.Struct({
-  /** The term's language code, which repeats its key in the enclosing map. */
+  /**
+   * The term's language code, which normally repeats its key in the
+   * enclosing map; with language fallback it names the language the term
+   * came from.
+   */
   language: Schema.optional(Schema.Unknown),
   /** The term itself: a label, a description or one alias. */
   value: Schema.optional(Schema.Unknown),
@@ -626,9 +632,13 @@ type RawEntity = typeof RawEntity.Type;
 /**
  * Lenient schema for the `wbgetentities` response envelope: the decode step
  * {@link getEntities} runs before {@link normaliseEntities}. Every field is
- * optional and every leaf `Unknown`, so any JSON object decodes; read the
- * typed {@link WikidataItem}s that {@link normaliseEntities} builds from it,
- * not these fields.
+ * optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (an
+ * `entities` that is not an object, a statement list that is not an array,
+ * `null` where an object is expected) fails the decode, which
+ * {@link getEntities} reports as a `RequestFailed`. Read the typed
+ * {@link WikidataItem}s that {@link normaliseEntities} builds from it, not
+ * these fields.
  */
 export const WbGetEntitiesResponse = Schema.Struct({
   /**
@@ -980,9 +990,12 @@ const RawSearchHit = Schema.Struct({
 /**
  * Lenient schema for the `wbsearchentities` response envelope: the decode
  * step {@link searchEntities} runs before {@link normaliseSearch}. Every
- * field is optional and every leaf `Unknown`, so any JSON object decodes;
- * read the typed {@link SearchHit}s that {@link normaliseSearch} builds from
- * it, not these fields.
+ * field is optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (a
+ * `search` that is not an array, a `null` hit) fails the decode, which
+ * {@link searchEntities} reports as a `RequestFailed`. Read the typed
+ * {@link SearchHit}s that {@link normaliseSearch} builds from it, not these
+ * fields.
  */
 export const WbSearchResponse = Schema.Struct({
   /** The hits, in Wikibase's relevance order. */
@@ -1005,8 +1018,8 @@ export interface SearchHit {
    */
   readonly description: string | null;
   /**
-   * How the search matched — `"label"`, `"alias"`, `"description"`, …;
-   * `null` when Wikibase did not say.
+   * How the search matched, as Wikibase reports it (such as `"label"` or
+   * `"alias"`); `null` when Wikibase did not say.
    */
   readonly matchType: string | null;
   /**
