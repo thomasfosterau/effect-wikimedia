@@ -84,11 +84,6 @@
         "maxCognitive": 26
       },
       {
-        "files": ["src/wikitext/query.ts"],
-        "functions": ["decodeEntity"],
-        "maxCrap": 44.4
-      },
-      {
         "files": ["src/wikitext/quotes.ts"],
         "functions": ["resolveLine"],
         "maxCognitive": 35

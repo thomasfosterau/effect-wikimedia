@@ -158,37 +158,49 @@ const STRIP_KEEP_RAW: ReadonlySet<string> = new Set([
   "source",
 ]);
 
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-  ndash: "–",
-  mdash: "—",
-  hellip: "…",
-  times: "×",
-  deg: "°",
-};
+// A Map, not an object literal: a lookup on `{}` also finds the inherited
+// `constructor`, `toString`, … (`&constructor;` is a well-formed entity).
+const NAMED_ENTITIES: ReadonlyMap<string, string> = new Map([
+  ["amp", "&"],
+  ["lt", "<"],
+  ["gt", ">"],
+  ["quot", '"'],
+  ["apos", "'"],
+  ["nbsp", "\u00a0"],
+  ["ndash", "–"],
+  ["mdash", "—"],
+  ["hellip", "…"],
+  ["times", "×"],
+  ["deg", "°"],
+]);
 
-// reason: named + numeric (decimal/hex) entity decode with range guards; CRAP is estimate-inflated because the audit runs without unit coverage — covered by query.test.ts.
+const NUMERIC_ENTITY_RE = /^#(?:[xX]([0-9A-Fa-f]+)|([0-9]+))$/;
+
+// MediaWiki's `Sanitizer::validateCodepoint`: the code points a numeric
+// reference may name and still render as a character. MediaWiki escapes any
+// other reference (NUL and the C0/C1 controls but tab and newline, a
+// surrogate, U+FFFE/U+FFFF, anything past U+10FFFF), so the reader sees it as
+// literal text.
+function isRenderableCodePoint(code: number): boolean {
+  return (
+    code === 0x09 ||
+    code === 0x0a ||
+    (code >= 0x20 && code <= 0x7e) ||
+    (code >= 0xa0 && code <= 0xd7ff) ||
+    (code >= 0xe000 && code <= 0xfffd) ||
+    (code >= 0x10000 && code <= 0x10ffff)
+  );
+}
+
+// Decodes one entity as a reader sees it; one MediaWiki would render as
+// literal text (an unknown name, an unrenderable code point) stays as written.
 function decodeEntity(raw: string): string {
   const body = raw.slice(1, -1); // strip & and ;
-  if (body.charCodeAt(0) === 0x23) {
-    // numeric
-    const isHex = body.charCodeAt(1) === 0x78 || body.charCodeAt(1) === 0x58;
-    const code = Number.parseInt(body.slice(isHex ? 2 : 1), isHex ? 16 : 10);
-    if (Number.isFinite(code) && code >= 0 && code <= 0x10ffff) {
-      try {
-        return String.fromCodePoint(code);
-      } catch {
-        return raw;
-      }
-    }
-    return raw;
-  }
-  return NAMED_ENTITIES[body] ?? raw;
+  const numeric = NUMERIC_ENTITY_RE.exec(body);
+  if (numeric === null) return NAMED_ENTITIES.get(body) ?? raw;
+  const [, hex, dec] = numeric;
+  const code = hex === undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex, 16);
+  return isRenderableCodePoint(code) ? String.fromCodePoint(code) : raw;
 }
 
 const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
@@ -198,6 +210,10 @@ const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
  * markup removed. Templates and template arguments strip to nothing (they
  * are never expanded — an explicit non-goal), reference/citation tags are
  * dropped, wikilinks reduce to their label, and entities are decoded.
+ * Decoding knows a few common named entities and every numeric reference;
+ * an entity MediaWiki would show as literal text (an unknown name, or a
+ * reference to a control character, a surrogate or a code point past
+ * U+10FFFF) stays as written.
  *
  * This is a best-effort prose extraction, **not** a MediaWiki renderer: text
  * produced by template expansion is necessarily absent, so it matches an
@@ -217,7 +233,6 @@ function stripNodes(nodes: readonly Node[]): string {
   return out;
 }
 
-// reason: per-node-type strip dispatch (a full node switch); CRAP is estimate-inflated because the audit runs without unit coverage — covered by query.test.ts.
 function stripNode(node: Node): string {
   switch (node._tag) {
     case "Text":
