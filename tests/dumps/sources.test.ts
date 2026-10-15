@@ -56,6 +56,25 @@ const orHung = <A>(promise: Promise<A>): Promise<A | "hung"> => {
   return Promise.race([promise, hung]).finally(() => clearTimeout(timer));
 };
 
+/**
+ * Runs `body`, then fails if an uncaught exception surfaced while it ran: an
+ * `error` event nobody listened for, which would crash a real process. The
+ * listener makes the test fail on its own (Vitest would otherwise only fail
+ * the run, unattributed).
+ */
+const withoutUncaught = async (body: () => Promise<void>): Promise<void> => {
+  const uncaught: unknown[] = [];
+  const onUncaught = (error: unknown) => uncaught.push(error);
+  process.on("uncaughtException", onUncaught);
+  try {
+    await body();
+    await wait(20); // let any error event surface
+    expect(uncaught).toEqual([]);
+  } finally {
+    process.off("uncaughtException", onUncaught);
+  }
+};
+
 // ── File source + decompression ──────────────────────────────────────────
 
 describe("fromFile", () => {
@@ -439,8 +458,9 @@ describe("interruption teardown", () => {
     // A Node Readable's own iterator destroys the stream in `return()`, which
     // would mask a teardown that never calls `destroy()` (#80). This source's
     // `return()` leaves it open, so only `fromNodeReadable`'s teardown can
-    // destroy it; and its iterator's `return()` and its scope finalizer both
-    // run, so the `destroyed` guard is what keeps it to one `destroy()`.
+    // destroy it; and `fromNodeReadable`'s wrapping `return()` and its scope
+    // finalizer both run, so the `destroyed` guard is what keeps it to one
+    // `destroy()`.
     let destroyCalls = 0;
     let pulled = 0;
     let onThirdPull = (): void => undefined;
@@ -491,6 +511,66 @@ describe("interruption teardown", () => {
     if (exit === "hung") return;
     expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(readable.destroyed).toBe(true);
+  });
+
+  it("releases decompressWith's upstream source when interrupted before the stage is opened", async () => {
+    // Bridging the source to a web stream starts it on a fiber of its own,
+    // which only cancelling the web stream stops. An interruption that lands
+    // after the source has started but before `fromNodeReadable` opens the
+    // stage must still stop it, or the upstream (an HTTP body, which parks
+    // holding its socket once a chunk is buffered) stays open (#109). The
+    // source's first step interrupts the consuming fiber, which lands the
+    // interruption in that window deterministically; the source then parks.
+    let outer: Fiber.Fiber<unknown, unknown> | undefined;
+    let started = false;
+    let onReleased = (): void => undefined;
+    const released = new Promise<"released">((resolve) => (onReleased = () => resolve("released")));
+    const source = Stream.fromEffect(
+      Effect.sync(() => {
+        started = true;
+        outer?.interruptUnsafe();
+        return new Uint8Array(gzipSync(Buffer.from(DUMP)));
+      }),
+    ).pipe(Stream.concat(Stream.never), Stream.ensuring(Effect.sync(() => onReleased())));
+    const stream = Stream.unwrap(
+      Effect.sync(() => {
+        outer = Fiber.getCurrent();
+        return source.pipe(Dumps.decompressWith(Dumps.gunzipTransform));
+      }),
+    );
+    await withoutUncaught(async () => {
+      const exit = await orHung(runTestExit(Stream.runDrain(stream)));
+      expect(exit).not.toBe("hung");
+      if (exit === "hung") return;
+      expect(started).toBe(true);
+      expect(Exit.hasInterrupts(exit)).toBe(true);
+      expect(await orHung(released)).toBe("released");
+    });
+  });
+
+  it("destroys fromFile's decompression chain, without an uncaught error, when interrupted as soon as it is opened", async () => {
+    // `fromFile` opens a `.gz` as a `stream.compose` chain, which emits an
+    // `AbortError` when it is destroyed before it finishes. Destroyed by the
+    // scope finalizer before the stream is first pulled, nothing listens for
+    // that error, and a real process would crash on it (#109). The
+    // decompressor interrupts the fiber, which lands the interruption right
+    // after the open, as in the #95 test above.
+    const path = join(tmp, "interrupted-open.json.gz");
+    writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+    let stage: Transform | undefined;
+    const decompressor = (): Transform => {
+      Fiber.getCurrent()?.interruptUnsafe();
+      return (stage = createGunzip());
+    };
+    await withoutUncaught(async () => {
+      const exit = await orHung(
+        runTestExit(Stream.runDrain(Dumps.fromFile(path, { decompressor }))),
+      );
+      expect(exit).not.toBe("hung");
+      if (exit === "hung") return;
+      expect(Exit.hasInterrupts(exit)).toBe(true);
+      expect(stage?.destroyed).toBe(true);
+    });
   });
 });
 

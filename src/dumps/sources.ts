@@ -127,8 +127,21 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
 
 // ── Node Readable → Stream<Uint8Array> ───────────────────────────────────
 
+/**
+ * Destroys `readable` for teardown, unless it already is. Teardown passes no
+ * error, but a `stream.compose` chain (what {@link fromFile} opens with a
+ * decompressor, and what {@link decompressWith} opens) emits an `AbortError`
+ * when it is destroyed before it finishes. Before the stream is first pulled
+ * nothing listens for it, and Node throws an `error` event nobody listens for
+ * as an uncaught exception, which crashes the process (#109). The stream's
+ * outcome is already settled, so a listener that drops the error goes on
+ * first.
+ */
 const destroyReadable = (readable: NodeReadableLike): void => {
-  if (!readable.destroyed) readable.destroy();
+  if (readable.destroyed) return;
+  const emitter = readable as Partial<Pick<Readable, "on">>;
+  if (typeof emitter.on === "function") emitter.on("error", () => undefined);
+  readable.destroy();
 };
 
 /**
@@ -195,10 +208,13 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
  * decompressing a tiny `.gz` into hundreds of MB) is paused between pulls and
  * the whole file is never buffered.
  *
- * A scope finalizer destroys the Readable on stream teardown, which is the
- * interruption guarantee: cancelling the consuming Effect destroys the
- * Readable and anything composed into it — an open file descriptor, an
- * in-flight gunzip — so no decompression work is orphaned. It holds while the
+ * Stream teardown destroys the Readable, which is the interruption
+ * guarantee: cancelling the consuming Effect destroys the Readable and
+ * anything composed into it — an open file descriptor, an in-flight gunzip —
+ * so no decompression work is orphaned. Two mechanisms make it hold: the
+ * wrapping iterator's `return()` destroys it once the stream has been pulled,
+ * and a scope finalizer, registered in the same uninterruptible step that
+ * opens it, destroys it if teardown comes before that. It holds while the
  * Readable is stalled waiting for data, too: the interruption completes once
  * the Readable's own `destroy()` does (it emits `close`), without waiting for
  * that data. That wait is bounded at one second: if the Readable hasn't
@@ -259,10 +275,15 @@ export const decompressWith =
       // `compose` (not `.pipe`) so tearing the output down destroys the whole
       // chain — the web-source reader and the transform — leaving no orphaned
       // decompression work behind.
-      Effect.map(Stream.toReadableStreamEffect(source), (web) =>
+      Effect.map(Effect.context<R>(), (context) =>
         fromNodeReadable(() => {
-          // Building `web` already started the source, so a rejected stage
-          // must cancel it, or the upstream (an HTTP body, a file) stays open.
+          // Building `web` starts the source on a fiber of its own that only
+          // `web.cancel()` stops, so build it here, inside `fromNodeReadable`'s
+          // uninterruptible open: an interruption can't then land between
+          // starting the source and registering the teardown that cancels it
+          // (#109). A rejected stage must cancel it too, or the upstream (an
+          // HTTP body, a file) stays open.
+          const web = Stream.toReadableStreamWith(source, context);
           // Cancel only here: once `webToNode` has run, `web` is locked. If
           // the source has already failed, `web` is errored and `cancel()`
           // rejects with that error; swallow it, since the stage rejection is
