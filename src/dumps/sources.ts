@@ -138,14 +138,18 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
  * Composes `head` into `stage`, destroying both if `compose` throws: nothing
  * else owns them yet, so a throw would otherwise leave `head` (an open file,
  * a source behind a web stream) open. {@link asNodeDuplex} already rejects
- * the stages `compose` throws on, so this is a second line of defence.
+ * the stages `compose` throws on, so this is a second line of defence. Both
+ * go through `destroyReadable`, which adds a no-op `error` listener first:
+ * destroying a fresh `fs.ReadStream` still runs its pending open, and if that
+ * open fails (a missing file) the `error` it emits would otherwise crash the
+ * process as an uncaught exception, as in #109.
  */
 const composeOrDestroy = (head: Readable, stage: Duplex): Duplex => {
   try {
     return compose(head, stage);
   } catch (error) {
-    head.destroy();
-    stage.destroy();
+    destroyReadable(head);
+    destroyReadable(stage);
     throw error;
   }
 };
