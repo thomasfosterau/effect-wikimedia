@@ -6,13 +6,14 @@
  * Source: the 2,125 semicolon-terminated names of the HTML Standard's named
  * character references list
  * (https://html.spec.whatwg.org/multipage/named-characters.html), © WHATWG
- * (Apple, Google, Mozilla, Microsoft), licensed under CC BY 4.0
- * (https://creativecommons.org/licenses/by/4.0/). Modified here: reformatted
- * into `DATA` below, with the 106 legacy names without the `;` omitted. Taken
- * via the npm package `character-entities` 2.0.2 (`characterEntities`,
- * © 2015 Titus Wormer, MIT:
- * https://github.com/wooorm/character-entities/blob/2.0.2/license), which
- * reproduces the list; MIT is this package's license too.
+ * (Apple, Google, Mozilla, Microsoft). The HTML Standard is CC BY 4.0
+ * (https://creativecommons.org/licenses/by/4.0/), and the portions of it
+ * incorporated into source code, as here, are under the BSD 3-Clause
+ * License instead. Modified here: reformatted into `DATA` below, with the
+ * 106 legacy names without the `;` omitted. Taken via the npm package
+ * `character-entities` 2.0.2 (`characterEntities`, © 2015 Titus Wormer,
+ * MIT), which reproduces the list. Both licenses' full texts are in
+ * `THIRD_PARTY_NOTICES.md`, which ships in this package.
  *
  * Checked against MediaWiki's own table, the one `Sanitizer::normalizeEntity`
  * reads (`Wikimedia\RemexHtml\HTMLData::NAMED_ENTITY_TRANSLATION`, remex-html
