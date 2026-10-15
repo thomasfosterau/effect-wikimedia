@@ -80,7 +80,7 @@ const Revision = Schema.Struct({
 });
 
 const WikitextPage = Schema.Struct({
-  /** The page ID; absent for a missing or invalid title. */
+  /** The page ID; absent for a missing, invalid or special title. */
   pageid: Schema.optional(Schema.Unknown),
   /** The page title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
@@ -104,7 +104,7 @@ export const WikitextResponse = Schema.Struct({
   /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
-      /** The requested pages, keyed by page ID (a negative number for a missing or invalid title). */
+      /** The requested pages, keyed by page ID (a negative number for a missing, invalid or special title). */
       pages: Schema.optional(Schema.Record(Schema.String, WikitextPage)),
     }),
   ),
@@ -205,6 +205,10 @@ const MetadataPage = Schema.Struct({
   title: Schema.optional(Schema.Unknown),
   /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
+  /** Present (as `""`) when MediaWiki rejects the title; the entry then has `invalidreason`. */
+  invalid: Schema.optional(Schema.Unknown),
+  /** Present (as `""`) for a `Special:` or `Media:` title, which names no stored page. */
+  special: Schema.optional(Schema.Unknown),
   /** The page's content model. */
   contentmodel: Schema.optional(Schema.Unknown),
   /** MediaWiki's code for the page's content language. */
@@ -252,10 +256,8 @@ export interface PageMetadata {
   /**
    * The page's MediaWiki page ID (`pageid`), which stays the same when the page
    * is renamed. `null` if the response's `pageid` is absent or isn't a
-   * non-negative number up to `Number.MAX_SAFE_INTEGER` (a fraction is
-   * truncated). That is the case for a title the API reports as `invalid`, or
-   * as an existing `special` page (`Special:…`): neither is flagged `missing`,
-   * so {@link getPageMetadata} returns a result for it, not `null`.
+   * non-negative number up to `Number.MAX_SAFE_INTEGER`; a fraction is
+   * truncated.
    */
   readonly pageId: number | null;
   /**
@@ -314,13 +316,20 @@ function toHttpsUrl(value: unknown): string | null {
   }
 }
 
-/** Normalises a `PageMetadataResponse` for the requested `title`; `null` when the page is missing. */
+/**
+ * Normalises a `PageMetadataResponse` for the requested `title`. Returns
+ * `null` when the response has no entry for a stored page: every entry is
+ * flagged `missing`, `invalid` (a title MediaWiki rejects) or `special` (a
+ * `Special:` or `Media:` title), or there are no entries.
+ */
 export function normalisePageMetadata(
   response: PageMetadataResponse,
   title: string,
 ): PageMetadata | null {
   const pages = Object.values(response.query?.pages ?? {});
-  const page = pages.find((p) => p.missing === undefined);
+  const page = pages.find(
+    (p) => p.missing === undefined && p.invalid === undefined && p.special === undefined,
+  );
   if (page === undefined) return null;
   return {
     pageId: toNonNegativeInt(page.pageid),
@@ -334,7 +343,21 @@ export function normalisePageMetadata(
   };
 }
 
-/** Fetches a page's identity/bookkeeping metadata. Returns `null` when the page does not exist upstream. */
+/**
+ * Fetches a page's identity and bookkeeping metadata via the Action API's
+ * `prop=info`. Returns `null` when the title names no stored page upstream:
+ * the page does not exist, MediaWiki rejects the title as invalid (for
+ * example one containing `<` or `[`, which {@link Core.requireTitle} lets
+ * through), it is a `Special:` or `Media:` title, existing or not, or it is
+ * an interwiki title (`fr:Foo` on an English wiki), which the API reports
+ * under `query.interwiki` with no page entry.
+ * Fails with {@link InvalidRequest}, before any request is sent, for an
+ * invalid host or a title {@link Core.requireTitle} rejects;
+ * {@link Core.RateLimited} for a `429` / `503` or a `maxlag` error once
+ * `retry` (default {@link Core.DEFAULT_RETRY_OPTIONS}) is exhausted; and
+ * {@link Core.RequestFailed} for any other non-2xx status, a transport error
+ * or a response that does not decode.
+ */
 export const getPageMetadata = Effect.fn("Action.getPageMetadata")(function* (
   host: string,
   title: string,
