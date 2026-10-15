@@ -135,10 +135,20 @@ function toBoundedString(value: unknown, max = 2000): string | null {
 
 /** A reference to another entity (`wikibase-entityid`) — an item, property, or lexeme. */
 export interface WikibaseEntityIdValue {
+  /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "wikibase-entityid";
-  /** The referenced entity's branded id. */
+  /**
+   * The referenced entity's branded id, upper-cased. A value whose `id` is
+   * not a plain `Q`/`P`/`L` id (a lexeme form or sense such as `L1-F1`, an
+   * entity schema such as `E10`, or a legacy value with only a `numeric-id`)
+   * degrades to {@link UnknownValue} instead.
+   */
   readonly id: EntityId;
-  /** The raw `entity-type` discriminator (`"item"`, `"property"`, `"lexeme"`, …). */
+  /**
+   * The raw `entity-type` discriminator (`"item"`, `"property"`, `"lexeme"`,
+   * …), trimmed; `null` when Wikibase sent none. It is not checked against
+   * {@link WikibaseEntityIdValue.id}'s prefix.
+   */
   readonly entityType: string | null;
 }
 
@@ -149,22 +159,80 @@ export interface WikibaseEntityIdValue {
  * calendar entity IRI (Gregorian `Q1985727`, Julian `Q1985786`).
  */
 export interface TimeValue {
+  /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "time";
+  /**
+   * The timestamp as Wikibase sent it, trimmed and cut at 64 characters: a
+   * signed year, then `-MM-DDThh:mm:ssZ`, such as `+1952-03-11T00:00:00Z`.
+   * It is not parsed or validated. The year may run past four digits, and
+   * the fields finer than {@link TimeValue.precision} are usually zero, so
+   * a year-only date reads `+1952-00-00T00:00:00Z`. A value with no usable
+   * `time` degrades to {@link UnknownValue}.
+   */
   readonly time: string;
+  /**
+   * Wikibase's precision code, saying how much of {@link TimeValue.time} is
+   * meaningful: `9` year, `10` month, `11` day, `12` hour, `13` minute, `14`
+   * second; `8` decade, `7` century, `6` millennium, and `5` down to `0` for
+   * 10⁴ to 10⁹ years. `null` when absent or not a finite number; it is not
+   * range-checked.
+   */
   readonly precision: number | null;
+  /**
+   * The calendar model's entity IRI, such as
+   * `http://www.wikidata.org/entity/Q1985727` (proleptic Gregorian) or
+   * `…/Q1985786` (proleptic Julian), saying which calendar
+   * {@link TimeValue.time} is written in. `null` when absent; the IRI is not
+   * validated.
+   */
   readonly calendarModel: string | null;
+  /**
+   * The time zone offset from UTC, in minutes. Wikibase does not use it yet
+   * and normally sends `0`; `null` when absent or not a finite number.
+   */
   readonly timezone: number | null;
+  /**
+   * How far the true time may lie before {@link TimeValue.time}, in units
+   * of {@link TimeValue.precision}. Wikibase does not use it yet and
+   * normally sends `0`; `null` when absent or not a finite number.
+   */
   readonly before: number | null;
+  /**
+   * How far the true time may lie after {@link TimeValue.time}, in units
+   * of {@link TimeValue.precision}. Wikibase does not use it yet and
+   * normally sends `0`; `null` when absent or not a finite number.
+   */
   readonly after: number | null;
 }
 
-/** A geographic coordinate (`globecoordinate`). `globe` is the globe entity IRI (Earth = `Q2`). */
+/**
+ * A geographic coordinate (`globecoordinate`). `globe` is the globe entity
+ * IRI (Earth = `Q2`). Every field may be `null`, so a `globecoordinate`
+ * datavalue never degrades to {@link UnknownValue}.
+ */
 export interface GlobeCoordinateValue {
+  /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "globecoordinate";
+  /** The latitude in decimal degrees, north positive; `null` when absent or not a finite number. */
   readonly latitude: number | null;
+  /** The longitude in decimal degrees, east positive; `null` when absent or not a finite number. */
   readonly longitude: number | null;
+  /**
+   * The altitude, which Wikibase has never used and sends as `null`; `null`
+   * also when it is not a finite number.
+   */
   readonly altitude: number | null;
+  /**
+   * How precise the coordinate is, in degrees (`0.0002777…` is one
+   * arcsecond). `null` when Wikibase sent none, as on some older
+   * statements, or it is not a finite number.
+   */
   readonly precision: number | null;
+  /**
+   * The entity IRI of the body the coordinate is on, such as
+   * `http://www.wikidata.org/entity/Q2` (Earth) or `…/Q405` (the Moon).
+   * `null` when absent; the IRI is not validated.
+   */
   readonly globe: string | null;
 }
 
@@ -175,17 +243,46 @@ export interface GlobeCoordinateValue {
  * the literal `"1"` for a dimensionless quantity.
  */
 export interface QuantityValue {
+  /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "quantity";
+  /**
+   * The amount as Wikibase's signed decimal string (`"+1.5"`, `"-273.15"`),
+   * trimmed and cut at 64 characters; parse it yourself if a JavaScript
+   * number's precision is enough. A value with no usable `amount` degrades
+   * to {@link UnknownValue}.
+   */
   readonly amount: string;
+  /**
+   * The unit's entity IRI, such as `http://www.wikidata.org/entity/Q11573`
+   * (metre), or `"1"` for a dimensionless count. `null` when absent; the IRI
+   * is not validated.
+   */
   readonly unit: string | null;
+  /**
+   * The upper bound of the amount's uncertainty, as a signed decimal string in
+   * the same unit; `null` when the statement gives no bounds.
+   */
   readonly upperBound: string | null;
+  /**
+   * The lower bound of the amount's uncertainty, as a signed decimal string in
+   * the same unit; `null` when the statement gives no bounds.
+   */
   readonly lowerBound: string | null;
 }
 
 /** A language-tagged text (`monolingualtext`). */
 export interface MonolingualTextValue {
+  /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "monolingualtext";
+  /**
+   * The text, trimmed and cut at 4,000 UTF-16 code units; never empty. A
+   * value with no usable `text` degrades to {@link UnknownValue}.
+   */
   readonly text: string;
+  /**
+   * The text's language code as Wikibase sent it (`"en"`, `"pt-br"`), trimmed;
+   * `null` when absent. It is not validated.
+   */
   readonly language: string | null;
 }
 
@@ -195,7 +292,13 @@ export interface MonolingualTextValue {
  * The property's datatype is carried on the enclosing {@link ValueSnak}.
  */
 export interface StringValue {
+  /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "string";
+  /**
+   * The string, trimmed and cut at 4,000 UTF-16 code units; never empty. A
+   * `string` datavalue that is empty or not a string degrades to
+   * {@link UnknownValue}.
+   */
   readonly value: string;
 }
 
@@ -207,20 +310,44 @@ export interface StringValue {
  * the datatype.
  */
 export interface ExternalIdValue {
+  /**
+   * Discriminates this value in the {@link DataValue} union. It names the
+   * property's datatype: the datavalue's own `type` is `string`.
+   */
   readonly _tag: "external-id";
+  /**
+   * The identifier as the external database spells it, trimmed and cut at
+   * 4,000 UTF-16 code units; never empty. It is not checked against the
+   * property's format constraint.
+   */
   readonly value: string;
 }
 
 /**
- * A datavalue whose `type` this module does not recognise — the lenient
- * degrade. Carries the raw `type` string (when present) and the untouched
- * `value` payload so a caller can still inspect it, but the model makes no
- * structural promise about it. A future Wikibase datatype lands here rather
+ * A datavalue whose `type` this module does not recognise, or whose
+ * payload is unusable for a `type` it does — the lenient degrade. Carries
+ * the raw `type` string (when present) and the untouched `value` payload so
+ * a caller can still inspect it, but the model makes no structural promise
+ * about it. A future Wikibase datatype lands here rather
  * than failing the decode.
  */
 export interface UnknownValue {
+  /**
+   * Discriminates this value in the {@link DataValue} union; `"unknown"` is
+   * this module's own tag, not a Wikibase `type`.
+   */
   readonly _tag: "unknown";
+  /**
+   * The datavalue's raw `type` string, untrimmed (`"time"` for a time value
+   * whose payload was unusable, or a type this module does not know); `null`
+   * when `type` was absent or not a string.
+   */
   readonly type: string | null;
+  /**
+   * The datavalue's `value` payload exactly as decoded from the response:
+   * not trimmed, bounded or checked, and `undefined` when absent. Treat it
+   * as untrusted input.
+   */
   readonly value: unknown;
 }
 
@@ -239,54 +366,126 @@ export type DataValue =
 
 /** A snak asserting a concrete {@link DataValue} for its property. */
 export interface ValueSnak {
+  /** Discriminates this snak in the {@link Snak} union: Wikibase's `snaktype`. */
   readonly _tag: "value";
+  /** The property the snak is about, validated and upper-cased. */
   readonly property: PropertyId;
-  /** The property's datatype (`"wikibase-item"`, `"external-id"`, `"time"`, …). */
+  /**
+   * The property's datatype (`"wikibase-item"`, `"external-id"`, `"time"`,
+   * …), trimmed; `null` when the snak carried none. It is what splits a
+   * `string` datavalue into {@link ExternalIdValue} or {@link StringValue}.
+   */
   readonly datatype: string | null;
+  /**
+   * The asserted value; an unrecognised or unusable datavalue is an
+   * {@link UnknownValue}, never absent.
+   */
   readonly value: DataValue;
 }
 
-/** A snak asserting the property has *some* (unspecified) value. */
+/**
+ * A snak asserting the property has *some* (unspecified) value: Wikibase's
+ * "unknown value", such as a date of death known to have happened but not
+ * when. A snak that arrives without a `datavalue` and is not marked
+ * `novalue` also becomes one, rather than an invented empty value.
+ */
 export interface SomeValueSnak {
+  /** Discriminates this snak in the {@link Snak} union: Wikibase's `snaktype`. */
   readonly _tag: "somevalue";
+  /** The property the snak is about, validated and upper-cased. */
   readonly property: PropertyId;
+  /**
+   * The property's datatype (`"wikibase-item"`, `"time"`, …), trimmed;
+   * `null` when the snak carried none.
+   */
   readonly datatype: string | null;
 }
 
-/** A snak asserting the property has *no* value. */
+/**
+ * A snak asserting the property has *no* value, such as Elizabeth I's
+ * spouse (`P26`). It is a positive claim, unlike a missing statement, which
+ * says nothing.
+ */
 export interface NoValueSnak {
+  /** Discriminates this snak in the {@link Snak} union: Wikibase's `snaktype`. */
   readonly _tag: "novalue";
+  /** The property the snak is about, validated and upper-cased. */
   readonly property: PropertyId;
+  /**
+   * The property's datatype (`"wikibase-item"`, `"time"`, …), trimmed;
+   * `null` when the snak carried none.
+   */
   readonly datatype: string | null;
 }
 
 /** A single snak — the property + value assertion at the heart of every statement. */
 export type Snak = ValueSnak | SomeValueSnak | NoValueSnak;
 
-/** A statement's epistemic rank; `"preferred"` values win when a consumer wants "the" value. */
+/**
+ * A statement's epistemic rank; `"preferred"` values win when a consumer
+ * wants "the" value. Wikibase's "best" statements for a property are the
+ * preferred ones, or the normal ones when none is preferred; a
+ * `"deprecated"` statement is recorded but known to be wrong (an erroneous
+ * or disproven claim; an outdated but once-true value stays `"normal"`).
+ */
 export type StatementRank = "preferred" | "normal" | "deprecated";
 
 /** A reference block backing a statement — a set of snaks grouped by property. */
 export interface Reference {
+  /**
+   * Wikibase's hash of the reference's snaks, which identifies it within the
+   * statement (and is shared by identical references); `null` when absent.
+   */
   readonly hash: string | null;
+  /**
+   * The reference's snaks keyed by property id (`"P248"` stated in, `"P854"`
+   * reference URL, …), in Wikibase's order. Unusable snaks and invalid
+   * property keys are dropped, a property with no snak left is omitted, and
+   * each list keeps at most {@link MAX_LIST_ENTRIES}.
+   */
   readonly snaks: Readonly<Record<string, readonly Snak[]>>;
 }
 
 /** A single claim on an item: a main snak, its rank, and its qualifiers and references. */
 export interface Statement {
-  /** The statement GUID (`Q42$...`), when present. */
+  /** The statement GUID (`Q42$...`), trimmed; `null` when absent. */
   readonly id: string | null;
+  /** The statement's rank; a missing or unrecognised rank reads as `"normal"`. */
   readonly rank: StatementRank;
+  /** The statement's main assertion: the property and its value, some value or no value. */
   readonly mainsnak: Snak;
-  /** Qualifier snaks, keyed by property id. */
+  /**
+   * Qualifier snaks (`"P580"` start time, `"P582"` end time, …), keyed by
+   * property id; they refine the main snak. Normalised as
+   * {@link Reference.snaks} is, so empty when the statement has none.
+   */
   readonly qualifiers: Readonly<Record<string, readonly Snak[]>>;
+  /**
+   * The references backing the statement, in Wikibase's order and at most
+   * {@link MAX_LIST_ENTRIES}; empty for an unsourced statement.
+   */
   readonly references: readonly Reference[];
 }
 
 /** One sitelink — the wiki, the linked page title, and any badges. */
 export interface Sitelink {
+  /**
+   * The wiki's global site id (`"enwiki"`, `"frwikisource"`, `"commonswiki"`),
+   * trimmed; the sitelink's key in {@link WikidataItem.sitelinks} when the
+   * entry carries no `site` of its own.
+   */
   readonly site: string;
+  /**
+   * The linked page's title as Wikibase stores it, with spaces rather than
+   * underscores and any namespace prefix (`"Douglas Adams"`), trimmed and
+   * cut at 4,000 UTF-16 code units. A sitelink without one is dropped.
+   */
   readonly title: string;
+  /**
+   * The badge items awarded to the page (`Q17437796` featured article,
+   * `Q17437798` good article, …); entries that are not item ids are dropped,
+   * and the list is empty when there are none.
+   */
   readonly badges: readonly ItemId[];
 }
 
@@ -295,14 +494,48 @@ export type LanguageMap = Readonly<Record<string, string>>;
 
 /** The fully typed Wikidata entity. */
 export interface WikidataItem {
+  /**
+   * The entity's id, validated and upper-cased; the key it is filed under by
+   * {@link getEntities}.
+   */
   readonly id: EntityId;
-  /** The entity kind (`"item"`, `"property"`, `"lexeme"`), as Wikibase reports it. */
+  /**
+   * The entity kind (`"item"`, `"property"`, `"lexeme"`), as Wikibase
+   * reports it; `null` when absent.
+   */
   readonly type: string | null;
+  /**
+   * The label in each language, keyed by language code (`"en"`, `"de"`).
+   * From {@link getEntities}, only the requested languages are present
+   * (it asks for no language fallback). Empty terms are dropped, and the
+   * map is empty when labels were not fetched.
+   */
   readonly labels: LanguageMap;
+  /**
+   * The short description in each language, keyed by language code, with
+   * the same rules as {@link WikidataItem.labels}.
+   */
   readonly descriptions: LanguageMap;
+  /**
+   * The aliases (other names) in each language, keyed by language code, in
+   * Wikibase's order and at most {@link MAX_LIST_ENTRIES} per language.
+   * Empty aliases are dropped, a language with none left is omitted, and it
+   * is empty when aliases were not fetched.
+   */
   readonly aliases: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The pages linked to the entity on other Wikimedia wikis, keyed by
+   * global site id (`"enwiki"`); empty when sitelinks were not fetched.
+   * Every sitelink with a title is kept: the list is not capped.
+   */
   readonly sitelinks: Readonly<Record<string, Sitelink>>;
-  /** Statements keyed by property id (`"P31"`, `"P569"`, …). */
+  /**
+   * Statements keyed by property id (`"P31"`, `"P569"`, …), in Wikibase's
+   * order and at most {@link MAX_LIST_ENTRIES} per property. Invalid
+   * property keys and unusable statements are dropped, but a property whose
+   * statements were all dropped keeps an empty list. Empty when claims were
+   * not fetched.
+   */
   readonly claims: Readonly<Record<string, readonly Statement[]>>;
 }
 
@@ -310,15 +543,21 @@ export interface WikidataItem {
 
 /** The `{ type, value }` datavalue envelope; `value` is left `Unknown` — its shape varies by `type`. */
 const RawDataValue = Schema.Struct({
+  /** The datavalue kind (`"time"`, `"quantity"`, …), which picks the {@link DataValue} member. */
   type: Schema.optional(Schema.Unknown),
+  /** The payload, whose shape depends on `type`; kept whole on an {@link UnknownValue}. */
   value: Schema.optional(Schema.Unknown),
 });
 type RawDataValue = typeof RawDataValue.Type;
 
 const RawSnak = Schema.Struct({
+  /** `"value"`, `"somevalue"` or `"novalue"`: which {@link Snak} member the snak becomes. */
   snaktype: Schema.optional(Schema.Unknown),
+  /** The property id the snak is about (`"P31"`); a snak without a valid one is dropped. */
   property: Schema.optional(Schema.Unknown),
+  /** The property's datatype (`"external-id"`, `"time"`, …). */
   datatype: Schema.optional(Schema.Unknown),
+  /** The value of a `"value"` snak; absent on `"somevalue"` and `"novalue"` snaks. */
   datavalue: Schema.optional(RawDataValue),
 });
 type RawSnak = typeof RawSnak.Type;
@@ -326,46 +565,86 @@ type RawSnak = typeof RawSnak.Type;
 const RawSnakList = Schema.Record(Schema.String, Schema.Array(RawSnak));
 
 const RawReference = Schema.Struct({
+  /** Wikibase's hash of the reference's snaks. */
   hash: Schema.optional(Schema.Unknown),
+  /** The reference's snaks keyed by property id. */
   snaks: Schema.optional(RawSnakList),
 });
 
 const RawStatement = Schema.Struct({
+  /** The statement GUID (`"Q42$…"`). */
   id: Schema.optional(Schema.Unknown),
+  /** `"preferred"`, `"normal"` or `"deprecated"`; anything else reads as `"normal"`. */
   rank: Schema.optional(Schema.Unknown),
+  /** The main assertion; a statement without a usable one is dropped. */
   mainsnak: Schema.optional(RawSnak),
+  /** Qualifier snaks keyed by property id. */
   qualifiers: Schema.optional(RawSnakList),
+  /** The references backing the statement. */
   references: Schema.optional(Schema.Array(RawReference)),
 });
 type RawStatement = typeof RawStatement.Type;
 
 const RawTermValue = Schema.Struct({
+  /**
+   * The term's language code, which normally repeats its key in the
+   * enclosing map; with language fallback it names the language the term
+   * came from.
+   */
   language: Schema.optional(Schema.Unknown),
+  /** The term itself: a label, a description or one alias. */
   value: Schema.optional(Schema.Unknown),
 });
 
 const RawSitelink = Schema.Struct({
+  /** The wiki's global site id (`"enwiki"`), which repeats its key in `sitelinks`. */
   site: Schema.optional(Schema.Unknown),
+  /** The linked page's title; a sitelink without one is dropped. */
   title: Schema.optional(Schema.Unknown),
+  /** The badge item ids awarded to the page. */
   badges: Schema.optional(Schema.Array(Schema.Unknown)),
 });
 type RawSitelink = typeof RawSitelink.Type;
 
 const RawEntity = Schema.Struct({
+  /** The entity id (`"Q42"`); an entity without a valid one is dropped. */
   id: Schema.optional(Schema.Unknown),
+  /** The entity kind (`"item"`, `"property"`, `"lexeme"`). */
   type: Schema.optional(Schema.Unknown),
-  // Wikibase flags a non-existent id as `{ id, missing: "" }` keyed under it.
+  /**
+   * Present (as `""`) when the requested id does not exist: Wikibase answers
+   * `{ id, missing: "" }`, keyed under the id. Such an entity is dropped.
+   */
   missing: Schema.optional(Schema.Unknown),
+  /** The labels, keyed by language code. */
   labels: Schema.optional(Schema.Record(Schema.String, RawTermValue)),
+  /** The descriptions, keyed by language code. */
   descriptions: Schema.optional(Schema.Record(Schema.String, RawTermValue)),
+  /** The aliases, keyed by language code. */
   aliases: Schema.optional(Schema.Record(Schema.String, Schema.Array(RawTermValue))),
+  /** The sitelinks, keyed by global site id. */
   sitelinks: Schema.optional(Schema.Record(Schema.String, RawSitelink)),
+  /** The statements, keyed by property id. */
   claims: Schema.optional(Schema.Record(Schema.String, Schema.Array(RawStatement))),
 });
 type RawEntity = typeof RawEntity.Type;
 
-/** Lenient schema for the `wbgetentities` response envelope. */
+/**
+ * Lenient schema for the `wbgetentities` response envelope: the decode step
+ * {@link getEntities} runs before {@link normaliseEntities}. Every field is
+ * optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (an
+ * `entities` that is not an object, a statement list that is not an array,
+ * `null` where an object is expected) fails the decode, which
+ * {@link getEntities} reports as a `RequestFailed`. Read the typed
+ * {@link WikidataItem}s that {@link normaliseEntities} builds from it, not
+ * these fields.
+ */
 export const WbGetEntitiesResponse = Schema.Struct({
+  /**
+   * The entities, keyed by id; a requested id that does not exist still has
+   * an entry, flagged `missing`.
+   */
   entities: Schema.optional(Schema.Record(Schema.String, RawEntity)),
 });
 export type WbGetEntitiesResponse = typeof WbGetEntitiesResponse.Type;
@@ -689,36 +968,72 @@ export const getEntities = Effect.fn("Wikidata.getEntities")(function* (
 export const MAX_SEARCH_RESULTS = 50;
 
 const RawSearchHit = Schema.Struct({
+  /** The matched entity's id (`"Q42"`); a hit without a valid one is dropped. */
   id: Schema.optional(Schema.Unknown),
+  /** The entity's label in the display language. */
   label: Schema.optional(Schema.Unknown),
+  /** The entity's description in the display language. */
   description: Schema.optional(Schema.Unknown),
+  /** Which term the query matched. */
   match: Schema.optional(
     Schema.Struct({
+      /** The kind of term matched (`"label"`, `"alias"`, …). */
       type: Schema.optional(Schema.Unknown),
+      /** The matched term's language code. */
       language: Schema.optional(Schema.Unknown),
+      /** The matched term's text. */
       text: Schema.optional(Schema.Unknown),
     }),
   ),
 });
 
-/** Lenient schema for the `wbsearchentities` response envelope. */
+/**
+ * Lenient schema for the `wbsearchentities` response envelope: the decode
+ * step {@link searchEntities} runs before {@link normaliseSearch}. Every
+ * field is optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (a
+ * `search` that is not an array, a `null` hit) fails the decode, which
+ * {@link searchEntities} reports as a `RequestFailed`. Read the typed
+ * {@link SearchHit}s that {@link normaliseSearch} builds from it, not these
+ * fields.
+ */
 export const WbSearchResponse = Schema.Struct({
+  /** The hits, in Wikibase's relevance order. */
   search: Schema.optional(Schema.Array(RawSearchHit)),
 });
 export type WbSearchResponse = typeof WbSearchResponse.Type;
 
 /** One `wbsearchentities` hit — the matched entity id plus its display label / description. */
 export interface SearchHit {
+  /** The matched entity's id, validated and upper-cased. */
   readonly id: EntityId;
+  /**
+   * The entity's label in the search language, trimmed and cut at 4,000
+   * UTF-16 code units; `null` when the entity has none to show.
+   */
   readonly label: string | null;
+  /**
+   * The entity's short description in the search language, trimmed and cut
+   * at 4,000 UTF-16 code units; `null` when it has none.
+   */
   readonly description: string | null;
-  /** How the search matched — `"label"`, `"alias"`, `"description"`, … */
+  /**
+   * How the search matched, as Wikibase reports it (such as `"label"` or
+   * `"alias"`); `null` when Wikibase did not say.
+   */
   readonly matchType: string | null;
-  /** The matched text (a label or alias). */
+  /**
+   * The matched text (a label or alias), which may differ from
+   * {@link SearchHit.label} when an alias or another language matched;
+   * `null` when Wikibase did not say.
+   */
   readonly matchText: string | null;
 }
 
-/** Normalises a `wbsearchentities` response, dropping hits whose id isn't a valid entity id. */
+/**
+ * Normalises a `wbsearchentities` response, dropping hits whose id isn't a
+ * valid entity id and keeping at most {@link MAX_SEARCH_RESULTS}.
+ */
 export function normaliseSearch(response: WbSearchResponse): readonly SearchHit[] {
   const out: SearchHit[] = [];
   for (const hit of response.search ?? []) {
