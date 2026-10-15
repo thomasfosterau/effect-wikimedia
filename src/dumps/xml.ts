@@ -63,10 +63,11 @@ export interface PageRef {
    */
   readonly title: string | null;
   /**
-   * Namespace number (`0` = main, `14` = category, …), from `<ns>`. `null`
-   * when absent, above `Number.MAX_SAFE_INTEGER`, or not a non-negative
-   * decimal integer: surrounding whitespace and leading zeros are accepted,
-   * but a sign, a fraction or an exponent gives `null`, not a rounded value.
+   * Namespace number (`0` = main, `14` = category, …), from `<ns>`. `null` when
+   * absent, above `Number.MAX_SAFE_INTEGER`, or not a non-negative decimal
+   * integer: surrounding whitespace and leading zeros are accepted (up to 18
+   * digits in all), but a sign, a fraction or an exponent gives `null`, not a
+   * rounded value.
    */
   readonly ns: number | null;
   /** The page id, from the page's own `<id>`; `null` under the same rules as {@link PageRef.ns}. */
@@ -89,8 +90,9 @@ export interface Contributor {
   readonly id: number | null;
   /**
    * Set instead of `username` for an anonymous (IP) edit: the `<ip>`, which
-   * MediaWiki writes in place of `<username>` and `<id>`. Trimmed and cut
-   * like `username`, and not validated as an address; `null` when absent.
+   * MediaWiki writes in place of `<username>` and `<id>`. Entity-decoded,
+   * trimmed and cut like `username`, and not validated as an address; `null`
+   * when absent.
    */
   readonly ip: string | null;
 }
@@ -110,9 +112,9 @@ export interface Revision {
    */
   readonly parentId: number | null;
   /**
-   * The `<timestamp>`, trimmed and cut to 4,096 UTF-16 code units but not
-   * parsed or validated; `null` when absent or blank. MediaWiki writes ISO
-   * 8601 UTC, such as `2001-01-21T02:12:21Z`.
+   * The `<timestamp>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
+   * units but not parsed or validated; `null` when absent or blank. MediaWiki
+   * writes ISO 8601 UTC, such as `2001-01-21T02:12:21Z`.
    */
   readonly timestamp: string | null;
   /**
@@ -129,15 +131,15 @@ export interface Revision {
   readonly comment: string | null;
   /**
    * The content model id, from `<model>` (`wikitext`, `css`, `json`, …),
-   * trimmed and cut to 4,096 UTF-16 code units; `null` when absent or blank.
-   * It should be the main slot's, but a revision with extra slots reports
-   * its last slot's instead (#154; see {@link Revision.text}).
+   * entity-decoded, trimmed and cut to 4,096 UTF-16 code units; `null` when
+   * absent or blank. It should be the main slot's, but a revision with extra
+   * slots reports its last slot's instead (#154; see {@link Revision.text}).
    */
   readonly model: string | null;
   /**
-   * The serialization format, from `<format>` (`text/x-wiki`, …), trimmed and
-   * cut like `model`; `null` when absent or blank. Taken from the last slot
-   * of a multi-slot revision, as `model` is (#154).
+   * The serialization format, from `<format>` (`text/x-wiki`, …),
+   * entity-decoded, trimmed and cut like `model`; `null` when absent or blank.
+   * Taken from the last slot of a multi-slot revision, as `model` is (#154).
    */
   readonly format: string | null;
   /**
@@ -145,7 +147,7 @@ export interface Revision {
    * trimmed nor cut. It is wikitext when `model` is `wikitext`, and then
    * composes with the `Wikitext` parser downstream. `null` when `<text>` is
    * absent or empty, as in a stub dump or for suppressed text
-   * (`<text deleted="deleted" />`).
+   * (`<text bytes="…" sha1="…" deleted="deleted" />`).
    *
    * A revision whose `<text>` (or any other captured field) runs past
    * 16,777,216 UTF-16 code units, counted before entity decoding, becomes a
@@ -156,10 +158,10 @@ export interface Revision {
    */
   readonly text: string | null;
   /**
-   * The `<sha1>`, trimmed and cut to 4,096 UTF-16 code units, not validated;
-   * `null` when absent or empty, as MediaWiki writes it for a revision whose
-   * text is suppressed. Export schema 0.11 defines it as one hash over the
-   * content of all the revision's slots.
+   * The `<sha1>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code units,
+   * not validated; `null` when absent or empty, as MediaWiki writes it for a
+   * revision whose text is suppressed. Export schema 0.11 defines it as one
+   * hash over the content of all the revision's slots.
    */
   readonly sha1: string | null;
   /** `true` when the revision has a `<minor>` element (MediaWiki writes `<minor/>`), else `false`. */
@@ -183,8 +185,10 @@ export interface PageRevisionHit {
 
 /**
  * A revision that could not be decoded — the lenient degrade, emitted as an
- * element: a missing or invalid `<id>`, a revision left unclosed, a captured
- * field over the length cap, or a truncated final page. `detail` says which.
+ * element: a missing or invalid `<id>` (also reported for a `</revision>`
+ * with no revision open), a revision left unclosed before the next
+ * `<revision>`, `<page>` or `</page>`, a captured field over the length cap,
+ * or a stream that ends inside a revision. `detail` says which.
  */
 export interface PageRevisionError {
   /** Always `"error"`; tells a per-record error from a {@link PageRevisionHit} (`"revision"`). */
@@ -203,7 +207,9 @@ export interface PageRevisionError {
    * `"revision not closed before end of page"`,
    * `"truncated revision at end of stream"` and
    * `"revision field exceeds the 16777216-byte cap"`; that cap counts UTF-16
-   * code units, not bytes (#155).
+   * code units of the still-escaped text, not bytes (#155).
+   * `"revision missing id"` also covers a `</revision>` with no revision
+   * open.
    */
   readonly detail: string;
 }

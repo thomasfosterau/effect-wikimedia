@@ -18,8 +18,11 @@
  * records: decode bytes → text → lines, strip the array framing per line,
  * `JSON.parse` and decode each entity through `Wikidata`'s model. **Lenient
  * by construction** — a line that fails to parse or is not a valid entity
- * becomes a typed {@link DumpLineError} *element*, never a stream failure, so
- * one corrupt line in a 100M-line dump does not tear the pipeline down.
+ * becomes a typed {@link DumpLineError} *element* rather than a stream
+ * failure, so one corrupt line in a 100M-line dump does not tear the pipeline
+ * down. One case escapes this today: a line whose nested containers are the
+ * wrong kind can make the entity decoder throw, which ends the stream as a
+ * defect (#147).
  *
  * Runtime-agnostic: this module imports only `effect` and the pure `Wikidata`
  * model (never its HTTP client). The byte source and decompression stages
@@ -49,10 +52,12 @@ export interface EntityHit {
    */
   readonly line: number;
   /**
-   * The entity on this line, as {@link Wikidata.decodeEntity} decodes it,
-   * whatever its kind (`"item"`, `"property"`, `"lexeme"`, …; filter with
-   * {@link byType}). Its `id` has passed the decoder's id check; a field the
-   * line lacks comes back empty (`{}`) or, for `type`, `null`.
+   * The entity on this line, as {@link Wikidata.decodeEntity} decodes it: an
+   * item, property or lexeme (filter with {@link byType}). Only `Q`, `P` and
+   * `L` ids pass the decoder, so a MediaInfo (`M…`) or EntitySchema (`E…`) line
+   * becomes a `"dumps/not-an-entity"` {@link DumpLineError}. Its `id` has
+   * passed the decoder's id check; a field the line lacks comes back empty
+   * (`{}`) or, for `type`, `null`.
    */
   readonly item: WikidataItem;
 }
@@ -76,8 +81,9 @@ export interface DumpLineError {
   /**
    * Why the line yielded no entity: `"dumps/invalid-json"` when `JSON.parse`
    * rejects it, and `"dumps/not-an-entity"` when it parses but
-   * {@link Wikidata.decodeEntity} returns `null` (no valid entity id, flagged
-   * `missing`, or not an object at all).
+   * {@link Wikidata.decodeEntity} returns `null` (no valid entity id, where
+   * only `Q`, `P` and `L` ids count; flagged `missing`; or not an object at
+   * all).
    */
   readonly reason: DumpLineErrorReason;
   /**
