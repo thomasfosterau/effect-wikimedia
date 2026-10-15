@@ -18,8 +18,8 @@
  * So for each class on one of the `EFFECT_BASES`, this keeps the members
  * that base lists, re-homed onto the class (no "Inherited from" line, not
  * flagged external or inherited, defined where the class is), and removes the
- * rest of the inherited external members and the inherited constructor.
- * Effect's own reference documents the removed ones. Our own reflections are
+ * rest of the inherited external members, the inherited constructor included
+ * unless the base lists it. Effect's own reference documents the removed ones. Our own reflections are
  * untouched, so `typedoc.json`'s validation still covers every export and
  * every `{@link}` in their doc comments. Docgen fails (TypeDoc's CLI fails on
  * any logged error) if a base matches no class or a kept member is missing,
