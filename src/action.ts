@@ -80,7 +80,7 @@ const Revision = Schema.Struct({
 });
 
 const WikitextPage = Schema.Struct({
-  /** The page ID; absent for a missing or invalid title. */
+  /** The page ID; absent for a missing, invalid or special title. */
   pageid: Schema.optional(Schema.Unknown),
   /** The page title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
@@ -104,7 +104,7 @@ export const WikitextResponse = Schema.Struct({
   /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
-      /** The requested pages, keyed by page ID (a negative number for a missing or invalid title). */
+      /** The requested pages, keyed by page ID (a negative number for a missing, invalid or special title). */
       pages: Schema.optional(Schema.Record(Schema.String, WikitextPage)),
     }),
   ),
@@ -348,7 +348,9 @@ export function normalisePageMetadata(
  * `prop=info`. Returns `null` when the title names no stored page upstream:
  * the page does not exist, MediaWiki rejects the title as invalid (for
  * example one containing `<` or `[`, which {@link Core.requireTitle} lets
- * through), or it is a `Special:` or `Media:` title, existing or not.
+ * through), it is a `Special:` or `Media:` title, existing or not, or it is
+ * an interwiki title (`fr:Foo` on an English wiki), which the API reports
+ * under `query.interwiki` with no page entry.
  * Fails with {@link InvalidRequest}, before any request is sent, for an
  * invalid host or a title {@link Core.requireTitle} rejects;
  * {@link Core.RateLimited} for a `429` / `503` or a `maxlag` error once

@@ -216,7 +216,8 @@ describe("Action.getPageMetadata", () => {
 
   // MediaWiki's `ApiQuery` writes an invalid title as `{ title, invalidreason,
   // invalid }` and an existing special page as `{ ns, title, special }`, with
-  // no `missing` flag on either (`format=json` sends each flag as `""`).
+  // no `missing` flag on either (`formatversion=1`, the default this client
+  // requests, sends each flag as `""`).
   it("returns null for a title the API reports as invalid", async () => {
     const { urls, layer } = stubRouter({
       "prop=info": {
