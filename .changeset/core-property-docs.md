@@ -1,0 +1,5 @@
+---
+"@thomasfosterau/effect-wikimedia": patch
+---
+
+Document every `Core` property. The error fields now have doc comments: `InvalidRequest.kind` lists the kinds this package uses (`"host"`, `"title"`, `"filename"`, `"revisionId"`, `"entityId"`, `"query"`, `"language"`, `"type"`, `"queryLength"`, `"missingLimit"`), and `InvalidRequest.value` is the input as passed (or, for `"queryLength"` and `"missingLimit"`, the query's length or its first 120 code units). `RequestFailed.description` is a log message whose three forms are listed. `RateLimited.retryAfterSeconds` is in seconds, from `Retry-After` or `DEFAULT_MAXLAG_SECONDS`, and uncapped. `RetryOptions` now gives its units and defaults. Two class summaries were corrected: `InvalidRequest` also covers bad ids, queries and options, and `RateLimited` covers a `429` or `503` with or without `Retry-After`. No type is hidden from the docs, since `Core` exposes no raw response schema.
