@@ -425,9 +425,12 @@ export function normaliseTimeValue(raw: unknown): string | null {
  * {@link ImageFact} `filename`) and `iri` is its `Special:FilePath` URL;
  * both are trusted.
  */
-export function normaliseCommonsImage(
-  raw: unknown,
-): { readonly filename: string; readonly iri: string } | null {
+export function normaliseCommonsImage(raw: unknown): {
+  /** The trimmed claim value as spelled: no `File:` prefix stripped, spaces not turned into underscores. */
+  readonly filename: string;
+  /** `https://commons.wikimedia.org/wiki/Special:FilePath/` plus `filename` percent-encoded as one path segment (a space becomes `%20`). */
+  readonly iri: string;
+} | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0 || trimmed.length > 256) return null;

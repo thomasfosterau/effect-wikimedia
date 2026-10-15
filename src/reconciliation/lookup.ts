@@ -60,12 +60,30 @@ const ENTITY_PROPS = ["labels", "descriptions", "claims"] as const;
 
 /** A bad input the caller supplied — fix the input, don't retry. */
 export class InvalidQuery extends Schema.TaggedError<InvalidQuery>()("InvalidQuery", {
+  /**
+   * Which input was rejected. `"label"`: a `searchByLabel` label that is
+   * empty or whitespace-only. `"property"`: a `searchByIdentifier` property
+   * that isn't a Wikidata property id (`P<digits>`; case and surrounding
+   * whitespace are ignored). `"identifier"`: a `searchByIdentifier` value
+   * that, once trimmed, is empty, longer than 256 UTF-16 code units, or has a
+   * character other than ASCII letters, digits, space and `.` `_` `:` `/`
+   * `-`; also an `enrich` argument that isn't an item id (`Q<digits>`).
+   */
   kind: Schema.Literals(["label", "property", "identifier"]),
+  /** The rejected input exactly as the caller passed it, before any trimming or case folding. */
   value: Schema.String,
 }) {}
 
 /** An upstream transport / decode failure (network, 5xx, malformed body). */
 export class LookupFailed extends Schema.TaggedError<LookupFailed>()("LookupFailed", {
+  /**
+   * A human-readable account of the failure, for logs rather than parsing.
+   * It is the `description` of the underlying `Core.RequestFailed`, or a
+   * sentence naming a `Core.RateLimited` that outlasted the client's
+   * retries (with the seconds the server asked to wait) or an unexpected
+   * `Core.InvalidRequest` (with its `kind` and `value`). The underlying
+   * error's tag and fields are not kept separately.
+   */
   description: Schema.String,
 }) {}
 
