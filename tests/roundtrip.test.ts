@@ -137,3 +137,60 @@ describe("fuzz: never throws, always round-trips", () => {
     expect(out).toBe(input);
   });
 });
+
+// Table-heavy fuzz (#132): the table scans step over nested constructs, so
+// mix table markers with their openers and closers, balanced or not.
+// A caption only ever opens the table: one after a row doesn't round-trip yet (#131).
+const TABLE_ATOMS = [
+  "|}",
+  "\n|",
+  "\n!",
+  "\n|-",
+  "||",
+  "!!",
+  "|",
+  "!",
+  "{|",
+  "{{",
+  "}}",
+  "{{{",
+  "}}}",
+  "[[",
+  "]]",
+  "<!--",
+  "-->",
+  "<ref>",
+  "</ref>",
+  "<nowiki>",
+  "</nowiki>",
+  "<ref name=a/>",
+  "\n",
+  "a",
+  " ",
+  "=",
+  "{",
+  "}",
+  "[",
+  "]",
+  "<",
+  ">",
+];
+
+function randomTable(rand: () => number): string {
+  let out = rand() < 0.3 ? "{|\n|+" : "{|\n";
+  const len = Math.floor(rand() * 60);
+  for (let i = 0; i < len; i++) out += TABLE_ATOMS[Math.floor(rand() * TABLE_ATOMS.length)];
+  return rand() < 0.8 ? `${out}\n|}` : out;
+}
+
+describe("fuzz: tables with nested constructs (#132)", () => {
+  it("round-trips 3000 random tables with every span its own source slice", () => {
+    const rand = prng(0x13213213);
+    for (let i = 0; i < 3000; i++) {
+      const input = randomTable(rand);
+      const doc = parse(input);
+      expect(serialize(doc), `round-trip #${i}: ${JSON.stringify(input)}`).toBe(input);
+      assertSpanFidelity(input, doc);
+    }
+  });
+});

@@ -57,6 +57,7 @@ import {
   type Text,
   type Wikilink,
 } from "./ast.ts";
+import { matchBrackets } from "./brackets.ts";
 import { resolveQuotes } from "./quotes.ts";
 
 /** Recursion ceiling; deeper nesting degrades to text (fail-soft, no throw). */
@@ -174,6 +175,11 @@ class Parser {
    * under a narrowed heading-title limit.
    */
   private readonly failed = new Set<number>();
+  /**
+   * Where each bracketed construct in the source ends (`matchBrackets`),
+   * built on the first table scan that needs it.
+   */
+  private nestedEnds: ReadonlyMap<number, number> | undefined;
 
   constructor(src: string) {
     this.src = src;
@@ -368,13 +374,18 @@ class Parser {
   // *content* is ordinary wikitext and is parsed by recursing into
   // `parseFragment` over a narrowed `limit` (the same technique `tryHeading`
   // uses for a title), so nested constructs — including a nested table —
-  // parse normally. The line-boundary scan that finds where a cell's content
-  // *ends* is purely textual, though: it does not parse the content it's
-  // walking over, only tracks `{|`/`|}` nesting depth so a nested table's own
-  // row/cell lines aren't mistaken for this table's structure (see
-  // `scanTableFiller`). A `<nowiki>`/extension-tag body or other raw region
-  // containing a line that happens to start with a table marker is *not*
-  // shielded from this — a narrow, documented scope cut.
+  // parse normally.
+  //
+  // The scans that find a table's structure (where a line ends, the `||`/`!!`
+  // cell separators, a cell's attribute `|`) step over every nested construct
+  // whose `|`, `!` or line break belongs to it rather than to the table: a
+  // template, argument, wikilink, closed comment or extension tag (#132; see
+  // `findTopLevel`). MediaWiki gets the same effect, wikilinks aside, by
+  // building tables only after its preprocessor has expanded templates and
+  // hidden comments and extension tags. Line-start markers are therefore read
+  // per *logical* line, one whose breaks inside such constructs don't count;
+  // the scan also tracks `{|`/`|}` nesting so a nested table's own row/cell
+  // lines aren't mistaken for this table's structure (see `scanTableFiller`).
 
   private tryTable(depth: number): Table | null {
     const start = this.pos;
@@ -383,7 +394,7 @@ class Parser {
     this.pos += 2; // {|
 
     const openStart = this.pos;
-    this.consumeRestOfLine();
+    this.consumeLogicalLine();
     this.scanTableFiller();
     const open = this.src.slice(openStart, this.pos);
 
@@ -413,7 +424,7 @@ class Parser {
         rowStart = this.pos;
         this.pos += 2;
         const rowOpenStart = this.pos;
-        this.consumeRestOfLine();
+        this.consumeLogicalLine();
         this.scanTableFiller();
         rowOpen = this.src.slice(rowOpenStart, this.pos);
         rowStarted = true;
@@ -446,15 +457,18 @@ class Parser {
     return { _tag: "Table", span: this.span(start), open, captions, rows };
   }
 
-  /** Advances the cursor to just past the next `\n` (or to `this.limit` if there is none). */
-  private consumeRestOfLine(): void {
-    const nl = this.src.indexOf("\n", this.pos);
-    this.pos = nl === -1 || nl >= this.limit ? this.limit : nl + 1;
+  /**
+   * Advances the cursor to just past the newline that ends its logical line
+   * (see `tableLineEnd`), or to `this.limit` if there is none.
+   */
+  private consumeLogicalLine(): void {
+    const end = this.tableLineEnd(this.pos);
+    this.pos = end < this.limit ? end + 1 : end;
   }
 
   /**
-   * From a line-start position, advances through whole lines that are not
-   * one of this table's own marker lines (`|}`, `|-`, `|+`, `!`, `|`),
+   * From a line-start position, advances through whole logical lines that are
+   * not one of this table's own marker lines (`|}`, `|-`, `|+`, `!`, `|`),
    * tracking `{|`/`|}` nesting so a nested table's interior is skipped
    * rather than mistaken for this table's structure. Stops exactly at the
    * next marker line, or `this.limit`.
@@ -465,7 +479,7 @@ class Parser {
       if (nestDepth === 0 && this.isTableMarkerLine(this.pos)) return;
       if (this.src.startsWith("{|", this.pos)) nestDepth++;
       else if (nestDepth > 0 && this.src.startsWith("|}", this.pos)) nestDepth--;
-      this.consumeRestOfLine();
+      this.consumeLogicalLine();
     }
   }
 
@@ -479,19 +493,23 @@ class Parser {
 
   /**
    * MediaWiki's single-pipe cell/caption attribute rule (`Parser::doTableStuff`):
-   * the first bare `|` found in `[from, to)` splits attributes from content,
-   * *unless* the text before it contains `[[` (a wikilink's own pipe would
-   * otherwise be misread as the separator).
+   * the first `|` in `[from, to)` outside a nested construct (see
+   * `findTopLevel`) splits attributes from content, *unless* a `[[`
+   * comes before it (MediaWiki's guard against reading a wikilink's
+   * surroundings as attributes).
    */
   private splitCellAttrs(
     from: number,
     to: number,
   ): { attrs: string | undefined; contentStart: number } {
-    const pipeIdx = this.src.indexOf("|", from);
-    if (pipeIdx === -1 || pipeIdx >= to) return { attrs: undefined, contentStart: from };
-    const before = this.src.slice(from, pipeIdx);
-    if (before.includes("[[")) return { attrs: undefined, contentStart: from };
-    return { attrs: before, contentStart: pipeIdx + 1 };
+    const at = this.findTopLevel(from, to, (i) => {
+      const c = this.src.charCodeAt(i);
+      return c === 0x7c || (c === 0x5b && this.src.charCodeAt(i + 1) === 0x5b); // | or [[
+    });
+    if (at >= to || this.src.charCodeAt(at) !== 0x7c) {
+      return { attrs: undefined, contentStart: from };
+    }
+    return { attrs: this.src.slice(from, at), contentStart: at + 1 };
   }
 
   /** Parses `[start, end)` as a bounded wikitext fragment (block-level, so a nested table can open). */
@@ -519,28 +537,29 @@ class Parser {
 
   /**
    * Parses every cell opened on the current marker line (`!`/`|`, further
-   * split by `!!`/`||`), extending the last one across any following
-   * non-marker lines, and appends them to `into`. Leaves the cursor at the
-   * next table marker line (or `this.limit`).
+   * split by `!!`/`||` outside nested constructs), extending the last one
+   * across any following non-marker lines, and appends them to `into`.
+   * Leaves the cursor at the next table marker line (or `this.limit`).
    */
   private parseTableLineCells(header: boolean, depth: number, into: TableCell[]): void {
-    const sep = header ? "!!" : "||";
+    const sep = header ? 0x21 : 0x7c; // !! or ||
+    const isSep = (i: number): boolean =>
+      this.src.charCodeAt(i) === sep && this.src.charCodeAt(i + 1) === sep;
     const lineEnd = this.tableLineEnd(this.pos);
     let openStart = this.pos;
     let segStart = this.pos + 1; // past the single marker char
     let inline = false;
 
     for (;;) {
-      const sepIdx = this.src.indexOf(sep, segStart);
-      const hasMore = sepIdx !== -1 && sepIdx < lineEnd;
-      const segEnd = hasMore ? sepIdx : lineEnd;
-      const { attrs, contentStart } = this.splitCellAttrs(segStart, segEnd);
+      const sepIdx = this.findTopLevel(segStart, lineEnd, isSep);
+      const hasMore = sepIdx < lineEnd;
+      const { attrs, contentStart } = this.splitCellAttrs(segStart, sepIdx);
 
       let contentEnd: number;
       if (hasMore) {
-        contentEnd = segEnd;
+        contentEnd = sepIdx;
       } else {
-        this.pos = segEnd;
+        this.pos = lineEnd;
         this.consumeTrailingNewline();
         this.scanTableFiller();
         contentEnd = this.pos;
@@ -550,19 +569,76 @@ class Parser {
 
       if (!hasMore) return;
       openStart = sepIdx;
-      segStart = sepIdx + sep.length;
+      segStart = sepIdx + 2;
       inline = true;
     }
   }
 
-  /** End of the physical line containing `pos` (exclusive of the newline), bounded by `this.limit`. */
+  /**
+   * End of the logical line containing `pos`: the first `\n` outside a nested
+   * construct (see `findTopLevel`), exclusive, or `this.limit`. A
+   * multi-line template in a cell is therefore part of the line that opens it.
+   */
   private tableLineEnd(pos: number): number {
-    const nl = this.src.indexOf("\n", pos);
-    return nl === -1 || nl >= this.limit ? this.limit : nl;
+    return this.findTopLevel(pos, this.limit, (i) => this.src.charCodeAt(i) === 0x0a);
   }
 
   private consumeTrailingNewline(): void {
     if (this.pos < this.limit && this.src.charCodeAt(this.pos) === 0x0a) this.pos++;
+  }
+
+  /**
+   * The first index in `[from, to)` at which `test` holds, stepping over each
+   * nested construct (see `skipNested`); `to` when there is none.
+   */
+  private findTopLevel(from: number, to: number, test: (i: number) => boolean): number {
+    let i = from;
+    while (i < to) {
+      if (test(i)) return i;
+      i = this.skipNested(i);
+    }
+    return to;
+  }
+
+  /**
+   * The index just past the nested construct opening at `at` whose `|`, `!`
+   * and line breaks belong to it rather than to a table: a template or
+   * argument, a wikilink, a closed comment, or an extension tag (body
+   * included), as `matchBrackets` matched them. Otherwise `at + 1`, so an
+   * opener that never closes is literal text, as MediaWiki's preprocessor
+   * reads it. One that closes past `this.limit` is literal too, so a nested
+   * table's scan stays inside its cell even where the matcher and the
+   * recursive parser disagree about a construct.
+   */
+  private skipNested(at: number): number {
+    const c = this.src.charCodeAt(at);
+    if (c !== 0x7b && c !== 0x5b && c !== 0x3c) return at + 1; // only `{`, `[` and `<` open one
+    this.nestedEnds ??= this.matchNested();
+    const end = this.nestedEnds.get(at);
+    return end !== undefined && end <= this.limit ? end : at + 1;
+  }
+
+  /** Runs `matchBrackets` over the whole source, whatever `this.limit` is now. */
+  private matchNested(): ReadonlyMap<number, number> {
+    const savedLimit = this.limit;
+    this.limit = this.src.length;
+    const ends = matchBrackets(this.src, (at) => this.extensionTagEnd(at));
+    this.limit = savedLimit;
+    return ends;
+  }
+
+  /**
+   * End of the extension tag opening at `at`, its body and close tag included
+   * when it has them (see `tryTag`), or `-1` when no extension tag opens there.
+   * A closing tag never counts: `tagNameAt` finds no name after its `</`.
+   */
+  private extensionTagEnd(at: number): number {
+    if (!EXTENSION_TAGS.has(tagNameAt(this.src, at + 1))) return -1;
+    const saved = this.pos;
+    this.pos = at;
+    const end = this.tryTag(0) === null ? -1 : this.pos;
+    this.pos = saved;
+    return end;
   }
 
   // ── brackets: wikilinks and external links ──────────────────────────
@@ -890,6 +966,13 @@ function isAlnum(c: number): boolean {
  */
 function isEntityNameChar(c: number): boolean {
   return isAlnum(c) || c >= 0x80;
+}
+
+/** The lower-cased tag name (see `isNameChar`) starting at `i`; `""` when there is none. */
+function tagNameAt(src: string, i: number): string {
+  let j = i;
+  while (j < src.length && isNameChar(src.charCodeAt(j))) j++;
+  return src.slice(i, j).toLowerCase();
 }
 
 /** Tag-name characters: a letter, then letters/digits. */

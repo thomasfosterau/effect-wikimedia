@@ -448,6 +448,18 @@ export interface Tag {
  * line is simply absorbed as ordinary content instead of being recognised as
  * a marker (a deliberate, documented simplification, not a defect).
  *
+ * A line break inside a template, argument, wikilink, closed comment or
+ * extension tag doesn't start a new table line, and a `|`, `||` or `!!` inside one
+ * doesn't split a cell, so a multi-line `{{Infobox …}}` or a
+ * `<ref>{{cite web|…}}</ref>` stays whole in its cell. MediaWiki gets this
+ * by building tables after expanding templates and setting comments and
+ * extension tags aside; it does not protect wikilinks, which this parser
+ * does. A bracket that never closes is ordinary text, as in MediaWiki, so a
+ * stray `{{` hides nothing; so is an unclosed `<!--` (MediaWiki would hide
+ * the rest of the page). A construct that spans a `|}` line carries the table
+ * past it, and when no later `|}` follows there is no table: MediaWiki does
+ * the same for a template or an extension tag, but not for a wikilink.
+ *
  * `open` is the verbatim text from `{|` up to the first real row/cell/caption
  * marker: normally just the attribute text plus its line terminator, but it
  * also absorbs any blank or stray filler lines before real content begins
@@ -489,9 +501,9 @@ export interface Table {
  * depends on picking "the real one"; see {@link Table.captions}).
  *
  * `attrs` / `content` follow the single-pipe rule shared with
- * {@link TableCell}: the first bare `|` on the caption's opening line splits
- * attributes from content, *unless* the text before it contains `[[` (a
- * wikilink's own pipe would otherwise be misread as the separator) — see
+ * {@link TableCell}: the first `|` on the caption's opening line, outside any
+ * template, argument, wikilink, comment or extension tag, splits attributes
+ * from content, *unless* a `[[` outside those comes before it — see
  * {@link TableCell.attrs}. `content` extends across any following lines that
  * aren't themselves a table marker, so a caption's text can span paragraphs.
  */
@@ -502,9 +514,11 @@ export interface TableCaption {
    */
   readonly span: Span;
   /**
-   * The text between `|+` and the first `|` on its line, verbatim and
-   * untrimmed; `undefined` when there is no such `|` or a `[[` comes before
-   * it. The split is textual, so a template's own `|` also counts.
+   * The text between `|+` and the first `|` on its line outside a template,
+   * argument, wikilink, comment or extension tag, verbatim and untrimmed;
+   * `undefined` when there is no such `|` or a `[[` outside those comes
+   * before it. In `|+ {{flag|France}} results` there is none, so the
+   * template is content.
    */
   readonly attrs: string | undefined;
   /**
@@ -556,13 +570,16 @@ export interface TableRow {
  * `||` in a `!`-opened line is just literal text within that cell's content,
  * not a type change.
  *
- * `attrs` / `content`: MediaWiki's single-pipe rule (`Parser::doTableStuff`)
- * splits the cell's opening-line text at the first bare `|` into attributes
- * and content — *unless* the text before that `|` contains `[[`, in which
- * case the whole thing is content and `attrs` is `undefined`. This is the
- * documented guard against a wikilink's own pipe (`[[Foo|Bar]]`) being
- * misread as the attribute separator. `content` extends across any following
- * lines that aren't themselves a table marker (multi-line cell content).
+ * `attrs` / `content`: MediaWiki's single-pipe rule (`Parser::handleTables`)
+ * splits the cell's opening-line text at the first `|` into attributes and
+ * content. A `|` inside a template, argument, wikilink, comment or extension
+ * tag doesn't count (see {@link Table}), so `| {{flag|France}}` is all
+ * content. Nor is there a split when a `[[` outside those comes before the
+ * `|`: the whole thing is content and `attrs` is `undefined` (MediaWiki's
+ * guard against reading the text around a wikilink as attributes, which it
+ * also applies to `-{`; this parser does not).
+ * `content` extends across any following lines that aren't themselves a
+ * table marker (multi-line cell content).
  */
 export interface TableCell {
   /**
@@ -579,16 +596,18 @@ export interface TableCell {
   readonly inline: boolean;
   /**
    * The text between the marker and the first `|` in the cell's part of its
-   * opening line, verbatim and untrimmed; `undefined` when there is no such
-   * `|` or a `[[` comes before it. The split is textual, so a `|` inside a
-   * template or an extension tag's body also counts (#132).
+   * opening line outside a template, argument, wikilink, comment or
+   * extension tag, verbatim and untrimmed; `undefined` when there is no such
+   * `|` or a `[[` outside those comes before it. For
+   * `| style="x" | {{flag|France}}` it is `' style="x" '`; for
+   * `| {{flag|France}}` it is `undefined`.
    */
   readonly attrs: string | undefined;
   /**
    * The cell as wikitext, after the marker or the attribute `|`. It ends at
-   * the next `!!`/`||` on the line (found textually, so one inside a template
-   * also counts, #132); the line's last cell runs on through any following
-   * non-marker lines, line breaks included.
+   * the next `!!`/`||` on the line outside a template, argument, wikilink,
+   * comment or extension tag; the line's last cell runs on through any
+   * following non-marker lines, line breaks included.
    */
   readonly content: readonly Node[];
 }
