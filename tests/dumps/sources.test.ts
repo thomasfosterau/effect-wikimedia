@@ -192,24 +192,61 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
     expect(decodeUtf8(bytes)).toBe(SLICE);
   });
 
-  it("decodes a multi-stream input under backpressure", async () => {
+  it("decodes a multi-stream input without a hang", async () => {
     // Concatenated bzip2 streams (what parallel compressors such as `pbzip2`
     // write), in one 212 kB chunk: past 125 kB of input the decoder decodes
     // inside `write()`, and that one write's output outruns the adapter's
-    // buffer, so the adapter pauses the decoder, whose `write()` then returns
-    // `false`, and waits for its `drain`.
+    // buffer, so a write left waiting on a `drain` that never comes would
+    // hang here.
     const copies = 400;
     const compressed = readFileSync(SLICE_BZ2);
     const source = Stream.make(
       new Uint8Array(Buffer.concat(Array.from({ length: copies }, () => compressed))),
     );
-    // A write left waiting on a `drain` that never comes would hang.
     const bytes = await orHung(
       runTest(Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2())))),
     );
     expect(bytes).not.toBe("hung");
     if (bytes === "hung") return;
     expect(decodeUtf8(bytes)).toBe(SLICE.repeat(copies));
+  });
+
+  it("stops writing to a classic stage while its output is unread", async () => {
+    // Small chunks and a slow consumer: the adapter must pause the decoder
+    // when its own buffer fills (so its `write()` returns `false`) and must
+    // not write again until the decoder drains. Skipping either step leaves
+    // memory unbounded for a slow consumer of a large dump.
+    const copies = 400;
+    const compressed = Buffer.concat(Array.from({ length: copies }, () => readFileSync(SLICE_BZ2)));
+    const chunks = Array.from(
+      { length: Math.ceil(compressed.length / 4096) },
+      (_, i) => new Uint8Array(compressed.subarray(i * 4096, (i + 1) * 4096)),
+    );
+    const stage = unbzip2() as ReturnType<typeof unbzip2> & { paused: boolean };
+    const write = stage.write.bind(stage);
+    let refused = 0;
+    let writesWhilePaused = 0;
+    stage.write = ((chunk: Uint8Array) => {
+      if (stage.paused) writesWhilePaused++;
+      const accepted = write(chunk);
+      if (accepted === false) refused++;
+      return accepted;
+    }) as typeof stage.write;
+    const bytes = await orHung(
+      runTest(
+        Stream.runCollect(
+          Stream.fromIterable(chunks).pipe(
+            Dumps.decompressWith(() => stage),
+            Stream.tap(() => Effect.promise(() => wait(0))),
+          ),
+        ),
+      ),
+    );
+    expect(bytes).not.toBe("hung");
+    if (bytes === "hung") return;
+    expect(decodeUtf8(bytes)).toBe(SLICE.repeat(copies));
+    expect(refused).toBeGreaterThan(0);
+    expect(writesWhilePaused).toBe(0);
   });
 
   // The decoder reports truncated input with the `TypeError` its bit reader

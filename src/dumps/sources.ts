@@ -130,7 +130,7 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
   const duplex = stream as unknown as Duplex;
   if (isReadable(duplex) !== true || isWritable(duplex) !== true) {
     throw new TypeError(
-      "the decompressor must return a fresh Node stream Duplex or Transform, not a plain object or a stream already destroyed or ended",
+      "the decompressor must return a fresh Node stream (a Duplex, a Transform or a classic duplex stream), not a plain object or a stream already destroyed or ended",
     );
   }
   return hasStreamState(duplex) ? duplex : adaptClassicDuplex(duplex);
@@ -155,8 +155,8 @@ const hasStreamState = (stream: Duplex): boolean => {
 
 /**
  * Returns what `step` returns, or passes what it throws to `callback` and
- * returns `undefined`: a classic stream's `write()` or `end()` may throw, and
- * a throw from a Duplex's `_write` / `_final` would escape the stream.
+ * returns `undefined`: a classic stream's `write()` may throw, and a throw
+ * from a Duplex's `_write` would escape the stream.
  */
 const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefined => {
   try {
@@ -177,7 +177,8 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefi
  * when it returns `false`, and `end()`. Its `data` is pushed out, pausing it
  * while the adapter's buffer is full and resuming it on the next read, and
  * its `end` ends the output. Its `error` destroys the adapter with that
- * error, as does a throwing `write()` or `end()`, and a `close` before its
+ * error, as does a throwing `write()` or `end()` (Node reports the latter
+ * itself), and a `close` before its
  * `end` fails the adapter rather than leaving it waiting. Destroying the
  * adapter destroys the classic stream. Its own `error` listener means an
  * error the classic stream emits after teardown is dropped, not thrown.
@@ -190,12 +191,11 @@ const adaptClassicDuplex = (classic: Duplex): Duplex => {
       if (written === true) callback();
       else if (written === false) classic.once("drain", () => callback());
     },
+    // Node turns a synchronous throw from `_final` into an `error` event, so
+    // a throwing `end()` needs no guard here.
     final: (callback) => {
-      const closed = attempt(() => {
-        classic.end();
-        return true;
-      }, callback);
-      if (closed === true) callback();
+      classic.end();
+      callback();
     },
     read: () => void classic.resume(),
     destroy: (error, callback) => {
@@ -360,8 +360,8 @@ export const fromNodeReadable = (
 // ── Decompression stages ─────────────────────────────────────────────────
 
 /**
- * A decompression stage: a factory for a fresh Node `Transform` (bytes →
- * bytes), called once per stream. Typed as {@link NodeDuplexLike}, so any
+ * A decompression stage: a factory for a fresh Node stream that turns
+ * compressed bytes into bytes, called once per stream. Typed as {@link NodeDuplexLike}, so any
  * Node `Duplex` or `Transform` fits, and so does a classic (pre-streams2)
  * duplex stream, which is adapted for Node's `stream.compose`. Return a new
  * Node stream on each call: a value that `node:stream` doesn't recognise as a
