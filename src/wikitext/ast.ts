@@ -27,14 +27,28 @@
 
 /** A half-open source range in UTF-16 code-unit offsets: `[start, end)`. */
 export interface Span {
+  /**
+   * Offset of the first code unit, inclusive, counted from the start of
+   * {@link Document.source} (not from the parent node).
+   */
   readonly start: number;
+  /**
+   * Offset just past the last code unit (exclusive), so `end - start` is the
+   * length in UTF-16 code units.
+   */
   readonly end: number;
 }
 
 /** A parsed wikitext document: the source plus its top-level node tiling. */
 export interface Document {
+  /** Tells a document apart from a node array (a {@link Fragment} is either). */
   readonly _tag: "Document";
+  /** The whole source: always `{ start: 0, end: source.length }`. */
   readonly span: Span;
+  /**
+   * The top-level nodes, in source order, tiling the whole source; empty
+   * only for empty input.
+   */
   readonly children: readonly Node[];
   /** The exact source the tree was parsed from (for splice-edit callers). */
   readonly source: string;
@@ -57,21 +71,44 @@ export type Node =
 
 /** A plain text run. Captures its source slice verbatim. */
 export interface Text {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Text";
+  /**
+   * The node's source range; {@link serialize} ignores it, so after an edit
+   * it still points at the original text.
+   */
   readonly span: Span;
+  /** The source slice verbatim; never empty, and it may span lines. */
   readonly text: string;
 }
 
 /**
- * An HTML comment `<!-- … -->`. `closed` is `false` when the input ran out
- * before a `-->`, in which case the comment absorbs the rest of the input
- * (MediaWiki behaviour) and serializes without a closing marker.
+ * An HTML comment `<!-- … -->`. `closed` is `false` when no `-->` followed,
+ * in which case the comment absorbs the rest of the region being parsed (the
+ * input, a heading's title before its closing `=` run, or a table cell or
+ * caption) and serializes without a closing marker. MediaWiki always runs an
+ * unclosed comment to the end of the input.
  */
 export interface Comment {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Comment";
+  /**
+   * The node's source range, `<!--` and any `-->` included; {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
-  /** The text between `<!--` and `-->` (or end of input). */
+  /**
+   * The text between `<!--` and `-->` verbatim; for an unclosed comment,
+   * everything after `<!--` to the end of the region being parsed (the
+   * input, a heading's title, or a table cell or caption).
+   */
   readonly text: string;
+  /**
+   * Whether a `-->` ended the comment. `false` when none followed before the
+   * end of the region being parsed (the input, a heading's title before its
+   * closing `=` run, or a table cell or caption), which the comment then runs
+   * to. MediaWiki always runs it to the end of the input.
+   */
   readonly closed: boolean;
 }
 
@@ -81,9 +118,18 @@ export interface Comment {
  * characters, as MediaWiki reads it, whether or not it names a known entity.
  */
 export interface HtmlEntity {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "HtmlEntity";
+  /**
+   * The node's source range; {@link serialize} ignores it, so after an edit
+   * it still points at the original text.
+   */
   readonly span: Span;
-  /** The verbatim source, including the leading `&` and trailing `;`. */
+  /**
+   * The verbatim source, including the leading `&` and trailing `;`. The
+   * parser never decodes it; {@link stripToText} decodes the references
+   * MediaWiki renders as a character.
+   */
   readonly raw: string;
 }
 
@@ -98,10 +144,31 @@ export interface HtmlEntity {
  * See `./quotes.ts`.
  */
 export interface Formatting {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Formatting";
+  /**
+   * The node's source range; {@link serialize} ignores it, so after an edit
+   * it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The whole apostrophe run verbatim (two or more `'`), literal ones
+   * included; it is all the node serializes to.
+   */
   readonly marks: string;
+  /**
+   * What the run toggles once its literal apostrophes are set aside: `''`
+   * italic, `'''` bold, `'''''` both. Resolved per source line within the
+   * fragment: when a line has an odd number of bold runs, one `'''` is read
+   * as `'` + `''`. MediaWiki does this only when the line's italic count is
+   * odd too.
+   */
   readonly mode: "italic" | "bold" | "bold-italic";
+  /**
+   * How many leading apostrophes of {@link marks} are literal text rather
+   * than markup; `marks.length - leadingLiterals` is 2, 3 or 5, matching
+   * {@link mode}.
+   */
   readonly leadingLiterals: number;
 }
 
@@ -110,15 +177,35 @@ export interface Formatting {
  * `rightEquals` are the raw `=` runs (they may differ in length — MediaWiki
  * takes `level = min(left, right)` and leaves the surplus as literal `=`),
  * `title` is the inline fragment between them, and `trailing` is any
- * whitespace after the closing run up to (but not including) the newline.
+ * spaces or tabs after the closing run up to (but not including) the newline.
  */
 export interface Heading {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Heading";
+  /**
+   * The heading line's source range, newline excluded; {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /** The section level, 1 to 6: the length of the shorter `=` run. */
   readonly level: number;
+  /**
+   * The opening `=` run verbatim, 1 to 6 `=`. Any beyond {@link level} are
+   * title text to MediaWiki but stay here, not in {@link title}.
+   */
   readonly leftEquals: string;
+  /**
+   * The closing `=` run verbatim, 1 to 6 `=`. Any beyond {@link level} are
+   * title text to MediaWiki but stay here, not in {@link title}.
+   */
   readonly rightEquals: string;
+  /**
+   * The inline fragment between the `=` runs, surrounding spaces included;
+   * empty for a line such as `====`. Headings and tables are not recognised
+   * inside it.
+   */
   readonly title: readonly Node[];
+  /** The spaces and tabs after the closing run; `""` when there are none. */
   readonly trailing: string;
 }
 
@@ -129,9 +216,23 @@ export interface Heading {
  * is the inline fragment up to the first top-level `|`; `params` follow.
  */
 export interface Template {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Template";
+  /**
+   * The node's source range, `{{` through `}}`. {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The fragment between `{{` and the first top-level `|` or `}}`, verbatim:
+   * whitespace and comments included, and for a parser function the text
+   * after its colon too (`#if:x`). {@link templateName} reads it as text.
+   */
   readonly name: readonly Node[];
+  /**
+   * The parameters, one per top-level `|`, in source order; empty when
+   * there is no `|`.
+   */
   readonly params: readonly Param[];
 }
 
@@ -140,9 +241,20 @@ export interface Template {
  * fragment after the first top-level `|`, absent when there is none.
  */
 export interface Argument {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Argument";
+  /**
+   * The node's source range, `{{{` through `}}}`. {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /** The fragment between `{{{` and the first top-level `|` or `}}}`, verbatim. */
   readonly name: readonly Node[];
+  /**
+   * The fragment after the first top-level `|`, up to `}}}`; `undefined`
+   * when there is no `|`, and empty for `{{{x|}}}`. A later `|` stays in it
+   * as text, where MediaWiki would drop everything after it.
+   */
   readonly default: readonly Node[] | undefined;
 }
 
@@ -154,19 +266,48 @@ export interface Argument {
  * none of their own — so serialization is `"|" + name + "=" + value`.
  */
 export interface Param {
+  /**
+   * The fragment before the first top-level `=`, whitespace included;
+   * `undefined` for a positional parameter. {@link paramName} reads it as
+   * trimmed text.
+   */
   readonly name: readonly Node[] | undefined;
+  /**
+   * The fragment after the first top-level `=` (the whole parameter when
+   * positional), up to
+   * the next top-level `|` or `}}`; any later `=` is part of it. Whitespace is
+   * kept: MediaWiki trims it from named values only, while
+   * {@link paramValue} trims every value.
+   */
   readonly value: readonly Node[];
 }
 
 /**
  * A wikilink `[[Target|label]]`. `segments` holds every `|`-separated piece
- * after the target verbatim (File/Category links carry several); the first
- * segment is the display label for an ordinary link.
+ * after the target verbatim (File/Category links carry several); for an
+ * ordinary link they make up the display label.
  */
 export interface Wikilink {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Wikilink";
+  /**
+   * The node's source range, `[[` through `]]`. {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The fragment between `[[` and the first top-level `|` or `]]`, verbatim
+   * and not normalised: a leading `:`, the namespace prefix, any `#section`
+   * and surrounding whitespace are all kept.
+   */
   readonly target: readonly Node[];
+  /**
+   * The fragments after each top-level `|`, in order; empty when there is
+   * no `|`, and one empty fragment for the pipe trick `[[A|]]` (MediaWiki
+   * expands the pipe trick on save). For an ordinary link MediaWiki shows them
+   * rejoined with `|` as the label; for a
+   * `File:` link they are image options, usually ending with the caption.
+   */
   readonly segments: readonly (readonly Node[])[];
 }
 
@@ -178,9 +319,23 @@ export interface Wikilink {
  * recognised — they stay in {@link Text}.
  */
 export interface ExternalLink {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "ExternalLink";
+  /**
+   * The node's source range, `[` through `]`. {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The URL verbatim, protocol (or a protocol-relative `//`) included:
+   * everything after `[` up to the first space, tab, line break, `]`, `<`
+   * or `>`.
+   */
   readonly url: string;
+  /**
+   * Everything after the URL up to the closing `]`, separating whitespace
+   * included; `undefined` when `]` follows the URL directly.
+   */
   readonly label: readonly Node[] | undefined;
 }
 
@@ -215,8 +370,17 @@ export interface ExternalLink {
  * cannot arise from wikitext source.
  */
 export interface AutoLink {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "AutoLink";
+  /**
+   * The node's source range; {@link serialize} ignores it, so after an edit
+   * it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The linked URL verbatim, `http://` or `https://` included in whatever
+   * letter case the source used, after the trailing-punctuation trim.
+   */
   readonly url: string;
 }
 
@@ -229,7 +393,7 @@ export interface AutoLink {
  *   {@link EXTENSION_TAGS}) own their content: the text between the open
  *   and close tags is *not* parsed as wikitext but kept raw in
  *   {@link rawContent}. When no matching close is found the tag is
- *   open-only (`closed: false`, `rawContent: undefined`).
+ *   open-only (`rawContent` and `closeRaw` are `undefined`).
  * - **Presentational tags** (`div`, `span`, `br`, `b`, … — anything else)
  *   are flat markers: a `<div>` and its `</div>` are two separate nodes and
  *   the content between them is parsed as ordinary wikitext. These always
@@ -239,15 +403,34 @@ export interface AutoLink {
  * serialization for a marker node.
  */
 export interface Tag {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Tag";
+  /**
+   * The node's source range: the tag alone for a marker, or open tag through
+   * close tag for an extension tag with a body. {@link serialize} ignores it,
+   * so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The tag name in lower case (ASCII letters and digits), whatever case the
+   * source used; {@link raw} keeps the original spelling.
+   */
   readonly name: string;
   /** Whether the source wrote this as a closing tag `</name>`. */
   readonly closing: boolean;
+  /**
+   * Whether the tag text ends in `/>`, as in `<br/>` or `<ref name="a" />`.
+   * A self-closing extension tag has no body, so it is a marker.
+   */
   readonly selfClosing: boolean;
   /** Verbatim opening/closing tag text, e.g. `<ref name="a">`, `</div>`. */
   readonly raw: string;
-  /** Raw inner text for an extension tag, else `undefined`. */
+  /**
+   * An extension tag's body verbatim, unparsed (`""` when empty), ending at
+   * the first matching close tag since extension tags don't nest.
+   * `undefined` for every marker, including a self-closing or unclosed
+   * extension tag.
+   */
   readonly rawContent: string | undefined;
   /** Verbatim closing tag for an extension tag (`</ref>`), else `undefined`. */
   readonly closeRaw: string | undefined;
@@ -274,10 +457,28 @@ export interface Tag {
  * does not special-case it — it is just more text in `open`.
  */
 export interface Table {
+  /** Discriminates this node in the {@link Node} union. */
   readonly _tag: "Table";
+  /**
+   * The node's source range, `{|` through `|}`. {@link serialize}
+   * ignores it, so after an edit it still points at the original text.
+   */
   readonly span: Span;
+  /**
+   * The verbatim text after `{|` up to the first caption, row or cell marker
+   * line: the attributes, their line break and any filler lines.
+   */
   readonly open: string;
+  /**
+   * Every `|+` caption, in source order; empty when there is none.
+   * {@link serialize} writes them all before the rows, so a caption written
+   * after a row or cell marker does not round-trip.
+   */
   readonly captions: readonly TableCaption[];
+  /**
+   * The rows in source order, the first possibly implicit (no `|-`); empty
+   * when the table has neither a `|-` nor a cell.
+   */
   readonly rows: readonly TableRow[];
 }
 
@@ -285,7 +486,7 @@ export interface Table {
  * A table caption `|+ … `. Zero or more may occur (MediaWiki only really
  * gives meaning to one; this vocabulary does not privilege a particular
  * occurrence and keeps every `|+` line encountered, so round-trip never
- * depends on picking "the real one").
+ * depends on picking "the real one"; see {@link Table.captions}).
  *
  * `attrs` / `content` follow the single-pipe rule shared with
  * {@link TableCell}: the first bare `|` on the caption's opening line splits
@@ -295,15 +496,29 @@ export interface Table {
  * aren't themselves a table marker, so a caption's text can span paragraphs.
  */
 export interface TableCaption {
+  /**
+   * The caption's source range, from `|+` to the start of the next marker
+   * line; {@link serialize} ignores it.
+   */
   readonly span: Span;
+  /**
+   * The text between `|+` and the first `|` on its line, verbatim and
+   * untrimmed; `undefined` when there is no such `|` or a `[[` comes before
+   * it. The split is textual, so a template's own `|` also counts.
+   */
   readonly attrs: string | undefined;
+  /**
+   * The caption as wikitext, after the `|+` or the attribute `|`, up to the
+   * next table marker line; line breaks included.
+   */
   readonly content: readonly Node[];
 }
 
 /**
  * One table row. Rows are separated by `|-`; the table's very first row
  * needs no explicit marker (`open` is `undefined` for that implicit row —
- * distinct from an explicit `|-` with no attribute text, which is `""`).
+ * distinct from an explicit `|-` with no attribute text, which is its line
+ * break, `"\n"`).
  *
  * `open`, when present, is the verbatim text from just after `|-` through
  * the start of the row's first cell (or the next marker) — attribute text
@@ -311,8 +526,21 @@ export interface TableCaption {
  * {@link Table.open}.
  */
 export interface TableRow {
+  /**
+   * The row's source range, from its `|-` (or, for the implicit first row,
+   * its first cell marker) to the next `|-` or the closing `|}`;
+   * {@link serialize} ignores it.
+   */
   readonly span: Span;
+  /**
+   * The verbatim text after `|-`: attributes, line break and any filler
+   * lines. `undefined` for the implicit first row.
+   */
   readonly open: string | undefined;
+  /**
+   * The row's cells in source order, header and data cells mixed; empty for
+   * a `|-` with no cell after it.
+   */
   readonly cells: readonly TableCell[];
 }
 
@@ -337,10 +565,31 @@ export interface TableRow {
  * lines that aren't themselves a table marker (multi-line cell content).
  */
 export interface TableCell {
+  /**
+   * The cell's source range, from its marker (`!`, `|`, `!!` or `||`) to the
+   * end of its content; {@link serialize} ignores it.
+   */
   readonly span: Span;
+  /** Whether this is a header cell (`!` or `!!`) rather than a data cell (`|` or `||`). */
   readonly header: boolean;
+  /**
+   * Whether the cell opened with `!!` or `||` on the line of the cell before
+   * it, rather than with `!` or `|` at the start of a line.
+   */
   readonly inline: boolean;
+  /**
+   * The text between the marker and the first `|` in the cell's part of its
+   * opening line, verbatim and untrimmed; `undefined` when there is no such
+   * `|` or a `[[` comes before it. The split is textual, so a `|` inside a
+   * template or an extension tag's body also counts (#132).
+   */
   readonly attrs: string | undefined;
+  /**
+   * The cell as wikitext, after the marker or the attribute `|`. It ends at
+   * the next `!!`/`||` on the line (found textually, so one inside a template
+   * also counts, #132); the line's last cell runs on through any following
+   * non-marker lines, line breaks included.
+   */
   readonly content: readonly Node[];
 }
 
