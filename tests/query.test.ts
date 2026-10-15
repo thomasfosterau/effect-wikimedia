@@ -5,6 +5,7 @@
  * @module tests/query
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
@@ -239,7 +240,18 @@ describe("strip to plain text: entities (#107)", () => {
     expect(stripEntities(src)).toBe("\u200f");
   });
 
-  it("decodes every name in the HTML5 table, and only those", () => {
+  it("holds exactly the names and text of HTML5's table", () => {
+    // A digest of the sorted entries, so a changed value or a renamed entry
+    // fails even though the round-trip test below reads its expectations from
+    // the table itself. The same digest comes from `character-entities` 2.0.2
+    // and from remex-html's `;`-terminated entries (#123's review).
+    const entries = [...NAMED_ENTITIES].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
+      "083dc02ec806d6d630ad69cdcd3ebf4b3f04509f8ad00ad8772f8905d285beb4",
+    );
+  });
+
+  it("decodes every name in the HTML5 table", () => {
     // HTML5's 2,231 names less its 106 legacy forms without the `;`.
     expect(NAMED_ENTITIES.size).toBe(2125);
     for (const [name, text] of NAMED_ENTITIES) {
