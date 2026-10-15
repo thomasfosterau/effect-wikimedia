@@ -95,10 +95,19 @@ describe("performance floor: wikitables (#132)", () => {
     ' || {{Infobox\n|a=b\n}}\n! scope="row" | {{abbr|A|B}} !! [[a|b]] <!-- c -->\n';
   const largeTable = `{|\n${row.repeat(250)}|}\n`;
   const strayTable = `{|\n${"|-\n| {{stray a || b\n| c\n".repeat(2000)}|}\n`;
+  // Long closing runs: matching must consume a run of `}` or `]` in one pass,
+  // not rescan the rest of the run after each 2- or 3-character match.
+  const cell = (content: string): string => `{|\n| ${content}\n|}\n`;
+  const braceRunTable = cell(`${"{".repeat(40_000)}${"}".repeat(40_000)}`);
+  const linkRunTable = cell(`${"[[".repeat(20_000)}${"]]".repeat(20_000)}`);
+  const mixedRunTable = cell(`${"[[{{".repeat(10_000)}${"}}".repeat(10_000)}`);
 
   for (const [name, src] of [
     ["a table of templates and citations", largeTable],
     ["a table with an unclosed {{ in every row", strayTable],
+    ["a cell holding one long run of { then of }", braceRunTable],
+    ["a cell holding one long run of [[ then of ]]", linkRunTable],
+    ["a cell holding [[{{ runs closed only by }}", mixedRunTable],
   ] as const) {
     it(`parses ${name} (${src.length} chars) in linear time`, () => {
       const best = bestParseTime(src);

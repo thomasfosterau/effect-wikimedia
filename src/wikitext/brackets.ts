@@ -4,8 +4,8 @@
  * wikilink `[[…]]`, closed comment and extension tag ends, so a table's
  * line, cell-separator and attribute scans can step over each one whole.
  *
- * Openers go on a stack, as in MediaWiki's preprocessor, so each character
- * is visited once. The recursive descent in `./parse.ts` instead rescans the
+ * Openers go on a stack, as in MediaWiki's preprocessor, so brackets are
+ * matched in one pass, in time linear in the input. The recursive descent in `./parse.ts` instead rescans the
  * rest of the input for every opener that never closes, which is quadratic
  * on a table full of them. Where the two could differ, the stack sides with
  * the parser: a closing run matches the nearest open run of its kind, as
@@ -107,17 +107,26 @@ class BracketMatcher {
     return end;
   }
 
+  /**
+   * Matches the closing run at `i` against open runs, 2 or 3 characters at a
+   * time, until fewer than 2 closers are left or no run of its kind is open;
+   * the leftover closers are literal. The run is measured once, so a long run
+   * costs time linear in its length.
+   */
   private closeRun(i: number, openChar: number): number {
     const end = this.runEnd(i);
-    if (end - i < 2 || this.open[openChar] === 0) return end; // literal
-    // Runs of the other kind opened since the nearest run of this kind stay unclosed.
-    while (this.top().char !== openChar) this.pop();
-    const piece = this.top();
-    const matched = Math.min(end - i, piece.count, openChar === OPEN_BRACE ? 3 : 2);
-    piece.count -= matched;
-    this.ends.set(piece.pos + piece.count, i + matched);
-    if (piece.count < 2) this.pop();
-    return i + matched; // any closers left over are a new run
+    let at = i;
+    while (end - at >= 2 && this.open[openChar] > 0) {
+      // Runs of the other kind opened since the nearest run of this kind stay unclosed.
+      while (this.top().char !== openChar) this.pop();
+      const piece = this.top();
+      const matched = Math.min(end - at, piece.count, openChar === OPEN_BRACE ? 3 : 2);
+      piece.count -= matched;
+      this.ends.set(piece.pos + piece.count, at + matched);
+      if (piece.count < 2) this.pop();
+      at += matched;
+    }
+    return end;
   }
 
   /** Steps over a closed comment or an extension tag at `i`, recording its end. */

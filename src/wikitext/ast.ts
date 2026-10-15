@@ -448,14 +448,17 @@ export interface Tag {
  * line is simply absorbed as ordinary content instead of being recognised as
  * a marker (a deliberate, documented simplification, not a defect).
  *
- * A line break inside a template, argument, wikilink, comment or extension
- * tag doesn't start a new table line, and a `|`, `||` or `!!` inside one
+ * A line break inside a template, argument, wikilink, closed comment or
+ * extension tag doesn't start a new table line, and a `|`, `||` or `!!` inside one
  * doesn't split a cell, so a multi-line `{{Infobox …}}` or a
  * `<ref>{{cite web|…}}</ref>` stays whole in its cell. MediaWiki gets this
  * by building tables after expanding templates and setting comments and
  * extension tags aside; it does not protect wikilinks, which this parser
  * does. A bracket that never closes is ordinary text, as in MediaWiki, so a
- * stray `{{` hides nothing.
+ * stray `{{` hides nothing; so is an unclosed `<!--` (MediaWiki would hide
+ * the rest of the page). A construct that spans a `|}` line carries the table
+ * past it, and when no later `|}` follows there is no table: MediaWiki does
+ * the same for a template or an extension tag, but not for a wikilink.
  *
  * `open` is the verbatim text from `{|` up to the first real row/cell/caption
  * marker: normally just the attribute text plus its line terminator, but it
@@ -567,13 +570,14 @@ export interface TableRow {
  * `||` in a `!`-opened line is just literal text within that cell's content,
  * not a type change.
  *
- * `attrs` / `content`: MediaWiki's single-pipe rule (`Parser::doTableStuff`)
+ * `attrs` / `content`: MediaWiki's single-pipe rule (`Parser::handleTables`)
  * splits the cell's opening-line text at the first `|` into attributes and
  * content. A `|` inside a template, argument, wikilink, comment or extension
  * tag doesn't count (see {@link Table}), so `| {{flag|France}}` is all
  * content. Nor is there a split when a `[[` outside those comes before the
  * `|`: the whole thing is content and `attrs` is `undefined` (MediaWiki's
- * guard against reading the text around a wikilink as attributes).
+ * guard against reading the text around a wikilink as attributes, which it
+ * also applies to `-{`; this parser does not).
  * `content` extends across any following lines that aren't themselves a
  * table marker (multi-line cell content).
  */
