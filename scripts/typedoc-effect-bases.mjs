@@ -26,8 +26,10 @@
  * so an Effect or TypeDoc change can't silently stop the trimming or silently
  * drop documented members. It also fails if, after trimming, any class still
  * inherits more than `MAX_INHERITED_EXTERNALS` external members: that class is
- * on a base missing from `EFFECT_BASES` (a `Schema.Class`, `Schema.TaggedClass`
- * or `Schema.Error`, say), so its page would render the base's internals.
+ * on a base the plugin doesn't trim (an Effect base missing from
+ * `EFFECT_BASES` such as `Schema.Class`, `Schema.TaggedClass` or
+ * `Schema.Error`, a lib base such as `Error`, or a subclass of a trimmed
+ * class), so its page would render the base's internals.
  */
 import { Converter, ReflectionFlag, ReflectionKind } from "typedoc";
 
@@ -140,10 +142,11 @@ const EFFECT_BASES = [
  * The most inherited external members a class may still have after trimming
  * before docgen fails (#115). Every class in today's surface has none: the
  * trimmed ones lose all but the members they keep, which are re-homed, and
- * the plain `Dumps.XmlPageReader` inherits nothing. An untrimmed Effect base
- * brings at least 14 (measured on effect 4.0.0: `Data.Error` 14,
- * `Data.TaggedError` 15, `Context.Service` 21, `Schema.Class` 29,
- * `Schema.TaggedClass` 30, `Schema.Error` 42, `Schema.TaggedError` 43), and
+ * the plain `Dumps.XmlPageReader` inherits nothing. An Effect base the plugin
+ * doesn't trim brings at least 14 (measured on effect 4.0.0: `Data.Error` 14,
+ * `Data.TaggedError` 15, `Schema.Class` 29, `Schema.TaggedClass` 30,
+ * `Schema.Error` 42; for comparison, the trimmed `Context.Service` brings 21
+ * and `Schema.TaggedError` 43 before trimming), and
  * even a bare `extends Error` brings 11 (the lib's four instance members and
  * constructor, Node's three statics, and Effect's three `ErrorReporter`
  * symbols on the global `Error`). Five sits well below all of those while
@@ -272,7 +275,7 @@ function inheritedExternalCount(cls) {
 /**
  * Logs an error (which fails docgen) for each class that, after trimming,
  * still inherits more than `MAX_INHERITED_EXTERNALS` external members: it is
- * on an Effect base the plugin doesn't know, so its page renders that base's
+ * on a base the plugin doesn't trim, so its page renders that base's
  * internals.
  *
  * @param {import("typedoc").Logger} logger
@@ -284,7 +287,7 @@ function reportUntrimmed(logger, project) {
     const count = inheritedExternalCount(cls);
     if (count <= MAX_INHERITED_EXTERNALS) continue;
     logger.error(
-      `typedoc-effect-bases: ${cls.getFriendlyFullName()} still inherits ${count} external members (more than ${MAX_INHERITED_EXTERNALS}), so its page renders its base's internals; add its base to \`EFFECT_BASES\` in the plugin, with the members a consumer uses (#115).`,
+      `typedoc-effect-bases: ${cls.getFriendlyFullName()} still inherits ${count} external members (more than ${MAX_INHERITED_EXTERNALS}), so its page renders its base's internals; if the base is an Effect one, add it to \`EFFECT_BASES\` in the plugin with the members a consumer uses, otherwise change the base (#115).`,
     );
   }
 }
