@@ -104,6 +104,18 @@ describe("decodeEntityLine", () => {
     if (record?._tag !== "error") throw new Error("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
   });
+
+  // `null` is valid JSON, so it is not an invalid-json line: it parses, and
+  // what it parses to is not an entity, the same as `42` or `"x"` (#116).
+  for (const body of ["null", "42", '"x"', "[]"]) {
+    it(`a JSON ${body} line degrades to a not-an-entity error element`, () => {
+      const record = Dumps.decodeEntityLine(`${body},`, 3);
+      expect(record?._tag).toBe("error");
+      if (record?._tag !== "error") throw new Error("expected error");
+      expect(record.reason).toBe("dumps/not-an-entity");
+      expect(record.raw).toBe(body);
+    });
+  }
 });
 
 // ── Pure predicates ──────────────────────────────────────────────────────
@@ -214,14 +226,19 @@ async function writeBigDump(path: string, n: number): Promise<number> {
 
 /**
  * A full, synchronous garbage collection, for measuring *retained* memory.
- * The suite runs without `--expose-gc`, so this file turns the flag on for
- * its own worker and fetches `gc` from a fresh context, which is created
- * after the flag is set and so has it as a global (the technique
+ * The suite runs without `--expose-gc`, so this file turns the flag on,
+ * fetches `gc` from a fresh context, which is created after the flag is set
+ * and so has it as a global, and turns the flag off again (the technique
  * `jest-leak-detector` uses). No other file sees it.
  */
 const collectGarbage = (() => {
   setFlagsFromString("--expose-gc");
-  return runInNewContext("gc") as () => void;
+  const gc = runInNewContext("gc") as () => void;
+  // The captured `gc` keeps working with the flag off, and a context created
+  // later (another file sharing this worker, under `isolate: false` or
+  // threads) gets no `gc` global.
+  setFlagsFromString("--no-expose-gc");
+  return gc;
 })();
 
 /**
@@ -296,12 +313,14 @@ describe("constant memory", () => {
     // each under 1 MB, growth under 0.1 MB, with or without coverage). The
     // 40 MB ceiling sits below the ~57 MB uncompressed dump, so a regression
     // that kept the file, on- or off-heap, would blow it; the growth bound
-    // catches a leak too small to reach the ceiling, such as a 50-byte record
-    // kept per line. (The stronger proof, a 600 MB dump completing under a
-    // hard `--max-old-space-size=250` cap, is documented in the PR, not run
-    // in CI, to keep this suite fast.)
+    // catches a leak too small to reach the ceiling. Observed growth is
+    // -0.05 to -0.02 MB, so the 2 MB bound is ~50x that drift, and still
+    // fails a pipeline that keeps one number per line (~2.9 MB over the 290k
+    // lines between the first and last samples). (The stronger proof, a
+    // 600 MB dump completing under a hard `--max-old-space-size=250` cap, is
+    // documented in the PR, not run in CI, to keep this suite fast.)
     expect(peakHeapMb).toBeLessThan(40);
     expect(peakOffHeapMb).toBeLessThan(40);
-    expect(growthMb).toBeLessThan(8);
+    expect(growthMb).toBeLessThan(2);
   }, 120_000);
 });

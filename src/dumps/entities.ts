@@ -85,26 +85,25 @@ function boundRaw(text: string): string {
   return text.length > MAX_RAW_LENGTH ? text.slice(0, MAX_RAW_LENGTH) : text;
 }
 
-/** Parses one bare entity-JSON body; `null` when it is not valid JSON. */
-function parseJson(body: string): unknown | null {
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Decodes a single raw dump line into an {@link EntityRecord}, or `null` when
  * the line is pure array framing (`[`, `]`, blank) and carries no record.
- * Total and lenient: invalid JSON or a non-entity object yields a
- * {@link DumpLineError}, never a throw.
+ * Total and lenient: a line that is not valid JSON yields a
+ * {@link DumpLineError} with reason `dumps/invalid-json`, and valid JSON that
+ * does not decode as an entity (`null`, a number, a string, an array, an
+ * object with no valid entity id) one with reason `dumps/not-an-entity`;
+ * never a throw.
  */
 export function decodeEntityLine(line: string, lineNumber: number): EntityRecord | null {
   const body = stripFraming(line);
   if (body === null) return null;
-  const parsed = parseJson(body);
-  if (parsed === null) {
+  // Only a throw means the body is not JSON. A `null` return for that case
+  // read a body of `null` as invalid JSON too (#116); branching on the throw
+  // here needs no sentinel and allocates nothing per line.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
     return { _tag: "error", line: lineNumber, reason: "dumps/invalid-json", raw: boundRaw(body) };
   }
   const item = decodeEntity(parsed);
