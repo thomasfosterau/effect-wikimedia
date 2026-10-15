@@ -15,9 +15,19 @@
  * Untrusted-response discipline: every schema below is
  * deliberately lenient (fields optional, values left `Unknown` where their
  * shape varies) so a partial or unexpected payload decodes rather than
- * throwing; the normalisers next to each schema then extract and sanitise
- * only the fields this module trusts. A hostile or malformed response can
- * at worst yield fewer / no results, never an injection.
+ * throwing; the normalisers next to each schema then extract, trim and
+ * length-cap only the fields this module trusts. A hostile or malformed
+ * response can at worst yield fewer / no results, never an injection into a
+ * request.
+ * Two result fields are HTML as the wiki sent it, trimmed and length-capped
+ * but not sanitised: {@link SearchResult.snippet} and
+ * {@link ParsedSection.title}. Escape or sanitise them before putting them
+ * into a page.
+ *
+ * The four `*Response` schemas are those raw wire shapes, the decode step
+ * before each `normalise*` function. Read the typed results the normalisers
+ * build ({@link WikitextResult}, {@link PageMetadata},
+ * {@link SearchResult}, {@link ParsedPage}), not the raw fields.
  *
  * @copyright Thomas Foster
  * @module
@@ -48,40 +58,97 @@ function actionRequest(
 // ── Wikitext (action=query&prop=revisions) ───────────────────────────────
 
 const RevisionSlot = Schema.Struct({
+  /** The slot's content model (`"wikitext"`, `"Scribunto"`, …); not read. */
   contentmodel: Schema.optional(Schema.Unknown),
   // The Action API's wikitext slot content key is the literal `"*"`.
+  /** The slot's content; absent when the revision's text is hidden. */
   "*": Schema.optional(Schema.Unknown),
 });
 
 const Revision = Schema.Struct({
+  /** The revision ID. */
   revid: Schema.optional(Schema.Unknown),
+  /** When the revision was saved, as an ISO 8601 UTC string. */
   timestamp: Schema.optional(Schema.Unknown),
-  slots: Schema.optional(Schema.Struct({ main: Schema.optional(RevisionSlot) })),
+  /** The revision's content slots; only `main` is requested. */
+  slots: Schema.optional(
+    Schema.Struct({
+      /** The main slot, which holds the page's wikitext. */
+      main: Schema.optional(RevisionSlot),
+    }),
+  ),
 });
 
 const WikitextPage = Schema.Struct({
+  /** The page ID; absent for a missing or invalid title. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The page title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
+  /** The latest revision, as a one-element array; absent for a missing page. */
   revisions: Schema.optional(Schema.Array(Revision)),
 });
 
-/** Lenient schema for the `action=query&prop=revisions&rvslots=main` response envelope. */
+/**
+ * Lenient schema for the `action=query&prop=revisions&rvslots=main` response
+ * envelope: the decode step {@link getWikitext} runs before
+ * {@link normaliseWikitext}. Every field is optional and every leaf `Unknown`,
+ * so a partial, extended or future-shaped response decodes, but a container of
+ * the wrong kind (such as a list that is not an array, or `null` where an
+ * object is expected) fails the decode, which {@link getWikitext} reports as a
+ * `RequestFailed`. Read the typed {@link WikitextResult} that
+ * {@link normaliseWikitext} builds from it, not these fields.
+ */
 export const WikitextResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
+      /** The requested pages, keyed by page ID (a negative number for a missing or invalid title). */
       pages: Schema.optional(Schema.Record(Schema.String, WikitextPage)),
     }),
   ),
 });
 export type WikitextResponse = typeof WikitextResponse.Type;
 
-/** A page's current (or requested) wikitext, plus the identifying revision. */
+/** A page's current wikitext (its main slot), with the page and revision it came from. */
 export interface WikitextResult {
+  /**
+   * The page's MediaWiki page ID (`pageid`), which stays the same when the page
+   * is renamed. `null` if the response's `pageid` is absent or isn't a
+   * non-negative number up to `Number.MAX_SAFE_INTEGER`; a fraction is
+   * truncated.
+   */
   readonly pageId: number | null;
+  /**
+   * The page's title as MediaWiki reports it: prefixed display form, with
+   * spaces rather than underscores, after the wiki's normalisation (such as
+   * an upper-case first letter). If the response has no usable title, it is
+   * the title as requested after validation, with whitespace runs replaced
+   * by `_`.
+   */
   readonly title: string;
+  /**
+   * The ID (`revid`) of the revision the wikitext was read from: the page's
+   * latest revision at request time. `null` if the response's `revid` is absent
+   * or isn't a non-negative number up to `Number.MAX_SAFE_INTEGER`; a fraction
+   * is truncated.
+   */
   readonly revisionId: number | null;
+  /**
+   * When that revision was saved, as the API sent it: an ISO 8601 UTC
+   * string such as `2024-01-22T09:15:00Z`. It is cut to 40 characters but
+   * not parsed or validated. `null` if the response has no string
+   * `timestamp`.
+   */
   readonly timestamp: string | null;
+  /**
+   * The revision's main-slot content, exactly as the API sent it: not
+   * trimmed or length-capped, and possibly empty. It is returned whatever
+   * the page's content model, so a Lua module or a JSON page yields its
+   * source. Redirects are not followed: a redirect page yields its own
+   * `#REDIRECT [[…]]` text.
+   */
   readonly wikitext: string;
 }
 
@@ -132,36 +199,107 @@ export const getWikitext = Effect.fn("Action.getWikitext")(function* (
 // ── Page metadata (action=query&prop=info) ───────────────────────────────
 
 const MetadataPage = Schema.Struct({
+  /** The page ID; absent for a missing, invalid or special title. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The page title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
+  /** The page's content model. */
   contentmodel: Schema.optional(Schema.Unknown),
+  /** MediaWiki's code for the page's content language. */
   pagelanguage: Schema.optional(Schema.Unknown),
+  /** When the page was last touched, as an ISO 8601 UTC string. */
   touched: Schema.optional(Schema.Unknown),
+  /** The ID of the page's latest revision. */
   lastrevid: Schema.optional(Schema.Unknown),
+  /** The latest revision's size in bytes. */
   length: Schema.optional(Schema.Unknown),
+  /**
+   * The page's full URL (`fullurl`, requested with `inprop=url`); not
+   * MediaWiki's separate `canonicalurl`.
+   */
   fullurl: Schema.optional(Schema.Unknown),
 });
 
-/** Lenient schema for the `action=query&prop=info` response envelope. */
+/**
+ * Lenient schema for the `action=query&prop=info` response envelope: the decode
+ * step {@link getPageMetadata} runs before {@link normalisePageMetadata}. Every
+ * field is optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (such as a
+ * list that is not an array, or `null` where an object is expected) fails the
+ * decode, which {@link getPageMetadata} reports as a `RequestFailed`. Read the
+ * typed {@link PageMetadata} that {@link normalisePageMetadata} builds from it,
+ * not these fields.
+ */
 export const PageMetadataResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
+      /** The requested pages, keyed by page ID (a negative number for a missing, invalid or special title). */
       pages: Schema.optional(Schema.Record(Schema.String, MetadataPage)),
     }),
   ),
 });
 export type PageMetadataResponse = typeof PageMetadataResponse.Type;
 
-/** A page's identity and bookkeeping metadata. */
+/**
+ * A page's identity and bookkeeping metadata, from `prop=info&inprop=url`.
+ * Every field except `title` is `null` when the response lacks it or it
+ * fails its check.
+ */
 export interface PageMetadata {
+  /**
+   * The page's MediaWiki page ID (`pageid`), which stays the same when the page
+   * is renamed. `null` if the response's `pageid` is absent or isn't a
+   * non-negative number up to `Number.MAX_SAFE_INTEGER` (a fraction is
+   * truncated). That is the case for a title the API reports as `invalid`, or
+   * as an existing `special` page (`Special:…`): neither is flagged `missing`,
+   * so {@link getPageMetadata} returns a result for it, not `null`.
+   */
   readonly pageId: number | null;
+  /**
+   * The page's title as MediaWiki reports it: prefixed display form, with
+   * spaces rather than underscores, after the wiki's normalisation (such as
+   * an upper-case first letter). If the response has no usable title, it is
+   * the title as requested after validation, with whitespace runs replaced
+   * by `_`.
+   */
   readonly title: string;
+  /**
+   * The page's content model (`contentmodel`), which says how its source is
+   * interpreted: `wikitext` for most pages, or another model such as
+   * `Scribunto` (a Lua module), `json`, `css` or `javascript`.
+   */
   readonly contentModel: string | null;
+  /**
+   * MediaWiki's code for the page's content language (`pagelanguage`), such
+   * as `en`. It is MediaWiki's own code, which is not always a BCP 47 tag.
+   * It is usually the wiki's content language.
+   */
   readonly language: string | null;
+  /**
+   * When the page was last touched (`touched`), as the API sent it: an ISO
+   * 8601 UTC string such as `2024-01-22T09:15:00Z`, cut to 40 characters
+   * but not parsed or validated. MediaWiki updates it on an edit and also
+   * whenever the page's cached rendering is invalidated (a purge, or an edit
+   * to a template it uses), so it can be later than the latest revision.
+   */
   readonly touched: string | null;
+  /** The ID (`lastrevid`) of the page's latest revision. */
   readonly lastRevisionId: number | null;
+  /**
+   * The size of the latest revision's content (`length`), in bytes of its
+   * UTF-8 encoding, not characters. `null` above 100,000,000.
+   */
   readonly length: number | null;
+  /**
+   * The page's full URL (`fullurl`, not MediaWiki's separate `canonicalurl`) as
+   * the queried wiki builds it, such as
+   * `https://en.wikipedia.org/wiki/Douglas_Adams`. It is re-parsed with `URL`
+   * and returned in that serialisation; `null` unless it is an absolute
+   * `https:` URL of at most 2000 characters.
+   */
   readonly fullUrl: string | null;
 }
 
@@ -218,16 +356,31 @@ export const getPageMetadata = Effect.fn("Action.getPageMetadata")(function* (
 export const MAX_SEARCH_RESULTS = 50;
 
 const SearchHit = Schema.Struct({
+  /** The matching page's ID. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The matching page's title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** An HTML excerpt around the match. */
   snippet: Schema.optional(Schema.Unknown),
+  /** The page's word count. */
   wordcount: Schema.optional(Schema.Unknown),
 });
 
-/** Lenient schema for the `action=query&list=search` response envelope. */
+/**
+ * Lenient schema for the `action=query&list=search` response envelope: the
+ * decode step {@link search} runs before {@link normaliseSearch}. Every field
+ * is optional and every leaf `Unknown`, so a partial, extended or future-shaped
+ * response decodes, but a container of the wrong kind (such as a list that is
+ * not an array, or `null` where an object is expected) fails the decode, which
+ * {@link search} reports as a `RequestFailed`. Read the typed
+ * {@link SearchResult}s that {@link normaliseSearch} builds from it, not these
+ * fields.
+ */
 export const SearchResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
+      /** The hits, in the search engine's relevance order. */
       search: Schema.optional(Schema.Array(SearchHit)),
     }),
   ),
@@ -236,9 +389,27 @@ export type SearchResponse = typeof SearchResponse.Type;
 
 /** One search hit, with its HTML-snippet excerpt (Wikimedia wraps matches in `<span class="searchmatch">`). */
 export interface SearchResult {
+  /**
+   * The matching page's MediaWiki page ID (`pageid`). `null` if the hit's
+   * `pageid` is absent or isn't a non-negative number up to
+   * `Number.MAX_SAFE_INTEGER`; a fraction is truncated.
+   */
   readonly pageId: number | null;
+  /**
+   * The matching page's title as MediaWiki reports it: prefixed display
+   * form, with spaces rather than underscores. Trimmed, and never empty: a
+   * hit without a usable title is dropped from the results.
+   */
   readonly title: string;
+  /**
+   * An excerpt of the page's text around the match, as HTML: matched terms
+   * are wrapped in `<span class="searchmatch">`. It is trimmed and capped at
+   * {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units but not sanitised, so
+   * escape or sanitise it before putting it into a page. `null` if the
+   * excerpt is absent or empty.
+   */
   readonly snippet: string | null;
+  /** The number of words in the page (`wordcount`), as the search index counts them. */
   readonly wordCount: number | null;
 }
 
@@ -291,46 +462,128 @@ export const search = Effect.fn("Action.search")(function* (
 // ── Parse (action=parse) ─────────────────────────────────────────────────
 
 const ParseSection = Schema.Struct({
+  /** The heading's nesting depth in the table of contents; not read. */
   toclevel: Schema.optional(Schema.Unknown),
+  /** The heading level, as a numeric string (`"2"` for `== x ==`). */
   level: Schema.optional(Schema.Unknown),
+  /** The heading's text, as HTML. */
   line: Schema.optional(Schema.Unknown),
+  /** The heading's fragment ID. */
   anchor: Schema.optional(Schema.Unknown),
 });
 
 /** A link/category/template entry keyed by the wikitext `"*"` (page-title) convention. */
 const TitledEntry = Schema.Struct({
+  /** The entry's title (a category's in database form, without its prefix). */
   "*": Schema.optional(Schema.Unknown),
 });
 
 const ParseResult = Schema.Struct({
+  /** The parsed page's title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** The parsed page's ID. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The page's section headings, in document order. */
   sections: Schema.optional(Schema.Array(ParseSection)),
+  /** The wiki pages the page links to. */
   links: Schema.optional(Schema.Array(TitledEntry)),
+  /** The categories the page is in. */
   categories: Schema.optional(Schema.Array(TitledEntry)),
+  /** The pages transcluded while parsing. */
   templates: Schema.optional(Schema.Array(TitledEntry)),
 });
 
-/** Lenient schema for the `action=parse` response envelope. */
+/**
+ * Lenient schema for the `action=parse` response envelope: the decode step
+ * {@link parsePage} runs before {@link normaliseParse}. Every field is optional
+ * and every leaf `Unknown`, so a partial, extended or future-shaped response
+ * decodes, but a container of the wrong kind (such as a list that is not an
+ * array, or `null` where an object is expected) fails the decode, which
+ * {@link parsePage} reports as a `RequestFailed`. Read the typed
+ * {@link ParsedPage} that {@link normaliseParse} builds from it, not these
+ * fields.
+ */
 export const ParseResponse = Schema.Struct({
+  /** The parse result; absent on an error response, such as for a missing page. */
   parse: Schema.optional(ParseResult),
 });
 export type ParseResponse = typeof ParseResponse.Type;
 
 /** One section heading from a parsed page. */
 export interface ParsedSection {
+  /**
+   * The heading's level: the number of `=` around it in wikitext, so `2` for
+   * `== Life ==`, or the `<hN>` number of an HTML heading. `null` unless the
+   * response's `level` is a number, or a numeric string, from 0 to 20; a
+   * fraction is truncated, and an empty string reads as `0`.
+   */
   readonly level: number | null;
+  /**
+   * The heading's text as HTML (the API's `line`), not wikitext: MediaWiki
+   * renders it and keeps only some inline tags (such as `<i>`, `<b>`,
+   * `<sup>`, `<sub>` and `<span>`). It is trimmed and capped at
+   * {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units but not sanitised, so
+   * escape or sanitise it before putting it into a page. Never empty: a
+   * section without a usable heading is dropped.
+   */
   readonly title: string;
+  /**
+   * The heading's fragment ID (`anchor`), for linking to the section as
+   * `#anchor`, such as `Early_life`. MediaWiki makes it unique within the
+   * page, adding `_2`, `_3` and so on to repeated headings. `null` if the
+   * response has none.
+   */
   readonly anchor: string | null;
 }
 
 /** A parsed page's structural outline — headings, outgoing links, categories, and transcluded templates. */
 export interface ParsedPage {
+  /**
+   * The parsed page's MediaWiki page ID (`pageid`). `null` if the response's
+   * `pageid` is absent or isn't a non-negative number up to
+   * `Number.MAX_SAFE_INTEGER`; a fraction is truncated.
+   */
   readonly pageId: number | null;
+  /**
+   * The parsed page's title as MediaWiki reports it: prefixed display form,
+   * with spaces rather than underscores. Redirects are not followed, so for a
+   * redirect page this is the redirect's own title. If the response has no
+   * usable title, it is the title as requested after validation, with
+   * whitespace runs replaced by `_`.
+   */
   readonly title: string;
+  /**
+   * The page's section headings in document order, including those a
+   * transcluded page contributes. A heading without usable text is skipped,
+   * and at most {@link MAX_PARSE_ENTRIES} are kept.
+   */
   readonly sections: readonly ParsedSection[];
+  /**
+   * The titles of the wiki pages the rendered page links to (`links`), prefixed
+   * and with spaces, such as `Help:Contents`. They include links added by
+   * transcluded templates and links to pages that don't exist. Interwiki and
+   * interlanguage links, category assignments, file embeds (`[[File:…]]`) and
+   * `Special:` links are not included. In the API's order, which groups them by
+   * namespace rather than following the page, at most
+   * {@link MAX_PARSE_ENTRIES}.
+   */
   readonly links: readonly string[];
+  /**
+   * The categories the page is in (`categories`), including hidden ones and
+   * those added by templates. Each is the category's name in database form:
+   * no `Category:` prefix, and underscores rather than spaces, such as
+   * `English_novelists`. In the API's order, at most
+   * {@link MAX_PARSE_ENTRIES}.
+   */
   readonly categories: readonly string[];
+  /**
+   * The titles of the pages transcluded while parsing (`templates`), directly
+   * or through other templates, prefixed and with spaces, such as
+   * `Template:Infobox writer`. They include modules a template invokes
+   * (`Module:` pages) and pages that don't exist. In the API's order, which
+   * groups them by namespace rather than following the page, at most
+   * {@link MAX_PARSE_ENTRIES}.
+   */
   readonly templates: readonly string[];
 }
 
