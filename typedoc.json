@@ -11,7 +11,8 @@
   // what a consumer uses: the `Service` shape of `Core.WikimediaClient` and
   // `Reconciliation.WikidataLookup` (`Context.Service`, #87), and the
   // constructor, `_tag`, fields, `message` and `makeEffect` of the error
-  // classes (`Schema.TaggedError`, #99).
+  // classes (`Schema.TaggedError`, #99). It fails docgen if a class on any
+  // other base still renders that base's internals (#115).
   "plugin": ["./scripts/typedoc-effect-bases.mjs"],
   // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
   // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
