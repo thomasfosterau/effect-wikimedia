@@ -16,7 +16,7 @@
     // (tests/dist-consumer/tsconfig.json), never imported.
     "tests/dist-consumer/index.ts",
     // A TypeDoc plugin, loaded by path from typedoc.json's `plugin` list.
-    "scripts/typedoc-context-service.mjs"
+    "scripts/typedoc-effect-bases.mjs"
   ],
   // Only devDependencies whose bins the Vite+ tasks in vite.config.ts run:
   // fallow reads commands from package.json `scripts`, not from `run.tasks`.
@@ -92,16 +92,6 @@
         "files": ["src/wikitext/quotes.ts"],
         "functions": ["resolveLine"],
         "maxCognitive": 35
-      },
-      // The `Context.Service` reflection hook, an anonymous arrow. fallow
-      // names every arrow `<arrow>`, so this also covers the file's one other
-      // arrow, a 4-line callback well under both limits. No test loads the
-      // TypeDoc plugin, so its CRAP is fallow's estimate (0% coverage).
-      {
-        "files": ["scripts/typedoc-context-service.mjs"],
-        "functions": ["<arrow>"],
-        "maxCognitive": 22,
-        "maxCrap": 182.1
       }
     ]
   },
