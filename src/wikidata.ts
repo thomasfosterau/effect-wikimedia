@@ -106,8 +106,23 @@ export function parseEntityId(raw: unknown): EntityId | null {
 /** Upper bound on any single free-text field copied from an untrusted response. */
 const MAX_TEXT_FIELD_LENGTH = 4000;
 
-/** Cap on how many aliases per language, sitelinks, or statements per property are kept. */
+/**
+ * Cap on how many entries of each list built from a response are kept: aliases
+ * per language, badges per sitelink, statements per property, references per
+ * statement, and snaks per property in a qualifier or reference block.
+ * Sitelinks have their own, higher cap, {@link MAX_SITELINKS}. Each list keeps
+ * its first usable entries, in Wikibase's order; an entry that is dropped as
+ * unusable does not count towards the cap.
+ */
 export const MAX_LIST_ENTRIES = 500;
+
+/**
+ * Cap on how many sitelinks an entity keeps, counted and chosen as for
+ * {@link MAX_LIST_ENTRIES}. Wikibase allows one sitelink per wiki, and
+ * Wikimedia has fewer linkable wikis than this, so no real item is cut; the
+ * cap only bounds a hostile or malformed response.
+ */
+export const MAX_SITELINKS = 2000;
 
 /** The most ids `wbgetentities` accepts per request (Wikibase's documented limit). */
 export const MAX_IDS_PER_REQUEST = 50;
@@ -483,8 +498,9 @@ export interface Sitelink {
   readonly title: string;
   /**
    * The badge items awarded to the page (`Q17437796` featured article,
-   * `Q17437798` good article, …); entries that are not item ids are dropped,
-   * and the list is empty when there are none.
+   * `Q17437798` good article, …), in Wikibase's order and at most
+   * {@link MAX_LIST_ENTRIES}; entries that are not item ids are dropped, and
+   * the list is empty when there are none.
    */
   readonly badges: readonly ItemId[];
 }
@@ -525,8 +541,9 @@ export interface WikidataItem {
   readonly aliases: Readonly<Record<string, readonly string[]>>;
   /**
    * The pages linked to the entity on other Wikimedia wikis, keyed by
-   * global site id (`"enwiki"`); empty when sitelinks were not fetched.
-   * Every sitelink with a title is kept: the list is not capped.
+   * global site id (`"enwiki"`), in Wikibase's order and at most
+   * {@link MAX_SITELINKS}. A sitelink without a title is dropped, and the map
+   * is empty when sitelinks were not fetched.
    */
   readonly sitelinks: Readonly<Record<string, Sitelink>>;
   /**
@@ -816,19 +833,33 @@ function normaliseAliases(
   return out;
 }
 
+/** Keeps the first {@link MAX_LIST_ENTRIES} badges that are valid item ids. */
+function normaliseBadges(raw: readonly unknown[] | undefined): ItemId[] {
+  const badges: ItemId[] = [];
+  for (const badge of raw ?? []) {
+    if (badges.length >= MAX_LIST_ENTRIES) break;
+    const id = parseItemId(badge);
+    if (id !== null) badges.push(id);
+  }
+  return badges;
+}
+
+/** Keeps the first {@link MAX_SITELINKS} sitelinks that carry a title. */
 function normaliseSitelinks(
   raw: Readonly<Record<string, RawSitelink>> | undefined,
 ): Record<string, Sitelink> {
   const out: Record<string, Sitelink> = {};
+  let kept = 0;
   for (const [site, link] of Object.entries(raw ?? {})) {
+    if (kept >= MAX_SITELINKS) break;
     const title = sanitiseText(link.title);
     if (title === null) continue;
-    const badges: ItemId[] = [];
-    for (const badge of link.badges ?? []) {
-      const id = parseItemId(badge);
-      if (id !== null) badges.push(id);
-    }
-    out[site] = { site: sanitiseText(link.site) ?? site, title, badges };
+    out[site] = {
+      site: sanitiseText(link.site) ?? site,
+      title,
+      badges: normaliseBadges(link.badges),
+    };
+    kept++;
   }
   return out;
 }

@@ -95,6 +95,50 @@ describe("Wikidata id parsers", () => {
   });
 });
 
+// ── List caps (hand-built entities) ─────────────────────────────────────
+
+describe("Wikidata sitelink caps", () => {
+  const cap = Wikidata.MAX_SITELINKS;
+  const badgeCap = Wikidata.MAX_LIST_ENTRIES;
+  /** `count` sitelinks keyed `site0wiki`, `site1wiki`, …, each with a title. */
+  const sitelinks = (count: number) =>
+    Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`site${i}wiki`, { title: `Page ${i}` }]),
+    );
+
+  it("keeps at most MAX_SITELINKS sitelinks per entity, the first in order", () => {
+    const entities = Wikidata.normaliseEntities({
+      entities: { Q1: { id: "Q1", sitelinks: sitelinks(cap + 5) } },
+    });
+    const keys = Object.keys(entities.Q1?.sitelinks ?? {});
+    expect(keys).toHaveLength(cap);
+    expect(keys[0]).toBe("site0wiki");
+    expect(keys.at(-1)).toBe(`site${cap - 1}wiki`);
+  });
+
+  it("does not count a dropped (title-less) sitelink towards the cap", () => {
+    const item = Wikidata.decodeEntity({
+      id: "Q1",
+      sitelinks: { untitledwiki: { site: "untitledwiki" }, ...sitelinks(cap) },
+    });
+    const keys = Object.keys(item?.sitelinks ?? {});
+    expect(keys).toHaveLength(cap);
+    expect(keys).not.toContain("untitledwiki");
+  });
+
+  it("keeps at most MAX_LIST_ENTRIES valid badges per sitelink, the first in order", () => {
+    const badges = ["not-an-item", ...Array.from({ length: badgeCap + 5 }, (_, i) => `Q${i + 1}`)];
+    const item = Wikidata.decodeEntity({
+      id: "Q1",
+      sitelinks: { enwiki: { site: "enwiki", title: "Page", badges } },
+    });
+    const kept = item?.sitelinks.enwiki?.badges ?? [];
+    expect(kept).toHaveLength(badgeCap);
+    expect(kept[0]).toBe("Q1");
+    expect(kept.at(-1)).toBe(`Q${badgeCap}`);
+  });
+});
+
 // ── Fixture round-trip: decode → typed access ────────────────────────────
 
 describe("Wikidata.getEntities — recorded fixture round-trip", () => {
