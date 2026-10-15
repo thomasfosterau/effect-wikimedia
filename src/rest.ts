@@ -47,14 +47,20 @@ const LatestRevision = Schema.Struct({
 /**
  * Lenient schema for `GET /w/rest.php/v1/page/{title}`: the decode step
  * {@link getPageMetadata} runs before {@link normalisePageMetadata}. Every
- * field is optional and every leaf `Unknown`, so any JSON object decodes;
- * read the typed {@link PageMetadata} that {@link normalisePageMetadata}
- * builds from it, not these fields.
+ * field is optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (a `latest`
+ * or `license` that is not an object, `null` included) fails the decode, which
+ * {@link getPageMetadata} reports as a `RequestFailed`. Read the typed
+ * {@link PageMetadata} that {@link normalisePageMetadata} builds from it, not
+ * these fields.
  */
 export const PageMetadataResponse = Schema.Struct({
   /** The page id. */
   id: Schema.optional(Schema.Unknown),
-  /** The title in URL form, with underscores for spaces (`"Douglas_Adams"`). */
+  /**
+   * The title in database-key form, with underscores for spaces and no
+   * percent-encoding (`"Douglas_Adams"`).
+   */
   key: Schema.optional(Schema.Unknown),
   /** The title in display form, with spaces (`"Douglas Adams"`). */
   title: Schema.optional(Schema.Unknown),
@@ -65,9 +71,9 @@ export const PageMetadataResponse = Schema.Struct({
   /** The wiki's content license, which is site-wide rather than per page. */
   license: Schema.optional(License),
   /**
-   * The URL of the page's `/html` endpoint. MediaWiki sends it on
-   * `/page/{title}/bare`; the `/page/{title}` endpoint fetched here sends the
-   * page's source instead, so it is usually absent. Not read.
+   * The URL of the page's `/html` endpoint; not read. MediaWiki 1.47 and later
+   * (including Wikimedia's wikis) send it on `/page/{title}` whenever the HTML
+   * isn't inlined; earlier versions sent it only on `/page/{title}/bare`.
    */
   html_url: Schema.optional(Schema.Unknown),
 });
@@ -76,9 +82,12 @@ export type PageMetadataResponse = typeof PageMetadataResponse.Type;
 /**
  * Lenient schema for `GET /w/rest.php/v1/revision/{id}`: the decode step
  * {@link getRevisionMetadata} runs before {@link normaliseRevisionMetadata}.
- * Every field is optional and every leaf `Unknown`, so any JSON object
- * decodes; read the typed {@link RevisionMetadata} that
- * {@link normaliseRevisionMetadata} builds from it, not these fields.
+ * Every field is optional and every leaf `Unknown`, so a partial, extended or
+ * future-shaped response decodes, but a container of the wrong kind (a `page`
+ * or `license` that is not an object, `null` included) fails the decode, which
+ * {@link getRevisionMetadata} reports as a `RequestFailed`. Read the typed
+ * {@link RevisionMetadata} that {@link normaliseRevisionMetadata} builds from
+ * it, not these fields.
  */
 export const RevisionMetadataResponse = Schema.Struct({
   /** The revision id. */
@@ -96,7 +105,7 @@ export const RevisionMetadataResponse = Schema.Struct({
     Schema.Struct({
       /** The page id. */
       id: Schema.optional(Schema.Unknown),
-      /** The page's current title in URL form, with underscores for spaces; not read. */
+      /** The page's current title in database-key form, with underscores for spaces; not read. */
       key: Schema.optional(Schema.Unknown),
       /** The page's current title in display form, with spaces. */
       title: Schema.optional(Schema.Unknown),
@@ -110,23 +119,26 @@ export type RevisionMetadataResponse = typeof RevisionMetadataResponse.Type;
 /** A page's REST-surface identity metadata. */
 export interface PageMetadata {
   /**
-   * MediaWiki's page id; `null` when the response has none, or it is
-   * negative or not a finite number. A fractional value is truncated.
+   * MediaWiki's page id; `null` when the response has none, or it is negative,
+   * not a finite number or above `Number.MAX_SAFE_INTEGER`. A fractional value
+   * is truncated.
    */
   readonly pageId: number | null;
   /**
-   * The title in URL form, with underscores for spaces and any namespace
-   * prefix (`"Douglas_Adams"`, `"Talk:Douglas_Adams"`), trimmed and cut at
-   * 4,000 UTF-16 code units; `null` when absent or empty.
+   * The title in database-key form, with underscores for spaces and any
+   * namespace prefix (`"Douglas_Adams"`, `"Talk:Douglas_Adams"`), trimmed and
+   * cut at {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units; `null` when
+   * absent or empty.
    */
   readonly key: string | null;
   /**
    * The title in display form, with spaces and any namespace prefix
-   * (`"Douglas Adams"`), trimmed and cut at 4,000 UTF-16 code units. Never
-   * empty: when the response has no usable title it is the `title` passed
-   * to {@link normalisePageMetadata}, which {@link getPageMetadata} sets to
-   * the requested title, trimmed and with each run of whitespace replaced
-   * by an underscore (`"Douglas_Adams"`).
+   * (`"Douglas Adams"`), trimmed and cut at {@link Core.MAX_TEXT_FIELD_LENGTH}
+   * UTF-16 code units. Never empty when it comes from {@link getPageMetadata}: when the
+   * response has no usable title it is the `title` passed to
+   * {@link normalisePageMetadata}, which {@link getPageMetadata} sets to the
+   * requested title, trimmed and with each run of whitespace replaced by an
+   * underscore (`"Douglas_Adams"`).
    */
   readonly title: string;
   /**
@@ -136,9 +148,9 @@ export interface PageMetadata {
    */
   readonly contentModel: string | null;
   /**
-   * The id of the page's latest revision; `null` when the response has
-   * none, or it is negative or not a finite number. A fractional value is
-   * truncated.
+   * The id of the page's latest revision; `null` when the response has none, or
+   * it is negative, not a finite number or above `Number.MAX_SAFE_INTEGER`. A
+   * fractional value is truncated.
    */
   readonly latestRevisionId: number | null;
   /**
@@ -148,10 +160,12 @@ export interface PageMetadata {
    */
   readonly latestTimestamp: string | null;
   /**
-   * The URL of the wiki's content license (on Wikimedia projects,
-   * `"https://creativecommons.org/licenses/by-sa/4.0/"`), trimmed and not
-   * validated as a URL; `null` when absent or empty. The license is the
-   * wiki's site-wide one, not specific to the page.
+   * The URL of the wiki's content license (on most Wikimedia wikis a CC BY-SA
+   * 4.0 URL such as `"https://creativecommons.org/licenses/by-sa/4.0/deed.en"`;
+   * Wikinews uses CC BY), trimmed but not validated as a URL or checked for its
+   * scheme, so check that it is `https:` before using it as a link; `null` when
+   * absent or empty. The license is the wiki's site-wide one, not specific to
+   * the page.
    */
   readonly licenseUrl: string | null;
 }
@@ -161,21 +175,22 @@ export interface RevisionMetadata {
   /**
    * The revision id the response reports, or the `revisionId` passed to
    * {@link normaliseRevisionMetadata} when the response has none, or it is
-   * negative or not a finite number. A fractional value is truncated.
+   * negative, not a finite number or above `Number.MAX_SAFE_INTEGER`. A
+   * fractional value is truncated.
    */
   readonly revisionId: number;
   /**
-   * The id of the page the revision belongs to; `null` when the response
-   * has none, or it is negative or not a finite number. A fractional value
-   * is truncated.
+   * The id of the page the revision belongs to; `null` when the response has
+   * none, or it is negative, not a finite number or above
+   * `Number.MAX_SAFE_INTEGER`. A fractional value is truncated.
    */
   readonly pageId: number | null;
   /**
-   * The title of the page the revision belongs to, in display form with
-   * spaces and any namespace prefix (`"Douglas Adams"`), trimmed and cut at
-   * 4,000 UTF-16 code units; `null` when absent or empty. It is the page's
-   * current title, which differs from its title at the time of the edit if
-   * the page has since been moved.
+   * The title of the page the revision belongs to, in display form with spaces
+   * and any namespace prefix (`"Douglas Adams"`), trimmed and cut at
+   * {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units; `null` when absent or
+   * empty. It is the page's current title, which differs from its title at the
+   * time of the edit if the page has since been moved.
    */
   readonly pageTitle: string | null;
   /**
@@ -202,10 +217,12 @@ export interface RevisionMetadata {
    */
   readonly contentModel: string | null;
   /**
-   * The URL of the wiki's content license (on Wikimedia projects,
-   * `"https://creativecommons.org/licenses/by-sa/4.0/"`), trimmed and not
-   * validated as a URL; `null` when absent or empty. The license is the
-   * wiki's site-wide one, not specific to the revision.
+   * The URL of the wiki's content license (on most Wikimedia wikis a CC BY-SA
+   * 4.0 URL such as `"https://creativecommons.org/licenses/by-sa/4.0/deed.en"`;
+   * Wikinews uses CC BY), trimmed but not validated as a URL or checked for its
+   * scheme, so check that it is `https:` before using it as a link; `null` when
+   * absent or empty. The license is the wiki's site-wide one, not specific to
+   * the revision.
    */
   readonly licenseUrl: string | null;
 }
