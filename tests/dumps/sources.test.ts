@@ -185,17 +185,21 @@ const fakeDuplex = (): Dumps.NodeDuplexLike => ({
   async *[Symbol.asyncIterator]() {},
 });
 
-describe("a decompressor that is not a Node stream", () => {
-  // The structural type admits it, so the runtime must reject it. Without
-  // that check the stream never settles and ignores interruption, so
-  // `Effect.timeout` can't bound it; racing a timer turns a regression into
-  // a prompt failure instead of a test timeout.
-  const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
-    const outcome = await orHung(runTestExit(Stream.runDrain(stream)));
-    if (outcome === "hung") throw new Error("the stream hung instead of failing");
-    return expectFailureInstanceOf(outcome, Dumps.SourceError);
-  };
+/**
+ * Drains `stream`, expecting it to fail with a {@link Dumps.SourceError}, and
+ * returns that error. A stage the runtime fails to reject can leave the
+ * stream never settling and ignoring interruption, so `Effect.timeout` can't
+ * bound it; racing a timer turns a regression into a prompt failure instead
+ * of a test timeout.
+ */
+const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
+  const outcome = await orHung(runTestExit(Stream.runDrain(stream)));
+  if (outcome === "hung") throw new Error("the stream hung instead of failing");
+  return expectFailureInstanceOf(outcome, Dumps.SourceError);
+};
 
+describe("a decompressor that is not a Node stream", () => {
+  // The structural type admits it, so the runtime must reject it.
   it("fails fromFile with a SourceError", async () => {
     const path = join(tmp, "fake-decompressor.bin");
     writeFileSync(path, gzipSync(Buffer.from(DUMP)));
@@ -247,6 +251,93 @@ describe("a decompressor that is not a Node stream", () => {
       process.off("unhandledRejection", onUnhandled);
     }
   });
+});
+
+describe("a decompressor that returns a used stream", () => {
+  // `isReadable` / `isWritable` give `false`, not `null`, for a used stage, so
+  // the not-a-stream check let it through (#111). `compose` then throws on a
+  // destroyed stage or one whose input has ended, but only once the upstream
+  // has been opened, which leaked; and it accepts one whose output has
+  // already ended, which never settles. The stage must be rejected before
+  // anything is opened, and a `compose` that throws anyway must release what
+  // it was given. Each case builds its stage before the stream runs.
+  const usedStages: ReadonlyArray<readonly [string, () => Promise<Duplex>]> = [
+    [
+      "destroyed",
+      async () => {
+        const stage = createGunzip();
+        stage.destroy();
+        return stage;
+      },
+    ],
+    ["ended", async () => new PassThrough().end()],
+    [
+      "read to its end",
+      async () => {
+        const stage = new Duplex({ read() {}, write: (_chunk, _encoding, done) => done() });
+        stage.push(null);
+        stage.resume();
+        await new Promise((resolve) => stage.once("end", resolve));
+        return stage;
+      },
+    ],
+  ];
+
+  it.each(usedStages)(
+    "fails decompressWith with a SourceError and releases the upstream when the stage is %s",
+    async (_, used) => {
+      const stage = await used();
+      // This source never pushes and never ends: only cancelling the bridged
+      // web stream closes it.
+      const readable = new Readable({ read() {} });
+      const closed = new Promise<"closed">((resolve) =>
+        readable.once("close", () => resolve("closed")),
+      );
+      const source = Dumps.fromNodeReadable(() => readable);
+      await withoutUncaught(async () => {
+        const error = await failsPromptly(source.pipe(Dumps.decompressWith(() => stage)));
+        expect(await orHung(closed)).toBe("closed");
+        expect(error).toMatchObject({ description: expect.stringContaining("fresh Node stream") });
+      });
+    },
+  );
+
+  it.each(usedStages)(
+    "fails fromFile with a SourceError and leaks no file descriptor when the stage is %s",
+    async (_, used) => {
+      const stage = await used();
+      const path = join(tmp, "used-decompressor.bin");
+      writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+      // Every `fs.ReadStream` calls `_construct`, which opens the file, on a
+      // `nextTick` after it is constructed; collect the ones for this path to
+      // check each is closed again.
+      const construct = vi.spyOn(ReadStream.prototype, "_construct");
+      const opened = (): ReadonlyArray<ReadStream> =>
+        construct.mock.contexts.filter(
+          (context): context is ReadStream =>
+            context instanceof ReadStream && context.path === path,
+        );
+      try {
+        await withoutUncaught(async () => {
+          const error = await failsPromptly(Dumps.fromFile(path, { decompressor: () => stage }));
+          await wait(0); // let any `_construct` tick run
+          const closed = opened().map((file) =>
+            file.closed
+              ? Promise.resolve("closed" as const)
+              : new Promise<"closed">((resolve) => file.once("close", () => resolve("closed"))),
+          );
+          expect(await orHung(Promise.all(closed))).not.toBe("hung");
+          // Rejected before the file is opened at all.
+          expect(opened()).toEqual([]);
+          expect(error).toMatchObject({
+            description: expect.stringContaining("fresh Node stream"),
+          });
+        });
+      } finally {
+        construct.mockRestore();
+      }
+    },
+  );
 });
 
 // ── Interruption teardown ────────────────────────────────────────────────

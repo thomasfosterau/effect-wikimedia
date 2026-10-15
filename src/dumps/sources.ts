@@ -90,11 +90,12 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
  * The part of a Node `Duplex` that a {@link Decompressor} returns: writable
  * (compressed bytes in) and readable (decompressed bytes out). Declared
  * structurally so the package's declarations need no `node:stream` types.
- * At runtime the value must be a real Node `Duplex` or `Transform` (such as
+ * At runtime the value must be a fresh Node `Duplex` or `Transform` (such as
  * `zlib.createGunzip()` or a bzip2 transform from a library), which this type
  * can't express: it is passed to Node's `stream.compose`. A value that
- * `node:stream` doesn't recognise as a stream fails the stream with a
- * {@link SourceError}; pass a real Node stream.
+ * `node:stream` doesn't recognise as a stream, or a stream already destroyed
+ * or ended, fails the stream with a {@link SourceError}; pass a new Node
+ * stream each time.
  */
 export interface NodeDuplexLike extends NodeReadableLike {
   /** Writes a chunk of compressed input. */
@@ -105,24 +106,48 @@ export interface NodeDuplexLike extends NodeReadableLike {
 
 /**
  * Recovers the Node `Duplex` a {@link Decompressor} returns from its
- * structural type, for `compose`. The contract on {@link NodeDuplexLike} is
- * that the value is a real Node stream, but the type admits a plain object,
- * and `compose` doesn't reject one: the composed stream never settles. So
- * this checks first and throws, which {@link fromNodeReadable} turns into a
- * {@link SourceError}. The check is a heuristic, not a proof: `isReadable` /
- * `isWritable` return `null` only when the value's `readable` / `writable`
- * aren't booleans (a destroyed or ended Node stream gives `false`), so a
- * plain object with `readable: true, writable: true` still passes it and
- * hangs in `compose`.
+ * structural type, for `compose`, and throws unless it is a fresh one. The
+ * contract on {@link NodeDuplexLike} is that the value is a real Node stream,
+ * but the type admits a plain object, and `compose` doesn't reject one: the
+ * composed stream never settles. Nor is a used stream safe: `compose` throws
+ * on one destroyed or whose input has ended, but only once the upstream has
+ * been opened, which then leaks (#111), and accepts one whose output has
+ * ended, which yields nothing or never settles. So this checks first, before
+ * anything is opened, and throws a `TypeError`, which {@link fromNodeReadable}
+ * turns into a {@link SourceError}. `isReadable` / `isWritable` return `true`
+ * only for a Node stream that is neither destroyed nor ended on that side (a
+ * new `zlib.createGunzip()` gives `true` for both), `false` for a used one or
+ * an object without a stream's `pipe` / `write` / `on`, and `null` for a
+ * value whose `readable` / `writable` aren't booleans. `compose` checks the
+ * stage with the same `isWritable`, so a stage that passes here passes there.
+ * The check is a heuristic, not a proof: a plain object with
+ * `readable: true`, `writable: true` and `pipe` / `write` / `on` functions
+ * still passes it and hangs in `compose`.
  */
 const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
   const duplex = stream as unknown as Duplex;
-  if (isReadable(duplex) === null || isWritable(duplex) === null) {
+  if (isReadable(duplex) !== true || isWritable(duplex) !== true) {
     throw new TypeError(
-      "the decompressor must return a Node stream Duplex or Transform, not a plain object",
+      "the decompressor must return a fresh Node stream Duplex or Transform, not a plain object or a stream already destroyed or ended",
     );
   }
   return duplex;
+};
+
+/**
+ * Composes `head` into `stage`, destroying both if `compose` throws: nothing
+ * else owns them yet, so a throw would otherwise leave `head` (an open file,
+ * a source behind a web stream) open. {@link asNodeDuplex} already rejects
+ * the stages `compose` throws on, so this is a second line of defence.
+ */
+const composeOrDestroy = (head: Readable, stage: Duplex): Duplex => {
+  try {
+    return compose(head, stage);
+  } catch (error) {
+    head.destroy();
+    stage.destroy();
+    throw error;
+  }
 };
 
 // ── Node Readable → Stream<Uint8Array> ───────────────────────────────────
@@ -250,9 +275,9 @@ export const fromNodeReadable = (
 /**
  * A decompression stage: a factory for a fresh Node `Transform` (bytes →
  * bytes), called once per stream. Typed as {@link NodeDuplexLike}, so any
- * Node `Duplex` or `Transform` fits. Pass a real Node stream: a value that
- * `node:stream` doesn't recognise as a stream fails the stream it feeds with
- * a {@link SourceError}.
+ * Node `Duplex` or `Transform` fits. Return a new Node stream on each call: a
+ * value that `node:stream` doesn't recognise as a stream, or a stream already
+ * destroyed or ended, fails the stream it feeds with a {@link SourceError}.
  */
 export type Decompressor = () => NodeDuplexLike;
 
@@ -263,7 +288,8 @@ export const gunzipTransform: Decompressor = () => createGunzip();
  * Lifts a {@link Decompressor} into a `Stream` stage: `Stream<Uint8Array>` →
  * `Stream<Uint8Array>`, pushing the bytes through a fresh Node transform. A
  * decompressor that returns a value `node:stream` doesn't recognise as a
- * stream fails the stage with a {@link SourceError} and cancels the source. Use
+ * stream, or a stream already destroyed or ended, fails the stage with a
+ * {@link SourceError} and cancels the source. Use
  * it to decompress a source that is *not* a local file — e.g. an
  * {@link fromHttpRange} download — or to inject a bzip2 transform the package
  * does not ship. Composes with any byte source.
@@ -284,7 +310,8 @@ export const decompressWith =
           // (#109). A rejected stage must cancel it too, or the upstream (an
           // HTTP body, a file) stays open.
           const web = Stream.toReadableStreamWith(source, context);
-          // Cancel only here: once `webToNode` has run, `web` is locked. If
+          // Cancel only here: once `webToNode` has run, `web` is locked, and
+          // destroying the Node Readable it returns is what cancels it. If
           // the source has already failed, `web` is errored and `cancel()`
           // rejects with that error; swallow it, since the stage rejection is
           // what this stream reports, and an unhandled rejection would crash
@@ -296,7 +323,7 @@ export const decompressWith =
             web.cancel().catch(() => undefined);
             throw error;
           }
-          return compose(webToNode(web), stage);
+          return composeOrDestroy(webToNode(web), stage);
         }),
       ),
     );
@@ -346,12 +373,14 @@ export const fromFile = (
     // `compose` so destroying the decompressor also destroys the file read —
     // the fd is closed on interruption, not orphaned. If opening the file
     // throws, destroy the stage, which nothing else owns yet.
+    let file: Readable;
     try {
-      return compose(createReadStream(path), stage);
+      file = createReadStream(path);
     } catch (error) {
       stage.destroy();
       throw error;
     }
+    return composeOrDestroy(file, stage);
   });
 };
 
