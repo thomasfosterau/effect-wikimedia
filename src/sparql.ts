@@ -66,35 +66,95 @@ export function hasLimitClause(sparql: string): boolean {
 
 /** An IRI node (`{ "type": "uri" }`). */
 export interface UriTerm {
+  /** The discriminant: always `"uri"`, for a raw term whose `type` is exactly `"uri"`. */
   readonly _tag: "uri";
+  /**
+   * The IRI as the server sent it, such as
+   * `"http://www.wikidata.org/entity/Q42"` for a Wikidata item. It is cut at
+   * 10,000 UTF-16 code units but not trimmed, parsed or validated as an IRI;
+   * `""` when the raw `value` is absent or not a string.
+   */
   readonly value: string;
 }
 
 /**
- * A literal node (`{ "type": "literal" | "typed-literal" }`). `datatype` is
- * the literal's `xsd:*` (or other) datatype IRI, when typed; `language` is
- * the BCP-47 tag on a language-tagged literal (`rdf:langString`); `kind`
- * maps `datatype` toward the Wikibase datavalue vocabulary for convenience
- * (see {@link literalKind}).
+ * A literal node (`{ "type": "literal" | "typed-literal" }`): a plain,
+ * language-tagged or datatyped value, with `kind` mapping its datatype toward
+ * the Wikibase datavalue vocabulary for convenience (see {@link literalKind}).
  */
 export interface LiteralTerm {
+  /**
+   * The discriminant: always `"literal"`, for a raw term whose `type` is
+   * exactly `"literal"` or `"typed-literal"` (both are read the same way).
+   */
   readonly _tag: "literal";
+  /**
+   * The literal's lexical form as the server sent it, such as `"1.96"` for an
+   * `xsd:decimal` or `"1952-03-11T00:00:00Z"` for an `xsd:dateTime`: a string
+   * whatever the datatype, never parsed into a number or a date. It is cut at
+   * 10,000 UTF-16 code units but not trimmed; `""` when the raw `value` is
+   * absent or not a string.
+   */
   readonly value: string;
+  /**
+   * The literal's datatype IRI as the server sent it, such as
+   * `"http://www.w3.org/2001/XMLSchema#dateTime"`, cut at 2,000 UTF-16 code
+   * units but not trimmed or validated. `null` when the raw term has no string
+   * `datatype`; the SPARQL 1.1 JSON results format gives a simple or a
+   * language-tagged literal none.
+   */
   readonly datatype: string | null;
+  /**
+   * The literal's language tag (the raw term's `xml:lang`), such as `"en"`, as
+   * the server sent it: cut at 40 UTF-16 code units but not trimmed,
+   * case-normalised or validated. `null` when the raw term has no string
+   * `xml:lang`; an empty `xml:lang` gives `""`, not `null`.
+   */
   readonly language: string | null;
+  /**
+   * The {@link literalKind} of this term's `datatype` and `language`: any
+   * non-`null` `language` (`""` included) makes it `"monolingualtext"`,
+   * whatever the datatype; otherwise it is `"time"` for `xsd:dateTime` or
+   * `xsd:date`, `"quantity"` for the `xsd:` numeric datatypes, `"string"` for
+   * `xsd:string` or no datatype, and `"other"` for any other datatype IRI.
+   */
   readonly kind: LiteralKind;
 }
 
 /** A blank node (`{ "type": "bnode" }`). */
 export interface BlankNodeTerm {
+  /** The discriminant: always `"bnode"`, for a raw term whose `type` is exactly `"bnode"`. */
   readonly _tag: "bnode";
+  /**
+   * The blank node's label as the server sent it, such as `"t42"`. The SPARQL
+   * 1.1 JSON results format scopes a label to one response: the same label
+   * twice in a response is the same node, but the label identifies nothing
+   * outside it. Cut at 10,000 UTF-16 code units but not trimmed; `""` when the
+   * raw `value` is absent or not a string.
+   */
   readonly value: string;
 }
 
-/** A term whose `type` this module does not recognise — the lenient degrade. */
+/**
+ * A term whose `type` this module does not recognise — the lenient degrade.
+ * `type` matching is exact, so a differently cased `"URI"` lands here too.
+ */
 export interface UnknownTerm {
+  /**
+   * The discriminant: always `"unknown"`, for a raw term whose `type` is
+   * absent, not a string, or a string other than `"uri"`, `"literal"`,
+   * `"typed-literal"` and `"bnode"`.
+   */
   readonly _tag: "unknown";
+  /**
+   * The raw term's `type`, copied whole: not trimmed or length-capped
+   * (#150). `null` when it is absent or not a string.
+   */
   readonly type: string | null;
+  /**
+   * The raw term's `value`, cut at 10,000 UTF-16 code units but not trimmed;
+   * `null` when it is absent or not a string (an object or array included).
+   */
   readonly value: string | null;
 }
 
@@ -104,8 +164,8 @@ export type SparqlTerm = UriTerm | LiteralTerm | BlankNodeTerm | UnknownTerm;
 /**
  * A coarse classification of a typed literal, mapped back toward the
  * Wikibase datavalue vocabulary so a WDQS answer reads in the same terms as
- * a claim: `"time"` for `xsd:dateTime`, `"quantity"` for the `xsd:` numeric
- * datatypes, `"string"` for `xsd:string` / an untyped literal,
+ * a claim: `"time"` for `xsd:dateTime` or `xsd:date`, `"quantity"` for the
+ * `xsd:` numeric datatypes, `"string"` for `xsd:string` / an untyped literal,
  * `"monolingualtext"` for a language-tagged literal, `"other"` for any other
  * datatype IRI.
  */
@@ -136,9 +196,9 @@ const XSD_NUMERIC = new Set(
 /**
  * Maps a literal's datatype IRI (and whether it is language-tagged) to a
  * {@link LiteralKind}. A language-tagged literal is `"monolingualtext"`
- * regardless of datatype; `xsd:dateTime` is `"time"`; the `xsd:` numeric
- * family is `"quantity"`; `xsd:string` or no datatype is `"string"`;
- * anything else is `"other"`.
+ * regardless of datatype; `xsd:dateTime` and `xsd:date` are `"time"`; the
+ * `xsd:` numeric family is `"quantity"`; `xsd:string` or no datatype is
+ * `"string"`; anything else is `"other"`.
  */
 export function literalKind(datatype: string | null, language: string | null): LiteralKind {
   if (language !== null) return "monolingualtext";
@@ -151,26 +211,54 @@ export function literalKind(datatype: string | null, language: string | null): L
 // ── Lenient wire schema (Unknown-heavy) ──────────────────────────────────
 
 const RawTerm = Schema.Struct({
+  /**
+   * The term's kind: `"uri"`, `"literal"` (or `"typed-literal"`, read the same
+   * way) or `"bnode"`.
+   */
   type: Schema.optional(Schema.Unknown),
+  /** The term's value: the IRI, the literal's lexical form or the blank node's label. */
   value: Schema.optional(Schema.Unknown),
+  /** A datatyped literal's datatype IRI. */
   datatype: Schema.optional(Schema.Unknown),
+  /** A language-tagged literal's language tag. */
   "xml:lang": Schema.optional(Schema.Unknown),
 });
 type RawTerm = typeof RawTerm.Type;
 
-/** Lenient schema for the SPARQL 1.1 JSON results envelope. */
+/**
+ * Lenient schema for the SPARQL 1.1 JSON results envelope: the decode step
+ * {@link query} runs before {@link normaliseResults}. Every field is optional
+ * and every leaf `Unknown`, so a partial, extended or future-shaped response
+ * decodes, but a container of the wrong kind fails the decode, which
+ * {@link query} reports as a `RequestFailed`: a body, `head`, `results`, row or
+ * term that is not a JSON object (an array or `null` included), or a `vars` or
+ * `bindings` that is not an array. Read the typed {@link SparqlResults} that
+ * {@link normaliseResults} builds from it, not these fields.
+ */
 export const SparqlResultsResponse = Schema.Struct({
+  /** The result header. */
   head: Schema.optional(
     Schema.Struct({
+      /** The query's variable names, in projection order. */
       vars: Schema.optional(Schema.Array(Schema.Unknown)),
     }),
   ),
+  /** A `SELECT` query's result set. */
   results: Schema.optional(
     Schema.Struct({
+      /**
+       * The result rows, each mapping a variable name to its term; a variable
+       * a row leaves unbound is absent from it.
+       */
       bindings: Schema.optional(Schema.Array(Schema.Record(Schema.String, RawTerm))),
     }),
   ),
-  // ASK queries answer `{ head: {}, boolean: true }`.
+  /**
+   * An `ASK` query's answer, `true` or `false`, which the response carries in
+   * place of `results`; not read. {@link normaliseResults} ignores it, so an
+   * `ASK` through {@link query} yields empty `vars` and `bindings` whatever
+   * the answer (#149).
+   */
   boolean: Schema.optional(Schema.Unknown),
 });
 export type SparqlResultsResponse = typeof SparqlResultsResponse.Type;
@@ -180,7 +268,11 @@ export type SparqlBinding = Readonly<Record<string, SparqlTerm>>;
 
 /** A decoded SPARQL SELECT result set. */
 export interface SparqlResults {
-  /** The `SELECT` variable names, in projection order. */
+  /**
+   * The `SELECT` variable names, in projection order, as the server sent
+   * them: entries that are not strings are dropped, and each is cut at 200
+   * UTF-16 code units. Empty when the response has no `head.vars`.
+   */
   readonly vars: readonly string[];
   /** The result rows; each maps a (possibly-partial) subset of `vars` to a term. */
   readonly bindings: readonly SparqlBinding[];
