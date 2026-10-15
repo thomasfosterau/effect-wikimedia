@@ -100,8 +100,9 @@ export interface LiteralTerm {
    * The literal's datatype IRI as the server sent it, such as
    * `"http://www.w3.org/2001/XMLSchema#dateTime"`, cut at 2,000 UTF-16 code
    * units but not trimmed or validated. `null` when the raw term has no string
-   * `datatype`; the SPARQL 1.1 JSON results format gives a simple or a
-   * language-tagged literal none.
+   * `datatype`. The SPARQL 1.1 JSON results format writes no `datatype` key for
+   * a simple or a language-tagged literal, though RDF 1.1 types them
+   * `xsd:string` and `rdf:langString`.
    */
   readonly datatype: string | null;
   /**
@@ -114,9 +115,7 @@ export interface LiteralTerm {
   /**
    * The {@link literalKind} of this term's `datatype` and `language`: any
    * non-`null` `language` (`""` included) makes it `"monolingualtext"`,
-   * whatever the datatype; otherwise it is `"time"` for `xsd:dateTime` or
-   * `xsd:date`, `"quantity"` for the `xsd:` numeric datatypes, `"string"` for
-   * `xsd:string` or no datatype, and `"other"` for any other datatype IRI.
+   * whatever the datatype; {@link LiteralKind} lists the rest of the mapping.
    */
   readonly kind: LiteralKind;
 }
@@ -239,7 +238,10 @@ export const SparqlResultsResponse = Schema.Struct({
   /** The result header. */
   head: Schema.optional(
     Schema.Struct({
-      /** The query's variable names, in projection order. */
+      /**
+       * The query's variable names, in the order the server sent them (the
+       * `SELECT` clause's order, except under `SELECT *`).
+       */
       vars: Schema.optional(Schema.Array(Schema.Unknown)),
     }),
   ),
@@ -269,9 +271,10 @@ export type SparqlBinding = Readonly<Record<string, SparqlTerm>>;
 /** A decoded SPARQL SELECT result set. */
 export interface SparqlResults {
   /**
-   * The `SELECT` variable names, in projection order, as the server sent
-   * them: entries that are not strings are dropped, and each is cut at 200
-   * UTF-16 code units. Empty when the response has no `head.vars`.
+   * The `SELECT` variable names as the server sent them, in its order (the
+   * `SELECT` clause's order, except under `SELECT *`): entries that are not
+   * strings are dropped, and each is cut at 200 UTF-16 code units. Empty when
+   * the response has no `head.vars`.
    */
   readonly vars: readonly string[];
   /** The result rows; each maps a (possibly-partial) subset of `vars` to a term. */
@@ -332,10 +335,10 @@ export const MAX_QUERY_LENGTH = 50_000;
 /** Options for {@link query}. */
 export interface QueryOptions {
   /**
-   * Allow a query with no `LIMIT` clause. Off by default — the whole point
-   * of the helper is to make an unbounded query a deliberate, visible choice
-   * (set this only for a query that is intrinsically bounded, e.g. a single
-   * `VALUES` block or an `ASK`). See {@link hasLimitClause}.
+   * Allow a query with no `LIMIT` clause. Off by default — the whole point of
+   * the helper is to make an unbounded query a deliberate, visible choice (set
+   * this only for a query that is intrinsically bounded, e.g. a single `VALUES`
+   * block; an `ASK` answer is not read yet, #149). See {@link hasLimitClause}.
    */
   readonly allowUnbounded?: boolean;
   /** The WDQS host. Defaults to {@link WDQS_HOST}. */
