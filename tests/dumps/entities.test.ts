@@ -2,8 +2,9 @@
  * Unit tests for the entity JSON dump pipeline (`src/dumps/entities.ts`):
  * per-line framing / decode (table-driven, lenient degrade), the pure
  * predicates, and the full `Stream` pipeline over a gzipped truncated-dump
- * fixture — correct counts plus a **constant-memory** assertion (peak heap
- * delta stays flat while streaming a dump many times the ceiling).
+ * fixture — correct counts plus a **constant-memory** assertion (memory
+ * retained after a full GC stays flat while streaming a dump larger than the
+ * ceiling).
  *
  * @module tests/dumps/entities
  */
@@ -14,8 +15,11 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { createGzip, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { Dumps, Wikidata } from "../../src/index.ts";
 import { runTest } from "../helpers/effect.ts";
@@ -208,47 +212,96 @@ async function writeBigDump(path: string, n: number): Promise<number> {
   return bytes;
 }
 
+/**
+ * A full, synchronous garbage collection, for measuring *retained* memory.
+ * The suite runs without `--expose-gc`, so this file turns the flag on for
+ * its own worker and fetches `gc` from a fresh context, which is created
+ * after the flag is set and so has it as a global (the technique
+ * `jest-leak-detector` uses). No other file sees it.
+ */
+const collectGarbage = (() => {
+  setFlagsFromString("--expose-gc");
+  return runInNewContext("gc") as () => void;
+})();
+
+/**
+ * Heap and off-heap bytes still reachable after full collections. Two, because
+ * some native memory is only released on the second: after one, `external`
+ * still counts 10-17 MB left over from the gzip stream `beforeAll` wrote the
+ * dump through, which the next collection frees. `external` includes
+ * `arrayBuffers` (every `Buffer` and `Uint8Array`), so it alone is the
+ * off-heap figure.
+ */
+function retained(): { readonly heap: number; readonly offHeap: number } {
+  collectGarbage();
+  collectGarbage();
+  const m = process.memoryUsage();
+  return { heap: m.heapUsed, offHeap: m.external };
+}
+
+/** How many streamed items pass between retained-memory samples. */
+const SAMPLE_EVERY = 10_000;
+
 describe("constant memory", () => {
+  // `heapUsed` read without a collection counts garbage V8 hasn't collected
+  // yet, so a peak of raw samples measures V8's GC heuristics (how far it has
+  // grown the young generation, when its next full collection is due), not
+  // the pipeline (#112). With a 64 MB semi-space the old raw-peak version of
+  // this test read 43 MB while the pipeline retained under 1 MB. Instead,
+  // sample memory retained after a full collection, from inside the stream,
+  // every `SAMPLE_EVERY` items: whatever the pipeline holds at that point
+  // (buffered lines, chunks, decoded items) is reachable, and nothing else
+  // is counted.
   it("streams a dump larger than the heap ceiling without buffering it", async () => {
     // The ~300k-item dump (~57 MB uncompressed) was generated in beforeAll,
-    // so only the streaming is timed here.
+    // so only the streaming is measured here.
     expect(bigUncompressedBytes).toBeGreaterThan(45_000_000);
 
-    const base = process.memoryUsage();
-    let peakHeap = 0;
-    let peakOffHeap = 0;
-    const sampler = setInterval(() => {
-      const m = process.memoryUsage();
-      peakHeap = Math.max(peakHeap, m.heapUsed - base.heapUsed);
-      // Off-heap too, so a regression that buffered the dump into `Buffer`s /
-      // ArrayBuffers (invisible to `heapUsed`) is caught as well.
-      peakOffHeap = Math.max(
-        peakOffHeap,
-        m.external - base.external,
-        m.arrayBuffers - base.arrayBuffers,
-      );
-    }, 3);
+    const base = retained();
+    const samples: Array<{ readonly heap: number; readonly offHeap: number }> = [];
+    let seen = 0;
 
     const n = await count(
       Dumps.fromFile(bigPath).pipe(
         Dumps.entityRecords,
         Dumps.onlyEntities,
         Dumps.withClaim("P569"),
+        Stream.tap(() =>
+          Effect.sync(() => {
+            seen += 1;
+            if (seen % SAMPLE_EVERY === 0) {
+              const r = retained();
+              samples.push({ heap: r.heap - base.heap, offHeap: r.offHeap - base.offHeap });
+            }
+          }),
+        ),
       ),
     );
-    clearInterval(sampler);
 
     expect(n).toBe(BIG_ITEM_COUNT);
-    const peakHeapMb = peakHeap / 1_000_000;
-    const peakOffHeapMb = peakOffHeap / 1_000_000;
-    // Working set is one line at a time (observed heap ~10 MB, off-heap <1 MB,
-    // both flat across dump sizes). The 40 MB ceiling sits below the ~57 MB
-    // uncompressed dump, so a regression that buffered the file — on- or
-    // off-heap — would blow it, while the true constant-memory pipeline clears
-    // it with headroom for slow-GC CI runners. (The stronger proof — a 600 MB
-    // dump completing under a hard `--max-old-space-size=250` cap — is
-    // documented in the PR, not run in CI, to keep this suite fast.)
+    expect(samples).toHaveLength(BIG_ITEM_COUNT / SAMPLE_EVERY);
+    const mb = (bytes: number) => bytes / 1_000_000;
+    const peakHeapMb = mb(Math.max(...samples.map((s) => s.heap)));
+    const peakOffHeapMb = mb(Math.max(...samples.map((s) => s.offHeap)));
+    // Growth, on- and off-heap, from the first sample (pipeline warmed up,
+    // 10k items in) to the last (the whole dump read): a pipeline that holds
+    // one line at a time retains the same at both, while one that keeps
+    // something per line grows with the number of lines read in between.
+    const [first] = samples;
+    const last = samples.at(-1);
+    const growthMb =
+      first && last ? mb(last.heap + last.offHeap - first.heap - first.offHeap) : Number.NaN;
+
+    // Retained working set is one line at a time (observed: heap and off-heap
+    // each under 1 MB, growth under 0.1 MB, with or without coverage). The
+    // 40 MB ceiling sits below the ~57 MB uncompressed dump, so a regression
+    // that kept the file, on- or off-heap, would blow it; the growth bound
+    // catches a leak too small to reach the ceiling, such as a 50-byte record
+    // kept per line. (The stronger proof, a 600 MB dump completing under a
+    // hard `--max-old-space-size=250` cap, is documented in the PR, not run
+    // in CI, to keep this suite fast.)
     expect(peakHeapMb).toBeLessThan(40);
     expect(peakOffHeapMb).toBeLessThan(40);
+    expect(growthMb).toBeLessThan(8);
   }, 120_000);
 });
