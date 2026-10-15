@@ -320,15 +320,16 @@ describe("constant memory", () => {
       first && last ? mb(last.heap + last.offHeap - first.heap - first.offHeap) : Number.NaN;
 
     // Retained working set is one line at a time (observed: heap and off-heap
-    // each under 1 MB, growth under 0.1 MB, with or without coverage). The
-    // 40 MB ceiling sits below the ~57 MB uncompressed dump, so a regression
-    // that kept the file, on- or off-heap, would blow it; the growth bound
-    // catches a leak too small to reach the ceiling. Observed growth is
+    // each under 1 MB, growth within about 0.1 MB, with or without coverage).
+    // The 40 MB ceiling sits below the ~57 MB uncompressed dump, so a
+    // regression that kept the file, on- or off-heap, would blow it; the growth
+    // bound catches a leak too small to reach the ceiling. Observed growth is
     // about -0.1 to -0.02 MB (Node 20-26), so the 2 MB bound is ~20x the
-    // largest drift, and still fails a pipeline that keeps one number per
-    // line (~2.9 MB over the 290k lines between the first and last samples). (The stronger proof, a
-    // 600 MB dump completing under a hard `--max-old-space-size=250` cap, is
-    // documented in the PR, not run in CI, to keep this suite fast.)
+    // largest drift, and still fails a pipeline that keeps one number per line
+    // (~2.9 MB over the 290k lines between the first and last samples). (The
+    // stronger proof, a 600 MB dump completing under a hard
+    // `--max-old-space-size=250` cap, is documented in the PR, not run in CI,
+    // to keep this suite fast.)
     expect(peakHeapMb).toBeLessThan(40);
     expect(peakOffHeapMb).toBeLessThan(40);
     expect(growthMb).toBeLessThan(2);

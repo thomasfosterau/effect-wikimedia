@@ -90,9 +90,10 @@ function boundRaw(text: string): string {
  * the line is pure array framing (`[`, `]`, blank) and carries no record.
  * Total and lenient: a line that is not valid JSON yields a
  * {@link DumpLineError} with reason `dumps/invalid-json`, and valid JSON that
- * {@link decodeEntity} rejects one with reason `dumps/not-an-entity`: for
- * example `null`, a number, a string, an array, or an object with no valid
- * entity id or that Wikibase flagged `missing`. Never a throw.
+ * {@link Wikidata.decodeEntity} rejects one with reason
+ * `dumps/not-an-entity`: for example `null`, a number, a string, an array, or
+ * an object that has no valid entity id or that Wikibase flagged `missing`.
+ * Never a throw.
  */
 export function decodeEntityLine(line: string, lineNumber: number): EntityRecord | null {
   const body = stripFraming(line);
