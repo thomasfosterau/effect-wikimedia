@@ -75,7 +75,11 @@ export interface Comment {
   readonly closed: boolean;
 }
 
-/** An HTML entity reference: `&nbsp;`, `&#160;`, `&#x1F600;`. */
+/**
+ * An HTML entity reference: `&nbsp;`, `&#160;`, `&#x1F600;`. A named
+ * reference's name is any run of ASCII letters, digits and non-ASCII
+ * characters, as MediaWiki reads it, whether or not it names a known entity.
+ */
 export interface HtmlEntity {
   readonly _tag: "HtmlEntity";
   readonly span: Span;

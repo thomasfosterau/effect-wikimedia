@@ -45,9 +45,20 @@ const MARKERS = {
     "WikidataLookup.searchByIdentifier",
     "WikidataLookup.enrich",
   ],
+  // Wikitext has no `Effect.fn`: these are names from its HTML5 entity table
+  // (`src/wikitext/entities.ts`), the largest thing it bundles (#118).
+  wikitext: ["CounterClockwiseContourIntegral", "DoubleLongLeftRightArrow"],
 } as const;
 
-type Surface = "Action" | "Rest" | "Commons" | "Wikidata" | "Sparql" | "Dumps" | "Reconciliation";
+type Surface =
+  | "Action"
+  | "Rest"
+  | "Commons"
+  | "Wikidata"
+  | "Sparql"
+  | "Dumps"
+  | "Reconciliation"
+  | "Wikitext";
 
 /** Bundles a one-line entry that imports and uses only the given namespace from the package barrel. */
 async function bundleImporting(namespace: Surface): Promise<string> {
@@ -59,6 +70,7 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     Sparql: `import { Sparql } from "./index";\nconsole.log(Sparql.query, Sparql.hasLimitClause);\n`,
     Dumps: `import { Dumps } from "./index";\nconsole.log(Dumps.entityRecords, Dumps.pageRecords, Dumps.incrementalRecords, Dumps.fromFile, Dumps.gunzip);\n`,
     Reconciliation: `import { Reconciliation } from "./index";\nconsole.log(Reconciliation.WikidataLookup, Reconciliation.wikidataLookupLayer);\n`,
+    Wikitext: `import { Wikitext } from "./index";\nconsole.log(Wikitext.parse, Wikitext.stripToText, Wikitext.serialize);\n`,
   };
 
   const result = await build({
@@ -102,6 +114,7 @@ const SURFACES: readonly {
       MARKERS.sparql,
       MARKERS.dumps,
       MARKERS.reconciliation,
+      MARKERS.wikitext,
     ],
   },
   {
@@ -114,6 +127,7 @@ const SURFACES: readonly {
       MARKERS.sparql,
       MARKERS.dumps,
       MARKERS.reconciliation,
+      MARKERS.wikitext,
     ],
   },
   {
@@ -126,6 +140,7 @@ const SURFACES: readonly {
       MARKERS.sparql,
       MARKERS.dumps,
       MARKERS.reconciliation,
+      MARKERS.wikitext,
     ],
   },
   {
@@ -138,6 +153,7 @@ const SURFACES: readonly {
       MARKERS.sparql,
       MARKERS.dumps,
       MARKERS.reconciliation,
+      MARKERS.wikitext,
     ],
   },
   {
@@ -150,6 +166,7 @@ const SURFACES: readonly {
       MARKERS.wikidata,
       MARKERS.dumps,
       MARKERS.reconciliation,
+      MARKERS.wikitext,
     ],
   },
   {
@@ -164,6 +181,7 @@ const SURFACES: readonly {
       MARKERS.commons,
       MARKERS.sparql,
       MARKERS.reconciliation,
+      MARKERS.wikitext,
     ],
   },
   {
@@ -172,7 +190,21 @@ const SURFACES: readonly {
     // those are not foreign. The surfaces it never touches are.
     namespace: "Reconciliation",
     own: MARKERS.reconciliation,
-    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.sparql, MARKERS.dumps],
+    foreign: [MARKERS.rest, MARKERS.commons, MARKERS.sparql, MARKERS.dumps, MARKERS.wikitext],
+  },
+  {
+    // Wikitext imports nothing outside `src/wikitext/` (AGENTS.md).
+    namespace: "Wikitext",
+    own: MARKERS.wikitext,
+    foreign: [
+      MARKERS.action,
+      MARKERS.rest,
+      MARKERS.commons,
+      MARKERS.wikidata,
+      MARKERS.sparql,
+      MARKERS.dumps,
+      MARKERS.reconciliation,
+    ],
   },
 ];
 

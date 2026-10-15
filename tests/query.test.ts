@@ -18,6 +18,7 @@ import {
   templateName,
   walk,
 } from "../src/wikitext/index.ts";
+import { NAMED_ENTITIES } from "../src/wikitext/entities.ts";
 
 const ada = readFileSync(
   fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),
@@ -209,16 +210,72 @@ describe("strip to plain text: entities (#107)", () => {
     ["&hellip;", "\u2026"],
     ["&times;", "\u00d7"],
     ["&deg;", "\u00b0"],
+    // HTML5 names past the eleven `stripToText` knew before #118.
+    ["&eacute;", "\u00e9"],
+    ["&Eacute;", "\u00c9"],
+    ["&copy;", "\u00a9"],
+    ["&COPY;", "\u00a9"],
+    ["&AMP;", "&"],
+    ["&euro;", "\u20ac"],
+    ["&rarr;", "\u2192"],
+    ["&frac12;", "\u00bd"],
+    ["&rlm;", "\u200f"],
+    ["&NewLine;", "\n"],
+    ["&Afr;", "\u{1D504}"],
+    ["&CounterClockwiseContourIntegral;", "\u2233"],
+    // Two code points each.
+    ["&NotEqualTilde;", "\u2242\u0338"],
+    ["&ThickSpace;", "\u205f\u200a"],
+    ["&fjlig;", "fj"],
   ])("decodes the named entity %s", (src, text) => {
     expect(stripEntities(src)).toBe(text);
   });
 
-  // Each is a well-formed entity to the parser; a lookup on a plain object
-  // would find the inherited `Object.prototype` member and print its source.
-  it.each(["&unknown;", "&constructor;", "&toString;", "&valueOf;", "&hasOwnProperty;"])(
-    "keeps the unknown named entity %s as written",
+  // MediaWiki's `Sanitizer::MW_ENTITY_ALIASES`, read as `&rlm;`.
+  it.each([
+    ["the Hebrew alias", "&\u05e8\u05dc\u05de;"],
+    ["the Arabic alias", "&\u0631\u0644\u0645;"],
+  ])("decodes %s of &rlm;", (_, src) => {
+    expect(stripEntities(src)).toBe("\u200f");
+  });
+
+  it("decodes every name in the HTML5 table, and only those", () => {
+    // HTML5's 2,231 names less its 106 legacy forms without the `;`.
+    expect(NAMED_ENTITIES.size).toBe(2125);
+    for (const [name, text] of NAMED_ENTITIES) {
+      expect(name).toMatch(/^[A-Za-z0-9]+$/);
+      expect(text).toMatch(/^.{1,2}$/su); // one or two code points
+      expect(stripEntities(`&${name};`)).toBe(text);
+    }
+  });
+
+  // Each is a well-formed entity to the parser. Names are case-sensitive, so
+  // `&Amp;` and `&NBSP;` name nothing, and a name with a non-ASCII letter is
+  // read whole but is no entity. A lookup on a plain object would find the
+  // inherited `Object.prototype` member and print its source.
+  it.each([
+    "&unknown;",
+    "&Amp;",
+    "&NBSP;",
+    "&eacutex;",
+    "&caf\u00e9;",
+    "&\u05e8\u05dc;",
+    "&constructor;",
+    "&toString;",
+    "&valueOf;",
+    "&hasOwnProperty;",
+  ])("keeps the unknown named entity %s as written", (src) => {
+    expect(stripEntities(src)).toBe(src);
+  });
+
+  // MediaWiki matches a name only with its `;`, so HTML5's legacy forms
+  // without it (`&eacute`, `&copy`, `&amp`) are literal text.
+  it.each(["&eacute", "caf&eacute au lait", "&copy 2026", "&amp", "&AMP"])(
+    "leaves %s, without the semicolon, as literal text",
     (src) => {
-      expect(stripEntities(src)).toBe(src);
+      const doc = parse(src);
+      expect(doc.children.some((n) => n._tag === "HtmlEntity")).toBe(false);
+      expect(stripToText(doc)).toBe(src);
     },
   );
 
@@ -230,8 +287,9 @@ describe("strip to plain text: entities (#107)", () => {
   );
 
   // An `HtmlEntity` built by hand rather than parsed: only a whole decimal
-  // or hex reference decodes.
-  it.each(["&#-5;", "&#12.5;", "&#x41g;", "&#+65;", "&# 65;"])(
+  // or hex reference decodes. `&x#65;` would decode to "A" if
+  // `NUMERIC_ENTITY_RE` lost its `^` anchor.
+  it.each(["&#12.5;", "&#x41g;", "&#+65;", "&# 65;", "&x#65;", "&__proto__;"])(
     "keeps a hand-built malformed reference %s as written",
     (raw) => {
       const node = { _tag: "HtmlEntity", span: { start: 0, end: raw.length }, raw } as const;

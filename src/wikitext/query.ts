@@ -9,6 +9,7 @@
  */
 
 import type { Document, Node, Param, Template } from "./ast.ts";
+import { NAMED_ENTITIES } from "./entities.ts";
 import { serializeNodes } from "./serialize.ts";
 
 /** A fragment or a whole document — the common input to the query helpers. */
@@ -158,20 +159,12 @@ const STRIP_KEEP_RAW: ReadonlySet<string> = new Set([
   "source",
 ]);
 
-// A Map, not an object literal: a lookup on `{}` also finds the inherited
-// `constructor`, `toString`, … (`&constructor;` is a well-formed entity).
-const NAMED_ENTITIES: ReadonlyMap<string, string> = new Map([
-  ["amp", "&"],
-  ["lt", "<"],
-  ["gt", ">"],
-  ["quot", '"'],
-  ["apos", "'"],
-  ["nbsp", "\u00a0"],
-  ["ndash", "–"],
-  ["mdash", "—"],
-  ["hellip", "…"],
-  ["times", "×"],
-  ["deg", "°"],
+// MediaWiki's `Sanitizer::MW_ENTITY_ALIASES`: two names outside HTML5 that it
+// reads as `&rlm;` (U+200F RIGHT-TO-LEFT MARK), spelt in Hebrew letters
+// (resh, lamed, mem) and in Arabic letters (reh, lam, meem).
+const MW_ENTITY_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["\u05e8\u05dc\u05de", "rlm"],
+  ["\u0631\u0644\u0645", "rlm"],
 ]);
 
 const NUMERIC_ENTITY_RE = /^#(?:[xX]([0-9A-Fa-f]+)|([0-9]+))$/;
@@ -192,12 +185,15 @@ function isRenderableCodePoint(code: number): boolean {
   );
 }
 
-// Decodes one entity as a reader sees it; one MediaWiki would render as
-// literal text (an unknown name, an unrenderable code point) stays as written.
+// Decodes one entity as a reader sees it, as `Sanitizer::normalizeEntity`
+// and its numeric siblings do. A name that is neither an HTML5 entity nor one
+// of MediaWiki's aliases, and a reference to a code point
+// `isRenderableCodePoint` rejects, render as literal text, so they stay as
+// written.
 function decodeEntity(raw: string): string {
   const body = raw.slice(1, -1); // strip & and ;
   const numeric = NUMERIC_ENTITY_RE.exec(body);
-  if (numeric === null) return NAMED_ENTITIES.get(body) ?? raw;
+  if (numeric === null) return NAMED_ENTITIES.get(MW_ENTITY_ALIASES.get(body) ?? body) ?? raw;
   const [, hex, dec] = numeric;
   const code = hex === undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex, 16);
   return isRenderableCodePoint(code) ? String.fromCodePoint(code) : raw;
@@ -210,10 +206,13 @@ const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
  * markup removed. Templates and template arguments strip to nothing (they
  * are never expanded — an explicit non-goal), reference/citation tags are
  * dropped, wikilinks reduce to their label, and entities are decoded.
- * Decoding knows a few common named entities and every numeric reference;
- * an entity MediaWiki would show as literal text (an unknown name, or a
- * reference to a control character, a surrogate or a code point past
- * U+10FFFF) stays as written.
+ * Every entity MediaWiki renders as a character decodes: each HTML5 named
+ * entity with its `;` (`&eacute;`, `&AMP;`; names are case-sensitive, and a
+ * few stand for two code points), MediaWiki's aliases for `&rlm;`, and every
+ * decimal or hex reference to a code point it accepts. An entity MediaWiki
+ * shows as literal text stays as written: an unknown name, or a reference to
+ * a control character other than tab and newline (NUL and DEL included), a
+ * surrogate, U+FFFE, U+FFFF or a code point past U+10FFFF.
  *
  * This is a best-effort prose extraction, **not** a MediaWiki renderer: text
  * produced by template expansion is necessarily absent, so it matches an
