@@ -23,10 +23,10 @@
  * {@link ParsedSection.title}. Escape or sanitise them before putting them
  * into a page.
  *
- * The four `*Response` schemas (`WikitextResponse`, `PageMetadataResponse`,
- * `SearchResponse`, `ParseResponse`) are those raw wire shapes. They stay
- * exported, for the `normalise*` functions that take them, but are hidden
- * from the rendered API reference: depend on the normalised results instead.
+ * The four `*Response` schemas are those raw wire shapes, the decode step
+ * before each `normalise*` function. Read the typed results the normalisers
+ * build ({@link WikitextResult}, {@link PageMetadata},
+ * {@link SearchResult}, {@link ParsedPage}), not the raw fields.
  *
  * @copyright Thomas Foster
  * @module
@@ -57,44 +57,55 @@ function actionRequest(
 // ── Wikitext (action=query&prop=revisions) ───────────────────────────────
 
 const RevisionSlot = Schema.Struct({
+  /** The slot's content model (`"wikitext"`, `"Scribunto"`, …); not read. */
   contentmodel: Schema.optional(Schema.Unknown),
   // The Action API's wikitext slot content key is the literal `"*"`.
+  /** The slot's content; absent when the revision's text is hidden. */
   "*": Schema.optional(Schema.Unknown),
 });
 
 const Revision = Schema.Struct({
+  /** The revision ID. */
   revid: Schema.optional(Schema.Unknown),
+  /** When the revision was saved, as an ISO 8601 UTC string. */
   timestamp: Schema.optional(Schema.Unknown),
-  slots: Schema.optional(Schema.Struct({ main: Schema.optional(RevisionSlot) })),
+  /** The revision's content slots; only `main` is requested. */
+  slots: Schema.optional(
+    Schema.Struct({
+      /** The main slot, which holds the page's wikitext. */
+      main: Schema.optional(RevisionSlot),
+    }),
+  ),
 });
 
 const WikitextPage = Schema.Struct({
+  /** The page ID; absent for a missing or invalid title. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The page title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
+  /** The latest revision, as a one-element array; absent for a missing page. */
   revisions: Schema.optional(Schema.Array(Revision)),
 });
 
 /**
- * Lenient schema for the `action=query&prop=revisions&rvslots=main` response envelope.
- *
- * A raw wire shape, hidden from the rendered API reference; it stays
- * exported for `normaliseWikitext`.
- *
- * @hidden
+ * Lenient schema for the `action=query&prop=revisions&rvslots=main` response
+ * envelope: the decode step {@link getWikitext} runs before
+ * {@link normaliseWikitext}. Every field is optional and every leaf
+ * `Unknown`, so any JSON object decodes; read the typed
+ * {@link WikitextResult} that {@link normaliseWikitext} builds from it, not
+ * these fields.
  */
 export const WikitextResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
+      /** The requested pages, keyed by page ID (a negative number for a missing or invalid title). */
       pages: Schema.optional(Schema.Record(Schema.String, WikitextPage)),
     }),
   ),
 });
-/**
- * The decoded type of the `WikitextResponse` schema.
- *
- * @hidden
- */
 export type WikitextResponse = typeof WikitextResponse.Type;
 
 /** A page's current wikitext (its main slot), with the page and revision it came from. */
@@ -183,37 +194,43 @@ export const getWikitext = Effect.fn("Action.getWikitext")(function* (
 // ── Page metadata (action=query&prop=info) ───────────────────────────────
 
 const MetadataPage = Schema.Struct({
+  /** The page ID; absent for a missing, invalid or special title. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The page title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
+  /** The page's content model. */
   contentmodel: Schema.optional(Schema.Unknown),
+  /** MediaWiki's code for the page's content language. */
   pagelanguage: Schema.optional(Schema.Unknown),
+  /** When the page was last touched, as an ISO 8601 UTC string. */
   touched: Schema.optional(Schema.Unknown),
+  /** The ID of the page's latest revision. */
   lastrevid: Schema.optional(Schema.Unknown),
+  /** The latest revision's size in bytes. */
   length: Schema.optional(Schema.Unknown),
+  /** The page's canonical URL (requested with `inprop=url`). */
   fullurl: Schema.optional(Schema.Unknown),
 });
 
 /**
- * Lenient schema for the `action=query&prop=info` response envelope.
- *
- * A raw wire shape, hidden from the rendered API reference; it stays
- * exported for `normalisePageMetadata`.
- *
- * @hidden
+ * Lenient schema for the `action=query&prop=info` response envelope: the
+ * decode step {@link getPageMetadata} runs before
+ * {@link normalisePageMetadata}. Every field is optional and every leaf
+ * `Unknown`, so any JSON object decodes; read the typed
+ * {@link PageMetadata} that {@link normalisePageMetadata} builds from it,
+ * not these fields.
  */
 export const PageMetadataResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
+      /** The requested pages, keyed by page ID (a negative number for a missing, invalid or special title). */
       pages: Schema.optional(Schema.Record(Schema.String, MetadataPage)),
     }),
   ),
 });
-/**
- * The decoded type of the `PageMetadataResponse` schema.
- *
- * @hidden
- */
 export type PageMetadataResponse = typeof PageMetadataResponse.Type;
 
 /**
@@ -328,32 +345,32 @@ export const getPageMetadata = Effect.fn("Action.getPageMetadata")(function* (
 export const MAX_SEARCH_RESULTS = 50;
 
 const SearchHit = Schema.Struct({
+  /** The matching page's ID. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The matching page's title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** An HTML excerpt around the match. */
   snippet: Schema.optional(Schema.Unknown),
+  /** The page's word count. */
   wordcount: Schema.optional(Schema.Unknown),
 });
 
 /**
- * Lenient schema for the `action=query&list=search` response envelope.
- *
- * A raw wire shape, hidden from the rendered API reference; it stays
- * exported for `normaliseSearch`.
- *
- * @hidden
+ * Lenient schema for the `action=query&list=search` response envelope: the
+ * decode step {@link search} runs before {@link normaliseSearch}. Every
+ * field is optional and every leaf `Unknown`, so any JSON object decodes;
+ * read the typed {@link SearchResult}s that {@link normaliseSearch} builds
+ * from it, not these fields.
  */
 export const SearchResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
   query: Schema.optional(
     Schema.Struct({
+      /** The hits, in the search engine's relevance order. */
       search: Schema.optional(Schema.Array(SearchHit)),
     }),
   ),
 });
-/**
- * The decoded type of the `SearchResponse` schema.
- *
- * @hidden
- */
 export type SearchResponse = typeof SearchResponse.Type;
 
 /** One search hit, with its HTML-snippet excerpt (Wikimedia wraps matches in `<span class="searchmatch">`). */
@@ -430,42 +447,48 @@ export const search = Effect.fn("Action.search")(function* (
 // ── Parse (action=parse) ─────────────────────────────────────────────────
 
 const ParseSection = Schema.Struct({
+  /** The heading's nesting depth in the table of contents; not read. */
   toclevel: Schema.optional(Schema.Unknown),
+  /** The heading level, as a numeric string (`"2"` for `== x ==`). */
   level: Schema.optional(Schema.Unknown),
+  /** The heading's text, as HTML. */
   line: Schema.optional(Schema.Unknown),
+  /** The heading's fragment ID. */
   anchor: Schema.optional(Schema.Unknown),
 });
 
 /** A link/category/template entry keyed by the wikitext `"*"` (page-title) convention. */
 const TitledEntry = Schema.Struct({
+  /** The entry's title (a category's in database form, without its prefix). */
   "*": Schema.optional(Schema.Unknown),
 });
 
 const ParseResult = Schema.Struct({
+  /** The parsed page's title, in prefixed display form. */
   title: Schema.optional(Schema.Unknown),
+  /** The parsed page's ID. */
   pageid: Schema.optional(Schema.Unknown),
+  /** The page's section headings, in document order. */
   sections: Schema.optional(Schema.Array(ParseSection)),
+  /** The wiki pages the page links to. */
   links: Schema.optional(Schema.Array(TitledEntry)),
+  /** The categories the page is in. */
   categories: Schema.optional(Schema.Array(TitledEntry)),
+  /** The pages transcluded while parsing. */
   templates: Schema.optional(Schema.Array(TitledEntry)),
 });
 
 /**
- * Lenient schema for the `action=parse` response envelope.
- *
- * A raw wire shape, hidden from the rendered API reference; it stays
- * exported for `normaliseParse`.
- *
- * @hidden
+ * Lenient schema for the `action=parse` response envelope: the decode step
+ * {@link parsePage} runs before {@link normaliseParse}. Every field is
+ * optional and every leaf `Unknown`, so any JSON object decodes; read the
+ * typed {@link ParsedPage} that {@link normaliseParse} builds from it, not
+ * these fields.
  */
 export const ParseResponse = Schema.Struct({
+  /** The parse result; absent on an error response, such as for a missing page. */
   parse: Schema.optional(ParseResult),
 });
-/**
- * The decoded type of the `ParseResponse` schema.
- *
- * @hidden
- */
 export type ParseResponse = typeof ParseResponse.Type;
 
 /** One section heading from a parsed page. */
