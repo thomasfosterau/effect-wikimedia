@@ -177,37 +177,57 @@ export function tokenizeXml(buffer: string): {
 
 // ── Entity decoding ──────────────────────────────────────────────────────
 
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  lt: "<",
-  gt: ">",
-  amp: "&",
-  quot: '"',
-  apos: "'",
-};
+// XML's five predefined entities, and nothing more: the MediaWiki exporter
+// escapes with these alone, and XML defines no others without a DTD. A Map,
+// not an object literal: a lookup on `{}` also finds the inherited
+// `constructor`, `toString`, … (`&constructor;` is a well-formed entity).
+const XML_NAMED_ENTITIES: ReadonlyMap<string, string> = new Map([
+  ["lt", "<"],
+  ["gt", ">"],
+  ["amp", "&"],
+  ["quot", '"'],
+  ["apos", "'"],
+]);
 
-/** Resolves one entity body (the text between `&` and `;`), or `null` to leave it verbatim. */
-function resolveEntity(body: string): string | null {
-  if (body.startsWith("#x") || body.startsWith("#X")) {
-    const code = Number.parseInt(body.slice(2), 16);
-    return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : null;
-  }
-  if (body.startsWith("#")) {
-    const code = Number.parseInt(body.slice(1), 10);
-    return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : null;
-  }
-  return NAMED_ENTITIES[body] ?? null;
+// One entity: a whole hex reference (group 1), a whole decimal reference
+// (group 2) or a name (group 3). XML spells the hex marker `x`; `X` is also
+// accepted, as it always has been here.
+const XML_ENTITY_RE = /&(?:#[xX]([0-9A-Fa-f]+)|#([0-9]+)|([A-Za-z][A-Za-z0-9]*));/g;
+
+// XML 1.0's `Char` production: the code points a character reference may
+// name in a well-formed document. NUL, the C0 controls other than tab, LF and
+// CR, the surrogates, U+FFFE, U+FFFF and anything past U+10FFFF are excluded.
+function isXmlChar(code: number): boolean {
+  if (code < 0x20) return code === 0x09 || code === 0x0a || code === 0x0d;
+  if (code <= 0xd7ff) return true;
+  if (code < 0xe000) return false;
+  if (code <= 0xfffd) return true;
+  return code >= 0x10000 && code <= 0x10ffff;
 }
 
-/** Decodes the standard XML entities (named + numeric) in a text run. */
+/**
+ * Decodes the XML entity references in a text run, as the
+ * {@link XmlPageReader} does for each captured field: the five predefined
+ * named entities (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;`) and whole
+ * decimal (`&#65;`) or hex (`&#x41;`) character references.
+ *
+ * Total: it never throws, and anything it can't decode stays as written. That
+ * covers any other name (`&nbsp;`, `&constructor;`), a reference to a code
+ * point XML 1.0's `Char` production forbids (NUL and the other C0 controls
+ * except tab, LF and CR, a surrogate, U+FFFE, U+FFFF, or past U+10FFFF), and
+ * a malformed reference such as `&#65a;` or `&#12.5;`. So the result is always
+ * well-formed UTF-16.
+ */
 export function decodeXmlEntities(text: string): string {
   if (!text.includes("&")) return text;
-  return text.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (match, body: string) => {
-    try {
-      return resolveEntity(body) ?? match;
-    } catch {
-      return match; // an out-of-range code point — leave the entity verbatim
-    }
-  });
+  return text.replace(
+    XML_ENTITY_RE,
+    (match, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
+      if (name !== undefined) return XML_NAMED_ENTITIES.get(name) ?? match;
+      const code = hex === undefined ? Number(dec) : Number.parseInt(hex, 16);
+      return isXmlChar(code) ? String.fromCodePoint(code) : match;
+    },
+  );
 }
 
 // ── Field bounds & parsing ───────────────────────────────────────────────

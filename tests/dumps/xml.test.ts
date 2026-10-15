@@ -80,6 +80,73 @@ describe("decodeXmlEntities", () => {
       expect(Dumps.decodeXmlEntities(input)).toBe(expected);
     });
   }
+
+  it("decodes each of XML's five predefined entities", () => {
+    expect(Dumps.decodeXmlEntities("&amp;&lt;&gt;&quot;&apos;")).toBe("&<>\"'");
+  });
+
+  // The lookup is own-key only: an `Object.prototype` name is a well-formed
+  // entity, and an object-literal table "found" it as a built-in function.
+  for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    it(`keeps &${name}; as written`, () => {
+      expect(Dumps.decodeXmlEntities(`a &${name}; b`)).toBe(`a &${name}; b`);
+    });
+  }
+
+  it("keeps a name outside XML's five as written, even an HTML one", () => {
+    expect(Dumps.decodeXmlEntities("&nbsp;&AMP;&Lt;")).toBe("&nbsp;&AMP;&Lt;");
+  });
+
+  // XML 1.0 `Char`: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF].
+  const valid: ReadonlyArray<readonly [string, string]> = [
+    ["&#9;", "\t"],
+    ["&#xA;", "\n"],
+    ["&#xD;", "\r"],
+    ["&#x20;", " "],
+    ["&#xD7FF;", "퟿"],
+    ["&#xE000;", ""],
+    ["&#xFFFD;", "�"],
+    ["&#x10000;", "\u{10000}"],
+    ["&#x10FFFF;", "\u{10FFFF}"],
+    ["&#0065;", "A"],
+    ["&#X41;", "A"],
+  ];
+  for (const [input, expected] of valid) {
+    it(`decodes ${input}, a code point XML allows`, () => {
+      expect(Dumps.decodeXmlEntities(input)).toBe(expected);
+    });
+  }
+
+  const invalid: ReadonlyArray<string> = [
+    "&#0;",
+    "&#1;",
+    "&#x8;",
+    "&#xB;",
+    "&#xC;",
+    "&#xE;",
+    "&#x1F;",
+    "&#xD800;",
+    "&#xDFFF;",
+    "&#55357;&#56832;",
+    "&#xFFFE;",
+    "&#xFFFF;",
+    "&#x110000;",
+    `&#x${"F".repeat(300)};`,
+    `&#${"9".repeat(400)};`,
+  ];
+  for (const input of invalid) {
+    it(`keeps ${input.length > 24 ? `${input.slice(0, 20)}…` : input} as written, a code point XML forbids`, () => {
+      expect(Dumps.decodeXmlEntities(`a${input}b`)).toBe(`a${input}b`);
+    });
+  }
+
+  // Only a whole decimal or hex reference decodes; the leading digits of a
+  // malformed one never do.
+  for (const input of ["&#65a;", "&#9f;", "&#12.5;", "&#x41g;", "&#x;", "&#;", "&#-65;"]) {
+    it(`keeps the malformed reference ${input} as written`, () => {
+      expect(Dumps.decodeXmlEntities(input)).toBe(input);
+    });
+  }
 });
 
 // ── tokenizeXml carry (chunk-boundary safety) ────────────────────────────
