@@ -18,8 +18,11 @@
  * records: decode bytes → text → lines, strip the array framing per line,
  * `JSON.parse` and decode each entity through `Wikidata`'s model. **Lenient
  * by construction** — a line that fails to parse or is not a valid entity
- * becomes a typed {@link DumpLineError} *element*, never a stream failure, so
- * one corrupt line in a 100M-line dump does not tear the pipeline down.
+ * becomes a typed {@link DumpLineError} *element* rather than a stream
+ * failure, so one corrupt line in a 100M-line dump does not tear the pipeline
+ * down. One case escapes this today: a line whose nested containers are the
+ * wrong kind can make the entity decoder throw, which ends the stream as a
+ * defect (#147).
  *
  * Runtime-agnostic: this module imports only `effect` and the pure `Wikidata`
  * model (never its HTTP client). The byte source and decompression stages
@@ -38,9 +41,24 @@ import { decodeEntity, parsePropertyId, type WikidataItem } from "../wikidata.ts
 
 /** A successfully decoded dump line: the typed entity plus its 1-based line number. */
 export interface EntityHit {
+  /** Always `"entity"`; tells a hit from a {@link DumpLineError} (`"error"`). */
   readonly _tag: "entity";
-  /** 1-based line number in the dump (the opening `[` is line 1). */
+  /**
+   * 1-based line number in the decompressed dump text. {@link entityRecords}
+   * counts every line, the `[` / `]` framing and blank lines included, so in
+   * a whole dump the opening `[` is line 1 and the first entity line 2; a
+   * `\n`, a `\r\n` or a lone `\r` each end one line. From
+   * {@link decodeEntityLine} it is the `lineNumber` passed in.
+   */
   readonly line: number;
+  /**
+   * The entity on this line, as {@link Wikidata.decodeEntity} decodes it: an
+   * item, property or lexeme (filter with {@link byType}). Only `Q`, `P` and
+   * `L` ids pass the decoder, so a MediaInfo (`M…`) or EntitySchema (`E…`) line
+   * becomes a `"dumps/not-an-entity"` {@link DumpLineError}. Its `id` has
+   * passed the decoder's id check; a field the line lacks comes back empty
+   * (`{}`) or, for `type`, `null`.
+   */
   readonly item: WikidataItem;
 }
 
@@ -49,13 +67,31 @@ export type DumpLineErrorReason = "dumps/invalid-json" | "dumps/not-an-entity";
 
 /**
  * A dump line that did not decode to an entity — the lenient degrade. The
- * pipeline emits this as an element and continues; it never fails the stream.
- * `raw` is the offending line, bounded so a hostile dump cannot blow memory.
+ * pipeline emits this as an element and continues, rather than failing the
+ * stream. One case escapes it today: a line whose nested containers are the
+ * wrong kind (such as a `null` statement) can make the entity decoder throw,
+ * which ends the stream as a defect instead (#147). `raw` is the offending
+ * line, bounded so a hostile dump cannot blow memory.
  */
 export interface DumpLineError {
+  /** Always `"error"`; tells a per-line error from an {@link EntityHit} (`"entity"`). */
   readonly _tag: "error";
+  /** The line's 1-based number, counted as for {@link EntityHit.line}. */
   readonly line: number;
+  /**
+   * Why the line yielded no entity: `"dumps/invalid-json"` when `JSON.parse`
+   * rejects it, and `"dumps/not-an-entity"` when it parses but
+   * {@link Wikidata.decodeEntity} returns `null` (no valid entity id, where
+   * only `Q`, `P` and `L` ids count; flagged `missing`; or not an object at
+   * all).
+   */
   readonly reason: DumpLineErrorReason;
+  /**
+   * The offending line with its framing stripped as {@link stripFraming}
+   * does (trimmed, one trailing comma removed), cut to its first 500 UTF-16
+   * code units. The cut can split a surrogate pair, leaving a lone high
+   * surrogate at the end.
+   */
   readonly raw: string;
 }
 

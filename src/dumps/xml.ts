@@ -56,50 +56,161 @@ import * as Stream from "effect/Stream";
 
 /** The page a revision belongs to. */
 export interface PageRef {
+  /**
+   * The page's `<title>`, entity-decoded, trimmed and cut to 4,096 UTF-16
+   * code units; `null` when absent or blank. MediaWiki's exporter writes the
+   * namespace-prefixed title with spaces, such as `Category:Writers`.
+   */
   readonly title: string | null;
-  /** Namespace number (`0` = main, `14` = category, …). */
+  /**
+   * Namespace number (`0` = main, `14` = category, …), from `<ns>`. `null` when
+   * absent, above `Number.MAX_SAFE_INTEGER`, or not a non-negative decimal
+   * integer: surrounding whitespace and leading zeros are accepted (up to 18
+   * digits in all), but a sign, a fraction or an exponent gives `null`, not a
+   * rounded value.
+   */
   readonly ns: number | null;
+  /** The page id, from the page's own `<id>`; `null` under the same rules as {@link PageRef.ns}. */
   readonly id: number | null;
 }
 
 /** Who made a revision. A suppressed / anonymous edit leaves fields `null`. */
 export interface Contributor {
+  /**
+   * The `<username>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
+   * units; `null` when absent or blank, as for an anonymous (IP) edit or a
+   * suppressed contributor.
+   */
   readonly username: string | null;
+  /**
+   * The user id, from the contributor's `<id>`; `null` when absent, under
+   * the same rules as {@link PageRef.ns}. MediaWiki writes `0` for a username
+   * with no user id behind it, and that stays `0`.
+   */
   readonly id: number | null;
-  /** Set instead of `username` for an anonymous (IP) edit. */
+  /**
+   * Set instead of `username` for an anonymous (IP) edit: the `<ip>`, which
+   * MediaWiki writes in place of `<username>` and `<id>`. Entity-decoded,
+   * trimmed and cut like `username`, and not validated as an address; `null`
+   * when absent.
+   */
   readonly ip: string | null;
 }
 
-/** One revision's metadata and wikitext payload. */
+/** One revision's metadata and content (usually wikitext). */
 export interface Revision {
+  /**
+   * The revision id, from the revision's `<id>`. Never `null` on a
+   * {@link PageRevisionHit}: a revision whose `<id>` is absent or fails the
+   * rules of {@link PageRef.ns} becomes a {@link PageRevisionError} instead.
+   */
   readonly id: number | null;
+  /**
+   * The previous revision's id, from `<parentid>`; `null` when absent or
+   * invalid (rules as for {@link PageRef.ns}). MediaWiki omits `<parentid>`
+   * when a revision has no parent, as for a page's first revision.
+   */
   readonly parentId: number | null;
+  /**
+   * The `<timestamp>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
+   * units but not parsed or validated; `null` when absent or blank. MediaWiki
+   * writes ISO 8601 UTC, such as `2001-01-21T02:12:21Z`.
+   */
   readonly timestamp: string | null;
+  /**
+   * The `<contributor>`, or `null` when the revision has none. A suppressed
+   * contributor (`<contributor deleted="deleted" />`) still gives a
+   * {@link Contributor}, with every field `null`.
+   */
   readonly contributor: Contributor | null;
+  /**
+   * The edit summary, from `<comment>`: entity-decoded, trimmed and cut to
+   * 4,096 UTF-16 code units. `null` when absent, blank or suppressed
+   * (`<comment deleted="deleted" />`); MediaWiki omits an empty summary.
+   */
   readonly comment: string | null;
+  /**
+   * The content model id, from `<model>` (`wikitext`, `css`, `json`, …),
+   * entity-decoded, trimmed and cut to 4,096 UTF-16 code units; `null` when
+   * absent or blank. It should be the main slot's, but a revision with extra
+   * slots reports its last slot's instead (#154; see {@link Revision.text}).
+   */
   readonly model: string | null;
+  /**
+   * The serialization format, from `<format>` (`text/x-wiki`, …),
+   * entity-decoded, trimmed and cut like `model`; `null` when absent or blank.
+   * Taken from the last slot of a multi-slot revision, as `model` is (#154).
+   */
   readonly format: string | null;
-  /** The revision's wikitext (entity-decoded). Composes with the `Wikitext` parser downstream. */
+  /**
+   * The revision's content, from `<text>`: entity-decoded, but neither
+   * trimmed nor cut. It is wikitext when `model` is `wikitext`, and then
+   * composes with the `Wikitext` parser downstream. `null` when `<text>` is
+   * absent or empty, as in a stub dump or for suppressed text
+   * (`<text bytes="…" sha1="…" deleted="deleted" />`).
+   *
+   * A revision whose `<text>` (or any other captured field) runs past
+   * 16,777,216 UTF-16 code units, counted before entity decoding, becomes a
+   * {@link PageRevisionError} instead (#155). Export schema 0.11 puts each
+   * slot other than the main one in a `<content>` element; the reader
+   * doesn't know that element, so a multi-slot revision's `text`, `model` and
+   * `format` come from its last slot, not the main one (#154).
+   */
   readonly text: string | null;
+  /**
+   * The `<sha1>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code units,
+   * not validated; `null` when absent or empty, as MediaWiki writes it for a
+   * revision whose text is suppressed. Export schema 0.11 defines it as one
+   * hash over the content of all the revision's slots.
+   */
   readonly sha1: string | null;
+  /** `true` when the revision has a `<minor>` element (MediaWiki writes `<minor/>`), else `false`. */
   readonly minor: boolean;
 }
 
 /** A successfully decoded page/revision pair. */
 export interface PageRevisionHit {
+  /** Always `"revision"`; tells a hit from a {@link PageRevisionError} (`"error"`). */
   readonly _tag: "revision";
+  /**
+   * The enclosing `<page>`'s `title`, `ns` and `id` as read up to this
+   * revision (MediaWiki writes them before the first `<revision>`), in a
+   * fresh object per record. Every field is `null` for a revision outside
+   * any `<page>`.
+   */
   readonly page: PageRef;
+  /** The decoded revision. Its `id` is never `null`. */
   readonly revision: Revision;
 }
 
 /**
- * A revision that could not be decoded (missing required `<id>`, or a
- * truncated trailing page) — the lenient degrade, emitted as an element.
+ * A revision that could not be decoded — the lenient degrade, emitted as an
+ * element: a missing or invalid `<id>` (also reported for a `</revision>`
+ * with no revision open), a revision left unclosed before the next
+ * `<revision>`, `<page>` or `</page>`, a captured field over the length cap,
+ * or a stream that ends inside a revision. `detail` says which.
  */
 export interface PageRevisionError {
+  /** Always `"error"`; tells a per-record error from a {@link PageRevisionHit} (`"revision"`). */
   readonly _tag: "error";
+  /** Always `"dumps/malformed-revision"`; {@link PageRevisionError.detail} says which case. */
   readonly reason: "dumps/malformed-revision";
+  /**
+   * The page the revision belonged to, as read so far (see
+   * {@link PageRevisionHit.page}). The reader always sets it, so it is never
+   * `null` today, though the type allows it.
+   */
   readonly page: PageRef | null;
+  /**
+   * A short English description for logs. It is currently one of
+   * `"revision missing id"`, `"revision not closed before next revision"`,
+   * `"revision not closed before end of page"`,
+   * `"truncated revision at end of stream"` and
+   * `"revision field exceeds the 16777216-byte cap"`; that cap counts UTF-16
+   * code units of the still-escaped text, not bytes (#155).
+   * `"revision missing id"` also covers a `</revision>` with no revision
+   * open.
+   */
   readonly detail: string;
 }
 
@@ -110,9 +221,27 @@ export type PageRevisionRecord = PageRevisionHit | PageRevisionError;
 
 /** A structural open tag (`<page>`), close tag (`</page>`), or a text run. */
 export type XmlToken =
-  | { readonly t: "open"; readonly name: string }
-  | { readonly t: "close"; readonly name: string }
-  | { readonly t: "text"; readonly value: string };
+  | {
+      /** `"open"`: a start tag, or the first half of a self-closing one. */
+      readonly t: "open";
+      /** The element name from {@link tagName}: lower-cased, attributes dropped, any prefix kept. */
+      readonly name: string;
+    }
+  | {
+      /** `"close"`: an end tag, or the second half of a self-closing one. */
+      readonly t: "close";
+      /** The element name from {@link tagName}, as for an open tag. */
+      readonly name: string;
+    }
+  | {
+      /** `"text"`: a run of character data outside any tag. */
+      readonly t: "text";
+      /**
+       * The raw text, neither entity-decoded nor trimmed. One run of text can
+       * arrive as several tokens, for example split at a chunk boundary.
+       */
+      readonly value: string;
+    };
 
 /** Extracts a lower-cased element name from a tag body (`revision xml:space="…"` → `revision`). */
 export function tagName(body: string): string {
@@ -155,7 +284,12 @@ export function classifyTag(tag: string): readonly XmlToken[] {
  * streaming state is just the `rest` string.
  */
 export function tokenizeXml(buffer: string): {
+  /** The complete tokens in `buffer`, in order. */
   readonly tokens: readonly XmlToken[];
+  /**
+   * A trailing partial tag, from its `<`, to put in front of the next chunk;
+   * `""` when `buffer` doesn't end inside a tag.
+   */
   readonly rest: string;
 } {
   const tokens: XmlToken[] = [];
