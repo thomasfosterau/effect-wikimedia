@@ -62,6 +62,24 @@ Every Action API (`/w/api.php`) request carries `origin=*`, so a page on another
 
 `Rest` and `Sparql` requests don't carry the parameter, because the REST API and WDQS already send CORS headers without it. A request you build yourself for `Core.WikimediaClient` keeps any `origin` you put in its `params`, sent instead of `*`. If its `params` carry `crossorigin`, it gets no `origin=*`. `crossorigin` is MediaWiki's authenticated-CORS mode, which needs an `Authorization` header; without one, MediaWiki rejects the request. MediaWiki also returns a 403 for a request that carries both `origin` and `crossorigin`, so don't put both in `params`.
 
+### bzip2 dumps
+
+Wikidata publishes its entity dumps as `.json.gz` and `.json.bz2`. `Dumps.fromFile` decompresses a `.gz` file by itself, but Node has no bzip2, and the package ships no decoder. Bring one as the `decompressor`, for example [`unbzip2-stream`](https://www.npmjs.com/package/unbzip2-stream):
+
+```ts
+import * as Stream from "effect/Stream";
+import unbzip2 from "unbzip2-stream";
+import { Dumps } from "@thomasfosterau/effect-wikimedia";
+
+const itemCount = Dumps.fromFile("latest-all.json.bz2", { decompressor: () => unbzip2() }).pipe(
+  Dumps.entityRecords,
+  Dumps.onlyEntities,
+  Stream.runCount,
+);
+```
+
+`Dumps.decompressWith(() => unbzip2())` decompresses any other byte stream, such as a `Dumps.fromHttpRange` download. Return a new decoder from each call. `unbzip2-stream` returns a classic (pre-streams2) Node stream, which `Dumps` adapts for `stream.compose`; a `Transform` from another library works as is. `unbzip2-stream` is pure JavaScript and decodes on the event loop, so where both are published the `.json.gz` dump avoids that cost.
+
 ## API
 
 - **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` and `Api-User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), the Action API's `origin=*`, and the `maxlag` / retry-after etiquette every other module builds on.

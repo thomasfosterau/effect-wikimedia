@@ -29,6 +29,9 @@ catalog:
   # run the Effect oxlint preset, so `vite-plus` is not tied to its oxlint.
   "@effect/tsgo": 0.47.2
   "@types/node": ^26.1.2
+  # Types for `unbzip2-stream` below (test-only). They describe its stream as a
+  # `stream.Transform`, which it isn't: see that entry.
+  "@types/unbzip2-stream": ^1.4.3
   # Vitest's Istanbul coverage provider, which `vp run test:unit` loads to write
   # coverage/coverage-final.json for the coverage-backed CRAP scores in `vp run
   # fallow:health` (#102). It peers on vitest at the exact version, so it moves
@@ -69,6 +72,13 @@ catalog:
   # @effect/tsgo's bundled binary.
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
+  # Test-only: the bzip2 decoder the `Dumps` docs recommend for Wikidata's
+  # `.json.bz2` dumps, so tests/dumps/sources.test.ts can prove that recipe
+  # streams end to end (#128). Pure JS, MIT, no install scripts; its stream
+  # is a classic `through` stream, not a streams2 `Transform`, which
+  # `src/dumps/sources.ts` adapts before `stream.compose`. Never a runtime
+  # dependency: callers bring their own decoder.
+  unbzip2-stream: ^1.4.3
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override below

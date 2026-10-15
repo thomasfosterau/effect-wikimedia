@@ -1,7 +1,8 @@
 /**
  * Unit tests for the Node-only dump sources (`src/dumps/sources.ts`): the file
  * source with inline gzip decompression, the pluggable {@link Dumps.gunzip} /
- * {@link Dumps.decompressWith} stages, the **interruption teardown** guarantee
+ * {@link Dumps.decompressWith} stages (including bzip2 through `unbzip2-stream`,
+ * a classic stream, #128), the **interruption teardown** guarantee
  * (cancelling the Effect destroys the decompression source — no orphaned
  * work), and the **resumable** HTTP range download (offset tracked across a
  * mid-stream failure). The network is stubbed at `FetchHttpClient.Fetch`.
@@ -15,14 +16,24 @@ import {
   createReadStream,
   mkdtempSync,
   openSync,
+  readFileSync,
   ReadStream,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compose, Duplex, PassThrough, Readable, Transform } from "node:stream";
+import { fileURLToPath } from "node:url";
+import {
+  compose,
+  Duplex,
+  Stream as LegacyStream,
+  PassThrough,
+  Readable,
+  Transform,
+} from "node:stream";
 import { createGunzip, gzipSync } from "node:zlib";
+import unbzip2 from "unbzip2-stream";
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -132,6 +143,138 @@ describe("decompression stages", () => {
       Stream.runCollect(source.pipe(Dumps.decompressWith(Dumps.gunzipTransform))),
     );
     expect(decodeUtf8(bytes)).toBe(DUMP);
+  });
+});
+
+// ── bzip2 through a classic stream (#128) ────────────────────────────────
+
+const fixturePath = (name: string): string =>
+  fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
+
+/**
+ * `entities-slice.ndjson`, bzip2-compressed: made with
+ * `bzip2 -1 -c tests/fixtures/dumps/entities-slice.ndjson > tests/fixtures/dumps/entities-slice.ndjson.bz2`
+ * (bzip2 1.0.8). `-1` (100k blocks) rather than the default `-9` (900k)
+ * only changes the header's block-size digit, since the slice fits in one
+ * block either way; it lowers the input `unbzip2-stream` buffers before it
+ * decodes during `write()` from about 925 kB to 125 kB, so the multi-stream
+ * test below reaches that path with a small input.
+ */
+const SLICE_BZ2 = fixturePath("entities-slice.ndjson.bz2");
+const SLICE = readFileSync(fixturePath("entities-slice.ndjson"), "utf8");
+
+/** Whether a classic `through` stream, which has no `destroyed`, has been destroyed. */
+const throughDestroyed = (stream: LegacyStream & { readable: boolean; writable: boolean }) =>
+  !stream.readable && !stream.writable;
+
+describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
+  // `unbzip2-stream` returns a classic `through` stream: no `read()`, and
+  // `end` / `close` but never `finish`, so `stream.compose` failed it with
+  // "Premature close". The stage is adapted into a streams2 Duplex first.
+  it("streams a .bz2 dump through fromFile to its entities", async () => {
+    const ids = await runTest(
+      Stream.runCollect(
+        Dumps.fromFile(SLICE_BZ2, { decompressor: () => unbzip2() }).pipe(
+          Dumps.entityRecords,
+          Dumps.onlyEntities,
+          Stream.map((item) => item.id),
+        ),
+      ),
+    );
+    expect(ids).toEqual(["Q1", "Q42", "Q64", "P31", "Q5"]);
+  });
+
+  it("streams a .bz2 source through decompressWith to its bytes", async () => {
+    const source = Dumps.fromNodeReadable(() => createReadStream(SLICE_BZ2));
+    const bytes = await runTest(
+      Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2()))),
+    );
+    expect(decodeUtf8(bytes)).toBe(SLICE);
+  });
+
+  it("decodes a multi-stream input under backpressure", async () => {
+    // Concatenated bzip2 streams (what parallel compressors such as `pbzip2`
+    // write), in one 212 kB chunk: past 125 kB of input the decoder decodes
+    // inside `write()`, and that one write's output outruns the adapter's
+    // buffer, so the adapter pauses the decoder, whose `write()` then returns
+    // `false`, and waits for its `drain`.
+    const copies = 400;
+    const compressed = readFileSync(SLICE_BZ2);
+    const source = Stream.make(
+      new Uint8Array(Buffer.concat(Array.from({ length: copies }, () => compressed))),
+    );
+    // A write left waiting on a `drain` that never comes would hang.
+    const bytes = await orHung(
+      runTest(Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2())))),
+    );
+    expect(bytes).not.toBe("hung");
+    if (bytes === "hung") return;
+    expect(decodeUtf8(bytes)).toBe(SLICE.repeat(copies));
+  });
+
+  // The decoder reports truncated input with the `TypeError` its bit reader
+  // throws on running out of bytes, so that case pins only the prefix.
+  it.each([
+    ["corrupt", Buffer.from("BZh1 is not bzip2 data, though it starts like it"), "not valid bzip"],
+    ["truncated", readFileSync(SLICE_BZ2).subarray(0, -8), "dumps/source-read-failed: "],
+  ])("fails with a SourceError on %s input", async (_, input, message) => {
+    const source = Stream.make(new Uint8Array(input));
+    await withoutUncaught(async () => {
+      const error = await failsPromptly(source.pipe(Dumps.decompressWith(() => unbzip2())));
+      expect(error).toMatchObject({ description: expect.stringContaining(message) });
+    });
+  });
+
+  /**
+   * A hand-built classic duplex: a legacy `Stream` with the given `write`. It
+   * has no `destroyed` or async iterator, as `unbzip2-stream`'s has none
+   * (its types claim a `Transform`), so it is cast to the decompressor type.
+   */
+  const classicStream = (
+    write: (this: LegacyStream) => unknown,
+  ): LegacyStream & { readable: boolean; writable: boolean } & Dumps.NodeDuplexLike => {
+    const stream = Object.assign(new LegacyStream(), {
+      readable: true,
+      writable: true,
+      write,
+      end: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      destroy: () => {
+        stream.readable = stream.writable = false;
+        stream.emit("close");
+      },
+    });
+    return stream as typeof stream & Dumps.NodeDuplexLike;
+  };
+
+  it("fails with a SourceError when a classic stage's write() throws", async () => {
+    const stage = classicStream(() => {
+      throw new Error("write exploded");
+    });
+    const error = await failsPromptly(
+      Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
+    );
+    expect(error).toMatchObject({ description: expect.stringContaining("write exploded") });
+    expect(throughDestroyed(stage)).toBe(true);
+  });
+
+  it("fails with a SourceError when a classic stage closes before its output ends", async () => {
+    const stage = classicStream(function () {
+      this.emit("close");
+      return true;
+    });
+    const error = await failsPromptly(
+      Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
+    );
+    expect(error).toMatchObject({ description: expect.stringContaining("closed before") });
+  });
+
+  it("rejects a classic stage that has already ended", async () => {
+    const stage = unbzip2();
+    stage.end();
+    const error = await failsPromptly(Dumps.fromFile(SLICE_BZ2, { decompressor: () => stage }));
+    expect(error).toMatchObject({ description: expect.stringContaining("fresh Node stream") });
   });
 });
 
@@ -637,6 +780,42 @@ describe("interruption teardown", () => {
       expect(Exit.hasInterrupts(exit)).toBe(true);
       expect(await orHung(released)).toBe("released");
     });
+  });
+
+  it("destroys a classic bzip2 stage behind decompressWith, without an uncaught error, when interrupted while stalled", async () => {
+    const { readable, reading } = stalledReadable();
+    const stage = unbzip2();
+    await withoutUncaught(async () => {
+      await interruptsPromptly(
+        Dumps.fromNodeReadable(() => readable).pipe(Dumps.decompressWith(() => stage)),
+        reading,
+      );
+    });
+    expect(readable.destroyed).toBe(true);
+    expect(throughDestroyed(stage)).toBe(true);
+  });
+
+  it("destroys a classic bzip2 stage behind fromFile, without an uncaught error, when interrupted as soon as it is opened", async () => {
+    // As the gzip case below: the scope finalizer destroys the chain before
+    // it is first pulled, and the adapter must pass that on to the classic
+    // stream it wraps.
+    const stages: Array<ReturnType<typeof unbzip2>> = [];
+    const decompressor = () => {
+      Fiber.getCurrent()?.interruptUnsafe();
+      const stage = unbzip2();
+      stages.push(stage);
+      return stage;
+    };
+    await withoutUncaught(async () => {
+      const exit = await orHung(
+        runTestExit(Stream.runDrain(Dumps.fromFile(SLICE_BZ2, { decompressor }))),
+      );
+      expect(exit).not.toBe("hung");
+      if (exit === "hung") return;
+      expect(Exit.hasInterrupts(exit)).toBe(true);
+    });
+    expect(stages.length).toBe(1);
+    expect(stages.every(throughDestroyed)).toBe(true);
   });
 
   it("destroys fromFile's decompression chain, without an uncaught error, when interrupted as soon as it is opened", async () => {
