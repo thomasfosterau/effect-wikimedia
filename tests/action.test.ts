@@ -213,6 +213,42 @@ describe("Action.getPageMetadata", () => {
     });
     expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Nonexistent"))).toBeNull();
   });
+
+  // MediaWiki's `ApiQuery` writes an invalid title as `{ title, invalidreason,
+  // invalid }` and an existing special page as `{ ns, title, special }`, with
+  // no `missing` flag on either (`format=json` sends each flag as `""`).
+  it("returns null for a title the API reports as invalid", async () => {
+    const { urls, layer } = stubRouter({
+      "prop=info": {
+        status: 200,
+        body: {
+          query: {
+            pages: {
+              "-1": {
+                title: "Foo<Bar",
+                invalidreason: 'The requested page title contains invalid characters: "<".',
+                invalid: "",
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Foo<Bar"))).toBeNull();
+    expect(urls).toHaveLength(1);
+  });
+
+  it("returns null for an existing special page", async () => {
+    const { layer } = stubRouter({
+      "prop=info": {
+        status: 200,
+        body: { query: { pages: { "-1": { ns: -1, title: "Special:Random", special: "" } } } },
+      },
+    });
+    expect(
+      await run(layer, Action.getPageMetadata("en.wikipedia.org", "Special:Random")),
+    ).toBeNull();
+  });
 });
 
 describe("Action.search", () => {
