@@ -84,4 +84,4 @@ Commands and conventions: `AGENTS.md`; releases: `docs/RELEASING.md` (both in th
 
 ## License
 
-MIT — see the `LICENSE` file in the package.
+MIT — see the `LICENSE` file in the package. The `Wikitext` HTML entity table comes from the HTML Standard and the `character-entities` package; their licenses are in `THIRD_PARTY_NOTICES.md`, also in the package.
