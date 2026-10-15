@@ -173,15 +173,15 @@ export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestF
 export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
   /**
    * Seconds to wait before retrying: finite, non-negative, and possibly
-   * fractional. For a `429`, a `503` or a `maxlag` error body alike it is
-   * the response's `Retry-After` header value when that is a number of
-   * seconds ({@link parseRetryAfterHeader}), and
-   * {@link DEFAULT_MAXLAG_SECONDS} when the header is absent or an HTTP
-   * date. (MediaWiki answers a `maxlag` error with `Retry-After` set to the
-   * larger of the replica lag and 5 seconds.) It is the server's figure,
-   * uncapped: {@link RetryOptions.maxDelaySeconds} caps only how long
-   * {@link withMaxlagRetry} sleeps. Once retries are exhausted, the error
-   * that escapes carries the last attempt's value.
+   * fractional. For a `429`, a `503` or a `maxlag` error body alike it is the
+   * response's `Retry-After` header value when that is a number of seconds
+   * ({@link parseRetryAfterHeader}), and {@link DEFAULT_MAXLAG_SECONDS} when
+   * the header is absent or an HTTP date. (MediaWiki answers a `maxlag` error
+   * with `Retry-After` set to the larger of the request's `maxlag` parameter
+   * and 5 seconds.) It is the server's figure, uncapped:
+   * {@link RetryOptions.maxDelaySeconds} caps only how long
+   * {@link withMaxlagRetry} sleeps. Once retries are exhausted, the error that
+   * escapes carries the last attempt's value.
    */
   retryAfterSeconds: Schema.Finite,
 }) {}
@@ -368,16 +368,16 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
 
 /**
  * Detects the Action API's in-body maxlag signal: a `200 OK` response whose
- * JSON body is `{ error: { code: "maxlag", ... } }` (the REST/Parsoid
- * surface signals lag via HTTP status instead — see
- * {@link parseRetryAfterHeader}). Returns the etiquette-recommended backoff
- * in seconds ({@link DEFAULT_MAXLAG_SECONDS}) when detected, or `null` when
- * the body carries no maxlag signal. It reads only the body: MediaWiki also
- * sends a `Retry-After` header with this error (the larger of the replica
- * lag and 5 seconds), and {@link WikimediaClient} waits for that header's
- * value (capped by {@link RetryOptions.maxDelaySeconds}) when it is a number
- * of seconds, using this function's figure only when the header is absent
- * or an HTTP date.
+ * JSON body is `{ error: { code: "maxlag", ... } }` (the REST/Parsoid surface
+ * signals lag via HTTP status instead — see {@link parseRetryAfterHeader}).
+ * Returns the etiquette-recommended backoff in seconds
+ * ({@link DEFAULT_MAXLAG_SECONDS}) when detected, or `null` when the body
+ * carries no maxlag signal. It reads only the body: MediaWiki also sends a
+ * `Retry-After` header with this error (the larger of the request's `maxlag`
+ * parameter and 5 seconds), and {@link WikimediaClient} waits for that header's
+ * value (capped by {@link RetryOptions.maxDelaySeconds}) when it is a number of
+ * seconds, using this function's figure only when the header is absent or an
+ * HTTP date.
  */
 export function detectMaxlagSignal(body: unknown): number | null {
   if (typeof body !== "object" || body === null) return null;
