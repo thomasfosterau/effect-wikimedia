@@ -1,8 +1,10 @@
 /**
  * The `Wikitext` module of `@thomasfosterau/effect-wikimedia` (website#1065):
- * a pure, dependency-free wikitext → typed AST parser in the
- * `mwparserfromhell` niche. Wikitext in, a manipulable {@link Document} out
- * — no network, no template expansion, no HTML rendering.
+ * a pure wikitext → typed AST parser in the `mwparserfromhell` niche,
+ * written with the `@thomasfosterau/effect-parse` parser combinators.
+ * Wikitext in, a manipulable {@link Document} out — no network, no template
+ * expansion, no HTML rendering. {@link parse} is a plain synchronous
+ * function: it needs no Effect runtime and never fails.
  *
  * ```ts
  * import { Wikitext } from "@thomasfosterau/effect-wikimedia";

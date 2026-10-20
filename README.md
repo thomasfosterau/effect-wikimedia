@@ -12,7 +12,7 @@ Every surface is a namespace on the package's single `.` entry point (`import { 
 pnpm add @thomasfosterau/effect-wikimedia effect@rc
 ```
 
-`effect` is a required peer dependency (`>=4.0.0-rc.118`) — two copies break `Context` / `Layer` / `Schema` identity at runtime.
+`effect` is a required peer dependency (`>=4.0.0`) — two copies break `Context` / `Layer` / `Schema` identity at runtime.
 
 The package's declarations need no `@types/node`: the Node-only `Dumps` byte sources type their stream parameters structurally. A project that type-checks dependencies' declarations (`skipLibCheck: false`) still needs a `lib` that covers `effect`'s own: `ESNext.Disposable` (or `ESNext`) for `Disposable` / `AsyncDisposable`, and `DOM` for the web types they name (`URL`, `Request`, `ReadableStream`; `WebWorker` alone lacks the `Storage` that `effect/persistence` names).
 
@@ -88,7 +88,7 @@ const itemCount = Dumps.fromFile("latest-all.json.bz2", { decompressor: () => un
 - **`Commons`** — `filePathUrl` (`Special:FilePath` URL construction, with optional thumbnail width) and `getFileInfo`.
 - **`Wikidata`** — the typed Wikidata item / claim model: branded `Q`/`P`/`L` ids (`ItemId` / `PropertyId` / `LexemeId`), the full snak `DataValue` union (`wikibase-entityid`, `time`, `globecoordinate`, `quantity`, `monolingualtext`, `string`, `external-id`, and a lenient `unknown` degrade), statements with rank / qualifiers / references, sitelinks, and per-language label / description / alias maps. `getEntities` (batched `wbgetentities`, 50-id chunking) and `searchEntities` (`wbsearchentities`).
 - **`Sparql`** — the Wikidata Query Service (WDQS) SPARQL client: `query` (with a LIMIT-enforcing helper, `hasLimitClause`) decoding SPARQL 1.1 JSON results into typed terms (`uri` / `literal` / `bnode` / `unknown`), and `literalKind` mapping `xsd:*` datatypes back toward the Wikibase datavalue vocabulary.
-- **`Wikitext`** — a pure, dependency-free wikitext → typed AST parser, with a round-trip serializer and a query/manipulation surface. The one module that imports nothing, not even `Core`.
+- **`Wikitext`** — a pure wikitext → typed AST parser written with the [`@thomasfosterau/effect-parse`](https://www.npmjs.com/package/@thomasfosterau/effect-parse) combinators, with a round-trip serializer and a query/manipulation surface. The one module that imports no other, not even `Core`.
 - **`Dumps`** — Wikimedia dump processing as `Stream` pipelines: the Wikidata JSON entity dump decoded through `Wikidata`'s model, MediaWiki XML pages / incrementals via a scoped SAX-style scanner, and Node-only byte sources (file / resumable HTTP range) with pluggable gzip / bz2 decompression stages. Those byte sources are the package's only Node-only exports; the pipelines themselves stay runtime-agnostic over any `Stream<Uint8Array>`.
 - **`Reconciliation`** — the one _opinionated_ namespace, layered on top of `Action` / `Wikidata`: resolve a label or an external identifier to candidate Wikidata items (**Match**), then pull the selected facts for a confirmed QID (**Enrich**). It carries policy the surface modules deliberately don't — input validators, curated property allowlists, and the candidate/fact shapes. It is persistence-free: Match returns candidates, Enrich returns facts as a `WikidataFact` union tagged by kind (`Item`, `Identifier`, `Date`, `Image`), and storing either is the caller's job.
 

@@ -22,9 +22,10 @@
  *   (batched, 50-id chunking) and `wbsearchentities`.
  * - **`Sparql`** — the Wikidata Query Service (WDQS) SPARQL client: typed
  *   result terms and a LIMIT-enforcing query helper.
- * - **`Wikitext`** — a pure, dependency-free wikitext → typed AST parser:
- *   round-trip serializer plus a query/manipulation surface. The one module
- *   here that imports nothing (not even {@link Core}).
+ * - **`Wikitext`** — a pure wikitext → typed AST parser, written with the
+ *   `@thomasfosterau/effect-parse` combinators: round-trip serializer plus a
+ *   query/manipulation surface. The one module here that imports no other
+ *   (not even {@link Core}).
  * - **`Dumps`** — Wikimedia dump processing as `Stream` pipelines: the
  *   Wikidata JSON entity dump decoded through {@link Wikidata}'s model,
  *   MediaWiki XML pages / incrementals via a scoped SAX-style scanner, and

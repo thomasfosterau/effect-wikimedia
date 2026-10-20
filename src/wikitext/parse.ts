@@ -1,19 +1,26 @@
 /**
  * The wikitext parser (website#1065): raw wikitext in, a typed {@link Document}
- * out. Fail-soft by construction — every helper either consumes a
- * well-formed construct or leaves the cursor untouched so its opening
- * delimiter degrades to {@link Text}. The parser therefore *never throws*
- * and *always tiles* its input (see the invariants in
- * `./ast.ts`), which is what makes the round-trip and
- * fuzz guarantees hold.
+ * out. Fail-soft by construction — every construct either matches whole or
+ * fails without consuming input, so its opening delimiter degrades to
+ * {@link Text}. The parser therefore *never throws* and *always tiles* its
+ * input (see the invariants in `./ast.ts`), which is what makes the
+ * round-trip and fuzz guarantees hold.
  *
  * ## Design notes (the decisions website#1065 left open)
  *
- * - **Tokenizer granularity.** There is no discrete pre-tokenization pass:
- *   the scanner *is* the tokenizer, reading the source character by
- *   character with a single mutable cursor and recursing on structural
- *   delimiters. This keeps every byte accounted for (essential for exact
- *   round-trip) and avoids a second representation to keep in sync.
+ * - **Parser combinators (#168).** The grammar is written with
+ *   `@thomasfosterau/effect-parse`: each construct (template, argument,
+ *   wikilink, external link, autolink, comment, tag, entity, apostrophe run,
+ *   heading, table) is a `Parser` over the source string, composed from
+ *   literals, token sets, `alt`, `seq`, `repeat` and `dispatch`. Its cursor
+ *   is the scanner: there is no pre-tokenization pass, so every byte is
+ *   accounted for (essential for exact round-trip). The few steps that need
+ *   per-parse state or move the cursor non-locally (the fragment loop, the
+ *   table line scans) are `Parser.make` steps over the same cursor.
+ * - **Per-parse state** lives in the `Session` service in the parse
+ *   `State`'s context: the failed-open memo, the nesting depth and the
+ *   table scans' bracket map. A bounded region (a heading title, a table
+ *   cell) narrows `State.end`, so nested constructs cannot consume past it.
  * - **Brace disambiguation.** At a run of braces, a run of three or more is
  *   tried as an argument `{{{…}}}` first, then a template `{{…}}`; leftover
  *   braces fall through to text. This matches the common real cases; the
@@ -35,6 +42,8 @@
  * @module wikitext/parse
  */
 
+import { Ascii, Input, Parser, Token } from "@thomasfosterau/effect-parse";
+import * as Context from "effect/Context";
 import {
   type Argument,
   type AutoLink,
@@ -47,7 +56,6 @@ import {
   type HtmlEntity,
   type Node,
   type Param,
-  type Span,
   type Table,
   type TableCaption,
   type TableCell,
@@ -63,21 +71,616 @@ import { resolveQuotes } from "./quotes.ts";
 /** Recursion ceiling; deeper nesting degrades to text (fail-soft, no throw). */
 const MAX_DEPTH = 100;
 
+const NEWLINE = 0x0a;
+const PIPE = 0x7c;
+const BANG = 0x21;
+const SLASH = 0x2f;
+const SEMICOLON = 0x3b;
+
+/** The cursor every parser here reads: the source string. */
+type State = Input.State<string>;
+
+/** The per-parse state the grammar shares (see {@link Session}). */
+interface SessionState {
+  /**
+   * Opens (template / argument / wikilink / external link / table) that
+   * already failed, keyed by offset, region end and kind (see
+   * `memoFailure`), so a later attempt at the same spot
+   * returns at once. Without this, adversarial delimiter storms (`{{{{{{…`)
+   * backtrack exponentially — argument-then-template at every position, each
+   * recursing. The memo collapses the work to O(n²) worst case. The key
+   * includes the region end, since the same spot can be scanned under a
+   * narrowed heading-title or table-cell bound.
+   */
+  readonly failed: Set<number>;
+  /** How many fragments enclose the cursor; constructs stop at {@link MAX_DEPTH}. */
+  depth: number;
+  /**
+   * Where each bracketed construct in the source ends (`matchBrackets`),
+   * built on the first table scan that needs it.
+   */
+  nestedEnds: ReadonlyMap<number, number> | undefined;
+}
+
+/** The per-parse state, provided to the grammar through the parse context. */
+class Session extends Context.Service<Session, SessionState>()(
+  "effect-wikimedia/WikitextSession",
+) {}
+
+/** A parser over wikitext source that reads the parse's {@link Session}. */
+type WikiParser<A> = Parser.Parser<A, never, Session>;
+
+const session = (state: State): SessionState =>
+  Context.get(state.context as Context.Context<Session>, Session);
+
+const literal = Token.literal;
+
+// ── custom combinators ────────────────────────────────────────────────
+
+/** The kinds of open the failure memo distinguishes. */
+const Open = { Argument: 0, Template: 1, Wikilink: 2, ExternalLink: 3, Table: 4 } as const;
+const OPEN_KINDS = 5;
+
+/**
+ * Fails at once where `self` already failed at this offset under this region
+ * end (see {@link SessionState.failed}), and records each new failure.
+ */
+function memoFailure<A>(
+  kind: (typeof Open)[keyof typeof Open],
+  self: WikiParser<A>,
+): WikiParser<A> {
+  return Parser.make((state) => {
+    const failed = session(state).failed;
+    const key = (state.pos * (state.input.length + 1) + state.end) * OPEN_KINDS + kind;
+    if (failed.has(key)) return state.backtrack("Fail");
+    const a = self.step(state);
+    if (a === Input.Fail) failed.add(key);
+    return a;
+  });
+}
+
+/** Runs `self` one nesting level deeper (see {@link MAX_DEPTH}). */
+function nested<A>(self: WikiParser<A>): WikiParser<A> {
+  return Parser.make((state) => {
+    const s = session(state);
+    s.depth++;
+    const a = self.step(state);
+    s.depth--;
+    return a;
+  });
+}
+
+/**
+ * Parses `[start, end)` alone with `fragment` (narrowing the region so
+ * nothing nested can reach past `end`), then leaves the cursor at `end`.
+ */
+function fragmentWithin(
+  state: State,
+  start: number,
+  end: number,
+  fragment: WikiParser<Node[]>,
+): Node[] {
+  const savedEnd = state.end;
+  state.pos = start;
+  state.end = end;
+  const nodes = fragment.step(state);
+  state.end = savedEnd;
+  state.pos = end;
+  return nodes === Input.Fail ? [] : nodes;
+}
+
+const atLineStart = (state: State, pos: number): boolean =>
+  pos === 0 || state.input.charCodeAt(pos - 1) === NEWLINE;
+
+/** Succeeds, consuming nothing, at the start of a line. */
+const lineStart: WikiParser<void> = Parser.make((state) =>
+  atLineStart(state, state.pos) ? undefined : state.backtrack("Verify"),
+);
+
+// ── fragments ────────────────────────────────────────────────────────
+
+/**
+ * Characters that may start a construct or a stop delimiter. Text between
+ * them is taken in one run; at one of them the constructs are tried first.
+ */
+const SPECIAL = "{[<&'=hH|]}";
+const PLAIN_TEXT = Token.takeTill(SPECIAL, { min: 1 });
+
+/**
+ * A membership table for a set of ASCII characters, indexed by char code: a
+ * lookup the fragment loop makes at every special character, so cheaper
+ * than a `Set` (anything at or above 0x80 reads `undefined`, i.e. absent).
+ */
+function asciiTable(chars: Iterable<string>): Uint8Array {
+  const table = new Uint8Array(0x80);
+  for (const c of chars) table[c.charCodeAt(0)] = 1;
+  return table;
+}
+
+const SPECIAL_CODES = asciiTable(SPECIAL);
+
+const text = (src: string, start: number, end: number): Text => ({
+  _tag: "Text",
+  span: { start, end },
+  text: src.slice(start, end),
+});
+
+/**
+ * The delimiters that end a fragment, such as `}}` and `|` inside a
+ * template. `first` holds their first characters, so the fragment tries
+ * `parser` only where one of them can start.
+ */
+interface Stop {
+  readonly first: Uint8Array;
+  readonly parser: WikiParser<unknown>;
+}
+
+const stopAt = (...delimiters: readonly string[]): Stop => ({
+  first: asciiTable(delimiters.map((d) => d[0])),
+  parser: Parser.alt(...delimiters.map((d) => literal(d))),
+});
+
+/** Whether a {@link Stop} delimiter starts at the cursor (consuming nothing). */
+function atStop(state: State, stop: Stop): boolean {
+  if (stop.first[state.input.charCodeAt(state.pos)] !== 1) return false;
+  const start = state.pos;
+  const matched = stop.parser.step(state) !== Input.Fail;
+  state.pos = start;
+  return matched;
+}
+
+/**
+ * A run of nodes up to `stop` (left unconsumed), the region end, or the end
+ * of input; never fails. `block` enables the line-level constructs
+ * (headings, tables). Text between constructs is coalesced into one
+ * {@link Text} node, and the run's apostrophe markers are resolved by
+ * `resolveQuotes`.
+ */
+function fragment(stop: Stop | undefined, block: boolean): WikiParser<Node[]> {
+  return Parser.make((state) => {
+    const { construct, opens } = block ? blockConstructs : inlineConstructs;
+    const src = state.input;
+    // Constants for this run: every construct restores the region end and
+    // the nesting depth before it returns.
+    const end = state.end;
+    const deep = session(state).depth >= MAX_DEPTH;
+    const nodes: Node[] = [];
+    let textStart = state.pos;
+    while (state.pos < end) {
+      const start = state.pos;
+      const c = src.charCodeAt(start);
+      if (SPECIAL_CODES[c] !== 1) {
+        PLAIN_TEXT.step(state);
+        continue;
+      }
+      if (stop !== undefined && atStop(state, stop)) break;
+      const node = deep || opens[c] !== 1 ? Input.Fail : construct.step(state);
+      if (node === Input.Fail) {
+        // Not the start of a construct (or one that failed to close): the
+        // character belongs to the surrounding text run.
+        state.pos = start + 1;
+        continue;
+      }
+      if (start > textStart) nodes.push(text(src, textStart, start));
+      nodes.push(node);
+      textStart = state.pos;
+    }
+    if (state.pos > textStart) nodes.push(text(src, textStart, state.pos));
+    return resolveQuotes(nodes, src);
+  });
+}
+
+/** A fragment nested in a construct, one level deeper. */
+const inner = (stop: Stop | undefined, block = false): WikiParser<Node[]> =>
+  nested(fragment(stop, block));
+
+const pipe = literal("|");
+const argumentName = inner(stopAt("}}}", "|"));
+const argumentDefault = inner(stopAt("}}}"));
+const templatePart = inner(stopAt("}}", "|"));
+const paramName = inner(stopAt("}}", "|", "="));
+const linkPart = inner(stopAt("]]", "|"));
+const externalLabel = inner(stopAt("]"));
+const headingTitle = inner(undefined);
+const cellContent = inner(undefined, true);
+
+// ── braces: templates and arguments ───────────────────────────────────
+
+const argument: WikiParser<Argument> = memoFailure(
+  Open.Argument,
+  Parser.map(
+    Parser.withSpan(
+      Parser.seq(
+        literal("{{{"),
+        argumentName,
+        Parser.optional(Parser.preceded(pipe, argumentDefault)),
+        literal("}}}"),
+      ),
+    ),
+    ([[, name, def], span]): Argument => ({ _tag: "Argument", span, name, default: def }),
+  ),
+);
+
+const param: WikiParser<Param> = Parser.map(
+  Parser.seq(paramName, Parser.optional(Parser.preceded(literal("="), templatePart))),
+  ([first, value]): Param =>
+    value === undefined ? { name: undefined, value: first } : { name: first, value },
+);
+
+const template: WikiParser<Template> = memoFailure(
+  Open.Template,
+  Parser.map(
+    Parser.withSpan(
+      Parser.seq(
+        literal("{{"),
+        templatePart,
+        Parser.repeat(Parser.preceded(pipe, param)),
+        literal("}}"),
+      ),
+    ),
+    ([[, name, params], span]): Template => ({ _tag: "Template", span, name, params }),
+  ),
+);
+
+// ── tables ────────────────────────────────────────────────────────────
+//
+// A table is line-oriented: `{|` and its attribute line, then caption
+// (`|+`), row (`|-`) and cell (`|` / `!`) marker lines up to `|}`. Each
+// marker's attribute text runs to the end of its *logical* line, and a
+// cell's content runs on across the non-marker lines that follow it. Cell
+// and caption *content* is ordinary wikitext, parsed by a fragment bounded
+// to the cell (see `fragmentWithin`), so nested constructs — including a
+// nested table — parse normally.
+//
+// The scans that find a table's structure (where a line ends, the `||`/`!!`
+// cell separators, a cell's attribute `|`) step over every nested construct
+// whose `|`, `!` or line break belongs to it rather than to the table: a
+// template, argument, wikilink, closed comment or extension tag (#132; see
+// `findTopLevel`). MediaWiki gets the same effect, wikilinks aside, by
+// building tables only after its preprocessor has expanded templates and
+// hidden comments and extension tags. Line-start markers are therefore read
+// per *logical* line, one whose breaks inside such constructs don't count;
+// the filler scan also tracks `{|`/`|}` nesting so a nested table's own
+// row/cell lines aren't mistaken for this table's structure.
+
+/**
+ * The index just past the nested construct opening at `at` whose `|`, `!`
+ * and line breaks belong to it rather than to a table: a template or
+ * argument, a wikilink, a closed comment, or an extension tag (body
+ * included), as `matchBrackets` matched them. Otherwise `at + 1`, so an
+ * opener that never closes is literal text, as MediaWiki's preprocessor
+ * reads it. One that closes past the region end is literal too, so a nested
+ * table's scan stays inside its cell even where the matcher and the
+ * grammar disagree about a construct.
+ */
+function skipNested(state: State, at: number): number {
+  const c = state.input.charCodeAt(at);
+  if (c !== 0x7b && c !== 0x5b && c !== 0x3c) return at + 1; // only `{`, `[` and `<` open one
+  const s = session(state);
+  s.nestedEnds ??= matchBrackets(state.input, (i) => extensionTagEnd(state, i));
+  const end = s.nestedEnds.get(at);
+  return end !== undefined && end <= state.end ? end : at + 1;
+}
+
+/**
+ * The first index in `[from, to)` at which `test` holds, stepping over each
+ * nested construct (see `skipNested`); `to` when there is none.
+ */
+function findTopLevel(
+  state: State,
+  from: number,
+  to: number,
+  test: (i: number) => boolean,
+): number {
+  let i = from;
+  while (i < to) {
+    if (test(i)) return i;
+    i = skipNested(state, i);
+  }
+  return to;
+}
+
+/**
+ * End of the logical line containing `pos`: the first `\n` outside a nested
+ * construct (see `findTopLevel`), exclusive, or the region end. A
+ * multi-line template in a cell is therefore part of the line that opens it.
+ */
+const tableLineEnd = (state: State, pos: number): number =>
+  findTopLevel(state, pos, state.end, (i) => state.input.charCodeAt(i) === NEWLINE);
+
+/** The rest of the logical line, and the newline that ends it. */
+const logicalLine: WikiParser<void> = Parser.make((state) => {
+  const end = tableLineEnd(state, state.pos);
+  state.pos = end < state.end ? end + 1 : end;
+});
+
+const isTableMarker = (c: number): boolean => c === BANG || c === PIPE;
+
+/**
+ * From a line start, whole logical lines that are not one of this table's
+ * own marker lines (`|}`, `|-`, `|+`, `!`, `|`), tracking `{|`/`|}` nesting
+ * so a nested table's interior is skipped rather than mistaken for this
+ * table's structure. Stops exactly at the next marker line, or the region end.
+ */
+const tableFiller: WikiParser<void> = Parser.make((state) => {
+  const src = state.input;
+  let depth = 0;
+  while (state.pos < state.end) {
+    if (depth === 0 && isTableMarker(src.charCodeAt(state.pos))) return;
+    if (src.startsWith("{|", state.pos)) depth++;
+    else if (depth > 0 && src.startsWith("|}", state.pos)) depth--;
+    logicalLine.step(state);
+  }
+});
+
+/** A marker's attribute text: the rest of its logical line, then any filler. */
+const markerLine: WikiParser<string> = Parser.taken(Parser.seq(logicalLine, tableFiller));
+
+const trailingNewline = Parser.optional(literal("\n"));
+
+/**
+ * MediaWiki's single-pipe cell/caption attribute rule (`Parser::doTableStuff`):
+ * the first `|` in `[from, to)` outside a nested construct (see
+ * `findTopLevel`) splits attributes from content, *unless* a `[[`
+ * comes before it (MediaWiki's guard against reading a wikilink's
+ * surroundings as attributes).
+ */
+function splitCellAttrs(
+  state: State,
+  from: number,
+  to: number,
+): { attrs: string | undefined; contentStart: number } {
+  const src = state.input;
+  const at = findTopLevel(state, from, to, (i) => {
+    const c = src.charCodeAt(i);
+    return c === PIPE || (c === 0x5b && src.charCodeAt(i + 1) === 0x5b); // | or [[
+  });
+  if (at >= to || src.charCodeAt(at) !== PIPE) return { attrs: undefined, contentStart: from };
+  return { attrs: src.slice(from, at), contentStart: at + 1 };
+}
+
+const tableCaption: WikiParser<TableCaption> = Parser.make((state) => {
+  const start = state.pos;
+  if (literal("|+").step(state) === Input.Fail) return Input.Fail;
+  const lineEnd = tableLineEnd(state, state.pos);
+  const { attrs, contentStart } = splitCellAttrs(state, state.pos, lineEnd);
+  state.pos = lineEnd;
+  trailingNewline.step(state);
+  tableFiller.step(state);
+  const content = fragmentWithin(state, contentStart, state.pos, cellContent);
+  return { span: { start, end: state.pos }, attrs, content };
+});
+
+/**
+ * Every cell opened on a `!`/`|` marker line (further split by `!!`/`||`
+ * outside nested constructs), the last one extended across any following
+ * non-marker lines. Leaves the cursor at the next marker line (or the
+ * region end).
+ */
+const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
+  const src = state.input;
+  const marker = src.charCodeAt(state.pos);
+  if (state.pos >= state.end || !isTableMarker(marker)) return state.backtrack("OneOf");
+  const header = marker === BANG;
+  const isSep = (i: number): boolean =>
+    src.charCodeAt(i) === marker && src.charCodeAt(i + 1) === marker; // !! or ||
+  const lineEnd = tableLineEnd(state, state.pos);
+  const cells: TableCell[] = [];
+  let openStart = state.pos;
+  let segStart = state.pos + 1; // past the single marker char
+  let inline = false;
+
+  for (;;) {
+    const sepIdx = findTopLevel(state, segStart, lineEnd, isSep);
+    const hasMore = sepIdx < lineEnd;
+    const { attrs, contentStart } = splitCellAttrs(state, segStart, sepIdx);
+
+    let contentEnd = sepIdx;
+    if (!hasMore) {
+      state.pos = lineEnd;
+      trailingNewline.step(state);
+      tableFiller.step(state);
+      contentEnd = state.pos;
+    }
+    const content = fragmentWithin(state, contentStart, contentEnd, cellContent);
+    cells.push({ span: { start: openStart, end: contentEnd }, header, inline, attrs, content });
+
+    if (!hasMore) return cells;
+    openStart = sepIdx;
+    segStart = sepIdx + 2;
+    inline = true;
+  }
+});
+
+/** One item between a table's `{|` line and its `|}`. */
+type TableItem =
+  | { readonly _tag: "Row"; readonly start: number; readonly open: string }
+  | { readonly _tag: "Caption"; readonly caption: TableCaption }
+  | { readonly _tag: "Cells"; readonly cells: TableCell[] };
+
+const tableItem: WikiParser<TableItem> = Parser.preceded(
+  Parser.not(literal("|}")),
+  Parser.alt(
+    Parser.map(
+      Parser.withSpan(Parser.preceded(literal("|-"), markerLine)),
+      ([open, span]): TableItem => ({ _tag: "Row", start: span.start, open }),
+    ),
+    Parser.map(tableCaption, (caption): TableItem => ({ _tag: "Caption", caption })),
+    Parser.map(tableCells, (cells): TableItem => ({ _tag: "Cells", cells })),
+  ),
+);
+
+/**
+ * Groups a table's items into captions and rows. Cells before any `|-` open
+ * an implicit row (`open` undefined); each row runs to the next `|-` or the
+ * closing `|}` at `closeStart`, captions within it included.
+ */
+function tableRows(
+  items: readonly TableItem[],
+  closeStart: number,
+): { captions: TableCaption[]; rows: TableRow[] } {
+  const captions: TableCaption[] = [];
+  const rows: TableRow[] = [];
+  let row: { start: number; open: string | undefined; cells: TableCell[] } | undefined;
+  const flush = (end: number): void => {
+    if (row) rows.push({ span: { start: row.start, end }, open: row.open, cells: row.cells });
+  };
+  for (const item of items) {
+    switch (item._tag) {
+      case "Row":
+        flush(item.start);
+        row = { start: item.start, open: item.open, cells: [] };
+        break;
+      case "Caption":
+        captions.push(item.caption);
+        break;
+      case "Cells":
+        row ??= { start: item.cells[0].span.start, open: undefined, cells: [] };
+        row.cells.push(...item.cells);
+        break;
+    }
+  }
+  flush(closeStart);
+  return { captions, rows };
+}
+
+/** `{|` at the start of a line, at block level, opens a table — see {@link Table}. */
+const table: WikiParser<Table> = memoFailure(
+  Open.Table,
+  Parser.map(
+    Parser.withSpan(
+      Parser.seq(lineStart, literal("{|"), markerLine, Parser.repeat(tableItem), literal("|}")),
+    ),
+    ([[, , open, items], span]): Table => ({
+      _tag: "Table",
+      span,
+      open,
+      ...tableRows(items, span.end - 2),
+    }),
+  ),
+);
+
+// ── brackets: wikilinks and external links ────────────────────────────
+
+const wikilink: WikiParser<Wikilink> = memoFailure(
+  Open.Wikilink,
+  Parser.map(
+    Parser.withSpan(
+      Parser.seq(
+        literal("[["),
+        linkPart,
+        Parser.repeat(Parser.preceded(pipe, linkPart)),
+        literal("]]"),
+      ),
+    ),
+    ([[, target, segments], span]): Wikilink => ({ _tag: "Wikilink", span, target, segments }),
+  ),
+);
+
 /**
  * Recognised URL protocols for bracketed external links. Mirrors the common
  * subset of MediaWiki's `$wgUrlProtocols`. A `[` not followed by one of
- * these stays literal text.
+ * these (then `:`), or by `//`, stays literal text.
  */
-const PROTOCOL_RE =
-  /^(?:(?:https?|ftps?|sftp|ssh|svn|git|gopher|ircs?|news|nntp|redis|tel|telnet|urn|worldwind|xmpp|magnet|mailto|bitcoin|geo|sips?|sms):|\/\/)/i;
+const PROTOCOLS: ReadonlySet<string> = new Set([
+  "bitcoin",
+  "ftp",
+  "ftps",
+  "geo",
+  "git",
+  "gopher",
+  "http",
+  "https",
+  "irc",
+  "ircs",
+  "magnet",
+  "mailto",
+  "news",
+  "nntp",
+  "redis",
+  "sftp",
+  "sip",
+  "sips",
+  "sms",
+  "ssh",
+  "svn",
+  "tel",
+  "telnet",
+  "urn",
+  "worldwind",
+  "xmpp",
+]);
+
+const protocol = Parser.alt(
+  Parser.terminated(
+    Parser.filter(Ascii.alpha1, (name) => PROTOCOLS.has(name.toLowerCase())),
+    literal(":"),
+  ),
+  literal("//"),
+);
+
+const externalLink: WikiParser<ExternalLink> = memoFailure(
+  Open.ExternalLink,
+  Parser.map(
+    Parser.withSpan(
+      Parser.seq(
+        literal("["),
+        Parser.peek(protocol),
+        // The URL ends at whitespace, a closing `]`, or an angle bracket.
+        Token.takeTill(" \t\n\r]<>", { min: 1 }),
+        Parser.optional(Parser.preceded(Parser.not(literal("]")), externalLabel)),
+        literal("]"),
+      ),
+    ),
+    ([[, , url, label], span]): ExternalLink => ({ _tag: "ExternalLink", span, url, label }),
+  ),
+);
+
+// `[[` is only ever a wikilink; a single `[` may open an external link.
+const bracketed: WikiParser<Wikilink | ExternalLink> = Parser.alt(
+  wikilink,
+  Parser.preceded(Parser.not(literal("[[")), externalLink),
+);
+
+// ── bare url autolinking ───────────────────────────────────────────────
+
+/**
+ * Common Unicode `\p{Zs}` space separators beyond ASCII space — folded into
+ * the autolink URL-body stop set alongside MediaWiki's `EXT_LINK_URL_CLASS`
+ * ASCII/control exclusions. Not the full Unicode `Zs` category (a handful of
+ * rarely-used code points are omitted); a deliberate, narrow scope cut.
+ */
+const AUTOLINK_EXTRA_SPACES = String.fromCharCode(
+  0x00a0,
+  0x1680,
+  0x2000,
+  0x2001,
+  0x2002,
+  0x2003,
+  0x2004,
+  0x2005,
+  0x2006,
+  0x2007,
+  0x2008,
+  0x2009,
+  0x200a,
+  0x202f,
+  0x205f,
+  0x3000,
+);
 
 /**
  * Protocols recognised for bare (unbracketed) URL autolinking — see
- * {@link AutoLink}. Deliberately narrower than {@link PROTOCOL_RE}: only
+ * {@link AutoLink}. Deliberately narrower than {@link PROTOCOLS}: only
  * `http`/`https`, matching the scope of website#1287's deferred autolinking
- * work.
+ * work. The body runs to one of MediaWiki's `EXT_LINK_URL_CLASS` stops.
  */
-const AUTOLINK_PROTOCOL_RE = /^https?:\/\//i;
+const autoLinkCandidate = Parser.seq(
+  Parser.alt(Ascii.caseless("https://"), Ascii.caseless("http://")),
+  Token.takeTill([Token.range("\u0000", " "), `\u007f[]<>"${AUTOLINK_EXTRA_SPACES}`], {
+    min: 1,
+  }),
+);
 
 /**
  * A trailing run of these characters is trimmed off an autolinked URL back
@@ -101,862 +704,166 @@ function isAutoLinkTrailSep(c: number, hasParen: boolean): boolean {
 }
 
 /**
- * Common Unicode `\p{Zs}` space separators beyond ASCII space — folded into
- * the autolink URL-body stop set alongside MediaWiki's `EXT_LINK_URL_CLASS`
- * ASCII/control exclusions. Not the full Unicode `Zs` category (a handful of
- * rarely-used code points are omitted); a deliberate, narrow scope cut.
- */
-const AUTOLINK_EXTRA_SPACE_CODES: ReadonlySet<number> = new Set([
-  0x00a0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
-  0x200a, 0x202f, 0x205f, 0x3000,
-]);
-
-/** Characters that end an autolinked URL's body (MediaWiki's `EXT_LINK_URL_CLASS`). */
-function isAutoLinkStop(c: number): boolean {
-  return (
-    c <= 0x20 ||
-    c === 0x7f ||
-    c === 0x5b || // [
-    c === 0x5d || // ]
-    c === 0x3c || // <
-    c === 0x3e || // >
-    c === 0x22 || // "
-    AUTOLINK_EXTRA_SPACE_CODES.has(c)
-  );
-}
-
-/**
  * Matches a truncated HTML-entity reference at the end of a string
  * (`&amp`, `&#39`, `&#x27`) — used to avoid splitting a trailing entity when
  * trimming autolink punctuation lands on its `;`.
  */
 const ENTITY_TAIL_RE = /&(?:[a-z]+|#x[\da-f]+|#\d+)$/i;
 
-/** Which top-level delimiters terminate the current fragment scan. */
-interface Stop {
-  readonly templateEnd?: boolean; // `}}`
-  readonly argEnd?: boolean; // `}}}`
-  readonly linkEnd?: boolean; // `]]`
-  readonly extLinkEnd?: boolean; // `]`
-  readonly pipe?: boolean; // `|`
-  readonly equals?: boolean; // `=` (first, param name split)
+/** The length of `body` left once trailing punctuation is trimmed off. */
+function trimmedAutoLinkBody(body: string): number {
+  const hasParen = body.includes("(");
+  let end = body.length;
+  while (end > 0 && isAutoLinkTrailSep(body.charCodeAt(end - 1), hasParen)) end--;
+  // Don't split a trailing HTML-entity-looking reference by moving its `;`
+  // into the trimmed trail.
+  if (end < body.length && body.charCodeAt(end) === SEMICOLON) {
+    if (ENTITY_TAIL_RE.test(body.slice(0, end))) end++;
+  }
+  return end;
 }
 
-/** Parses wikitext into a {@link Document}. Total and fail-soft. */
-export function parse(source: string): Document {
-  const parser = new Parser(source);
-  const children = parser.parseFragment({}, 0, true);
-  return {
-    _tag: "Document",
-    span: { start: 0, end: source.length },
-    children,
-    source,
-  };
-}
+const autoLink: WikiParser<AutoLink> = Parser.make((state) => {
+  const start = state.pos;
+  const candidate = autoLinkCandidate.step(state);
+  if (candidate === Input.Fail) return Input.Fail;
+  const [scheme, body] = candidate;
+  const length = trimmedAutoLinkBody(body);
+  // A lone protocol with nothing real left after trimming isn't a link.
+  if (length === 0) return state.backtrack("Verify", [], start);
+  state.pos = start + scheme.length + length;
+  return { _tag: "AutoLink", span: { start, end: state.pos }, url: state.slice(start, state.pos) };
+});
 
-class Parser {
-  private readonly src: string;
-  private pos = 0;
-  /**
-   * The current scan boundary — the source length normally, temporarily
-   * narrowed while parsing a bounded sub-region (a heading title) so nested
-   * constructs cannot consume past it and break the tiling invariant.
-   */
-  private limit: number;
-  /** Compiled close-tag matchers, memoised per extension-tag name. */
-  private readonly closeTagRe = new Map<string, RegExp>();
-  /**
-   * Positions where a recursive open (template / argument / wikilink /
-   * external link) already failed, so a later attempt at the same spot
-   * returns immediately. Without this, adversarial delimiter storms
-   * (`{{{{{{…`) backtrack exponentially — argument-then-template at every
-   * position, each recursing. The memo collapses the work to O(n²) worst
-   * case. Keyed by `(start, limit, kind)` since the same spot can be scanned
-   * under a narrowed heading-title limit.
-   */
-  private readonly failed = new Set<number>();
-  /**
-   * Where each bracketed construct in the source ends (`matchBrackets`),
-   * built on the first table scan that needs it.
-   */
-  private nestedEnds: ReadonlyMap<number, number> | undefined;
+// ── angle brackets: comments and tags ─────────────────────────────────
 
-  constructor(src: string) {
-    this.src = src;
-    this.limit = src.length;
-  }
+const comment: WikiParser<Comment> = Parser.map(
+  Parser.withSpan(
+    Parser.preceded(
+      literal("<!--"),
+      Parser.alt(
+        Parser.map(Parser.terminated(Token.takeUntil("-->"), literal("-->")), (body) => ({
+          body,
+          closed: true,
+        })),
+        // Unclosed within the current region: absorb the rest (MediaWiki).
+        Parser.map(Token.rest, (body) => ({ body, closed: false })),
+      ),
+    ),
+  ),
+  ([{ body, closed }, span]): Comment => ({ _tag: "Comment", span, text: body, closed }),
+);
 
-  private failKey(start: number, kind: number): number {
-    return (start * (this.src.length + 1) + this.limit) * 4 + kind;
-  }
+const ALNUM = [Token.range("a", "z"), Token.range("A", "Z"), Token.range("0", "9")];
 
-  // ── fragment scanner ────────────────────────────────────────────────
+/** Tag-name characters: letters and digits. */
+const tagName = Token.takeWhile(ALNUM, { min: 1 });
 
-  /**
-   * Scans nodes until a top-level {@link Stop} delimiter (left unconsumed),
-   * the current {@link limit}, or end of input. `block` enables heading
-   * recognition (document level only); `depth` bounds recursion.
-   */
-  parseFragment(stop: Stop, depth: number, block: boolean): Node[] {
-    const nodes: Node[] = [];
-    let textStart = this.pos;
-    const flush = (end: number) => {
-      if (end > textStart) nodes.push(this.text(textStart, end));
-    };
+const quoted = (quote: string) =>
+  Parser.delimited(literal(quote), Token.takeTill(quote), literal(quote));
 
-    while (this.pos < this.limit) {
-      if (this.atStop(stop)) break;
-      const start = this.pos;
-      let node: Node | null = null;
+/**
+ * `<name …>` or `</name …>`, with its raw text. The attributes run to the
+ * first `>` outside a quoted value; a `<` before it, or no `>` at all,
+ * means this is no tag.
+ */
+const tagOpen = Parser.withTaken(
+  Parser.seq(
+    literal("<"),
+    Parser.optional(literal("/")),
+    tagName,
+    Parser.repeat(Parser.alt(Token.takeTill(`"'<>`, { min: 1 }), quoted('"'), quoted("'"))),
+    literal(">"),
+  ),
+);
 
-      if (depth < MAX_DEPTH) {
-        switch (this.src.charCodeAt(this.pos)) {
-          case 0x7b: // {
-            node = this.tryBrace(depth, block);
-            break;
-          case 0x5b: // [
-            node = this.tryBracket(depth);
-            break;
-          case 0x3c: // <
-            node = this.tryAngle(depth);
-            break;
-          case 0x26: // &
-            node = this.tryEntity();
-            break;
-          case 0x27: // '
-            node = this.tryFormatting();
-            break;
-          case 0x3d: // =
-            if (block && this.atLineStart(start)) node = this.tryHeading(depth);
-            break;
-          case 0x68: // h
-          case 0x48: // H
-            node = this.tryAutoLink();
-            break;
-          default:
-            break;
-        }
-      }
+const closeTags = new Map<string, WikiParser<readonly [rawContent: string, closeRaw: string]>>();
 
-      if (node) {
-        flush(start);
-        nodes.push(node);
-        textStart = this.pos;
-      } else {
-        // Not the start of a construct (or one that failed to close): the
-        // character belongs to the surrounding text run.
-        this.pos++;
-      }
-    }
-
-    flush(this.pos);
-    return resolveQuotes(nodes, this.src);
-  }
-
-  private atLineStart(pos: number): boolean {
-    return pos === 0 || this.src.charCodeAt(pos - 1) === 0x0a; // \n
-  }
-
-  // Delimiter-stop dispatch over a fixed char set.
-  private atStop(stop: Stop): boolean {
-    switch (this.src.charCodeAt(this.pos)) {
-      case 0x7c: // |
-        return stop.pipe === true;
-      case 0x3d: // =
-        return stop.equals === true;
-      case 0x5d: // ]
-        if (stop.extLinkEnd) return true;
-        return stop.linkEnd === true && this.src.charCodeAt(this.pos + 1) === 0x5d;
-      case 0x7d: // }
-        if (stop.argEnd && this.runOf(0x7d) >= 3) return true;
-        return stop.templateEnd === true && this.src.charCodeAt(this.pos + 1) === 0x7d;
-      default:
-        return false;
-    }
-  }
-
-  /** Length of the run of `code` starting at the cursor (within `limit`). */
-  private runOf(code: number): number {
-    let i = this.pos;
-    while (i < this.limit && this.src.charCodeAt(i) === code) i++;
-    return i - this.pos;
-  }
-
-  // ── braces: templates and arguments ─────────────────────────────────
-
-  private tryBrace(depth: number, block: boolean): Node | null {
-    // `{|` (a single brace, not a run of two-or-more) at the true start of a
-    // line, at block level, is a table — see `tryTable` / `Table`.
-    if (
-      block &&
-      this.src.charCodeAt(this.pos + 1) === 0x7c && // |
-      this.atLineStart(this.pos)
-    ) {
-      const table = this.tryTable(depth);
-      if (table) return table;
-    }
-    const run = this.runOf(0x7b); // {
-    if (run >= 3) {
-      const arg = this.tryArgument(depth);
-      if (arg) return arg;
-    }
-    if (run >= 2) return this.tryTemplate(depth);
-    return null;
-  }
-
-  private tryArgument(depth: number): Argument | null {
-    const start = this.pos;
-    const key = this.failKey(start, 0);
-    if (this.failed.has(key)) return null;
-    this.pos += 3;
-    const name = this.parseFragment({ argEnd: true, pipe: true }, depth + 1, false);
-    let def: Node[] | undefined;
-    if (this.src.charCodeAt(this.pos) === 0x7c) {
-      this.pos++;
-      def = this.parseFragment({ argEnd: true }, depth + 1, false);
-    }
-    if (this.runOf(0x7d) >= 3) {
-      this.pos += 3;
-      return { _tag: "Argument", span: this.span(start), name, default: def };
-    }
-    this.pos = start;
-    this.failed.add(key);
-    return null;
-  }
-
-  private tryTemplate(depth: number): Template | null {
-    const start = this.pos;
-    const key = this.failKey(start, 1);
-    if (this.failed.has(key)) return null;
-    this.pos += 2;
-    const name = this.parseFragment({ templateEnd: true, pipe: true }, depth + 1, false);
-    const params: Param[] = [];
-    while (this.src.charCodeAt(this.pos) === 0x7c) {
-      this.pos++;
-      params.push(this.parseParam(depth));
-    }
-    if (this.atTemplateEnd()) {
-      this.pos += 2;
-      return { _tag: "Template", span: this.span(start), name, params };
-    }
-    this.pos = start;
-    this.failed.add(key);
-    return null;
-  }
-
-  private atTemplateEnd(): boolean {
-    return (
-      this.pos + 1 < this.limit &&
-      this.src.charCodeAt(this.pos) === 0x7d &&
-      this.src.charCodeAt(this.pos + 1) === 0x7d
-    );
-  }
-
-  private parseParam(depth: number): Param {
-    const first = this.parseFragment(
-      { templateEnd: true, pipe: true, equals: true },
-      depth + 1,
-      false,
-    );
-    if (this.src.charCodeAt(this.pos) === 0x3d) {
-      this.pos++; // =
-      const value = this.parseFragment({ templateEnd: true, pipe: true }, depth + 1, false);
-      return { name: first, value };
-    }
-    return { name: undefined, value: first };
-  }
-
-  // ── tables ────────────────────────────────────────────────────────
-  //
-  // A hand-rolled line-oriented scan over the same mutable cursor as the
-  // rest of the parser, rather than a pre-tokenized line list — consistent
-  // with "the scanner *is* the tokenizer" (see the module doc). Cell/caption
-  // *content* is ordinary wikitext and is parsed by recursing into
-  // `parseFragment` over a narrowed `limit` (the same technique `tryHeading`
-  // uses for a title), so nested constructs — including a nested table —
-  // parse normally.
-  //
-  // The scans that find a table's structure (where a line ends, the `||`/`!!`
-  // cell separators, a cell's attribute `|`) step over every nested construct
-  // whose `|`, `!` or line break belongs to it rather than to the table: a
-  // template, argument, wikilink, closed comment or extension tag (#132; see
-  // `findTopLevel`). MediaWiki gets the same effect, wikilinks aside, by
-  // building tables only after its preprocessor has expanded templates and
-  // hidden comments and extension tags. Line-start markers are therefore read
-  // per *logical* line, one whose breaks inside such constructs don't count;
-  // the scan also tracks `{|`/`|}` nesting so a nested table's own row/cell
-  // lines aren't mistaken for this table's structure (see `scanTableFiller`).
-
-  private tryTable(depth: number): Table | null {
-    const start = this.pos;
-    const key = this.failKey(start, 4);
-    if (this.failed.has(key)) return null;
-    this.pos += 2; // {|
-
-    const openStart = this.pos;
-    this.consumeLogicalLine();
-    this.scanTableFiller();
-    const open = this.src.slice(openStart, this.pos);
-
-    const captions: TableCaption[] = [];
-    const rows: TableRow[] = [];
-    let cells: TableCell[] = [];
-    let rowStart = this.pos;
-    let rowOpen: string | undefined;
-    let rowStarted = false;
-    let closed = false;
-
-    const flushRow = (): void => {
-      if (!rowStarted) return;
-      rows.push({ span: { start: rowStart, end: this.pos }, open: rowOpen, cells });
-      cells = [];
-    };
-
-    while (this.pos < this.limit) {
-      if (this.src.startsWith("|}", this.pos)) {
-        flushRow();
-        this.pos += 2;
-        closed = true;
-        break;
-      }
-      if (this.src.startsWith("|-", this.pos)) {
-        flushRow();
-        rowStart = this.pos;
-        this.pos += 2;
-        const rowOpenStart = this.pos;
-        this.consumeLogicalLine();
-        this.scanTableFiller();
-        rowOpen = this.src.slice(rowOpenStart, this.pos);
-        rowStarted = true;
-        continue;
-      }
-      if (this.src.startsWith("|+", this.pos)) {
-        captions.push(this.parseTableCaption(depth));
-        continue;
-      }
-      const c = this.src.charCodeAt(this.pos);
-      if (c === 0x21 /* ! */ || c === 0x7c /* | */) {
-        if (!rowStarted) {
-          rowStart = this.pos;
-          rowOpen = undefined;
-          rowStarted = true;
-        }
-        this.parseTableLineCells(c === 0x21, depth, cells);
-        continue;
-      }
-      // Unreachable when `scanTableFiller` correctly stops at every marker
-      // line; a defensive bailout (not a throw — fail-soft) in case it doesn't.
-      break;
-    }
-
-    if (!closed) {
-      this.pos = start;
-      this.failed.add(key);
-      return null;
-    }
-    return { _tag: "Table", span: this.span(start), open, captions, rows };
-  }
-
-  /**
-   * Advances the cursor to just past the newline that ends its logical line
-   * (see `tableLineEnd`), or to `this.limit` if there is none.
-   */
-  private consumeLogicalLine(): void {
-    const end = this.tableLineEnd(this.pos);
-    this.pos = end < this.limit ? end + 1 : end;
-  }
-
-  /**
-   * From a line-start position, advances through whole logical lines that are
-   * not one of this table's own marker lines (`|}`, `|-`, `|+`, `!`, `|`),
-   * tracking `{|`/`|}` nesting so a nested table's interior is skipped
-   * rather than mistaken for this table's structure. Stops exactly at the
-   * next marker line, or `this.limit`.
-   */
-  private scanTableFiller(): void {
-    let nestDepth = 0;
-    while (this.pos < this.limit) {
-      if (nestDepth === 0 && this.isTableMarkerLine(this.pos)) return;
-      if (this.src.startsWith("{|", this.pos)) nestDepth++;
-      else if (nestDepth > 0 && this.src.startsWith("|}", this.pos)) nestDepth--;
-      this.consumeLogicalLine();
-    }
-  }
-
-  private isTableMarkerLine(pos: number): boolean {
-    if (this.src.startsWith("|}", pos)) return true;
-    if (this.src.startsWith("|-", pos)) return true;
-    if (this.src.startsWith("|+", pos)) return true;
-    const c = this.src.charCodeAt(pos);
-    return c === 0x21 || c === 0x7c;
-  }
-
-  /**
-   * MediaWiki's single-pipe cell/caption attribute rule (`Parser::doTableStuff`):
-   * the first `|` in `[from, to)` outside a nested construct (see
-   * `findTopLevel`) splits attributes from content, *unless* a `[[`
-   * comes before it (MediaWiki's guard against reading a wikilink's
-   * surroundings as attributes).
-   */
-  private splitCellAttrs(
-    from: number,
-    to: number,
-  ): { attrs: string | undefined; contentStart: number } {
-    const at = this.findTopLevel(from, to, (i) => {
-      const c = this.src.charCodeAt(i);
-      return c === 0x7c || (c === 0x5b && this.src.charCodeAt(i + 1) === 0x5b); // | or [[
+/**
+ * An extension tag's raw body and its close tag (`</name>`, any case,
+ * optional whitespace before the `>`), memoised per tag name. Fails when no
+ * close tag ends within the region.
+ */
+function extensionBody(name: string): WikiParser<readonly [string, string]> {
+  let parser = closeTags.get(name);
+  if (parser === undefined) {
+    const re = new RegExp(`</${name}\\s*>`, "ig");
+    parser = Parser.make((state) => {
+      re.lastIndex = state.pos;
+      const m = re.exec(state.input);
+      if (m === null || m.index + m[0].length > state.end) return state.backtrack("TakeUntil");
+      const rawContent = state.slice(state.pos, m.index);
+      state.pos = m.index + m[0].length;
+      return [rawContent, m[0]] as const;
     });
-    if (at >= to || this.src.charCodeAt(at) !== 0x7c) {
-      return { attrs: undefined, contentStart: from };
-    }
-    return { attrs: this.src.slice(from, at), contentStart: at + 1 };
+    closeTags.set(name, parser);
   }
-
-  /** Parses `[start, end)` as a bounded wikitext fragment (block-level, so a nested table can open). */
-  private parseBoundedFragment(start: number, end: number, depth: number): Node[] {
-    const savedLimit = this.limit;
-    this.pos = start;
-    this.limit = end;
-    const nodes = this.parseFragment({}, depth + 1, true);
-    this.limit = savedLimit;
-    this.pos = end;
-    return nodes;
-  }
-
-  private parseTableCaption(depth: number): TableCaption {
-    const start = this.pos;
-    this.pos += 2; // |+
-    const lineEnd = this.tableLineEnd(this.pos);
-    const { attrs, contentStart } = this.splitCellAttrs(this.pos, lineEnd);
-    this.pos = lineEnd;
-    this.consumeTrailingNewline();
-    this.scanTableFiller();
-    const content = this.parseBoundedFragment(contentStart, this.pos, depth);
-    return { span: { start, end: this.pos }, attrs, content };
-  }
-
-  /**
-   * Parses every cell opened on the current marker line (`!`/`|`, further
-   * split by `!!`/`||` outside nested constructs), extending the last one
-   * across any following non-marker lines, and appends them to `into`.
-   * Leaves the cursor at the next table marker line (or `this.limit`).
-   */
-  private parseTableLineCells(header: boolean, depth: number, into: TableCell[]): void {
-    const sep = header ? 0x21 : 0x7c; // !! or ||
-    const isSep = (i: number): boolean =>
-      this.src.charCodeAt(i) === sep && this.src.charCodeAt(i + 1) === sep;
-    const lineEnd = this.tableLineEnd(this.pos);
-    let openStart = this.pos;
-    let segStart = this.pos + 1; // past the single marker char
-    let inline = false;
-
-    for (;;) {
-      const sepIdx = this.findTopLevel(segStart, lineEnd, isSep);
-      const hasMore = sepIdx < lineEnd;
-      const { attrs, contentStart } = this.splitCellAttrs(segStart, sepIdx);
-
-      let contentEnd: number;
-      if (hasMore) {
-        contentEnd = sepIdx;
-      } else {
-        this.pos = lineEnd;
-        this.consumeTrailingNewline();
-        this.scanTableFiller();
-        contentEnd = this.pos;
-      }
-      const content = this.parseBoundedFragment(contentStart, contentEnd, depth);
-      into.push({ span: { start: openStart, end: contentEnd }, header, inline, attrs, content });
-
-      if (!hasMore) return;
-      openStart = sepIdx;
-      segStart = sepIdx + 2;
-      inline = true;
-    }
-  }
-
-  /**
-   * End of the logical line containing `pos`: the first `\n` outside a nested
-   * construct (see `findTopLevel`), exclusive, or `this.limit`. A
-   * multi-line template in a cell is therefore part of the line that opens it.
-   */
-  private tableLineEnd(pos: number): number {
-    return this.findTopLevel(pos, this.limit, (i) => this.src.charCodeAt(i) === 0x0a);
-  }
-
-  private consumeTrailingNewline(): void {
-    if (this.pos < this.limit && this.src.charCodeAt(this.pos) === 0x0a) this.pos++;
-  }
-
-  /**
-   * The first index in `[from, to)` at which `test` holds, stepping over each
-   * nested construct (see `skipNested`); `to` when there is none.
-   */
-  private findTopLevel(from: number, to: number, test: (i: number) => boolean): number {
-    let i = from;
-    while (i < to) {
-      if (test(i)) return i;
-      i = this.skipNested(i);
-    }
-    return to;
-  }
-
-  /**
-   * The index just past the nested construct opening at `at` whose `|`, `!`
-   * and line breaks belong to it rather than to a table: a template or
-   * argument, a wikilink, a closed comment, or an extension tag (body
-   * included), as `matchBrackets` matched them. Otherwise `at + 1`, so an
-   * opener that never closes is literal text, as MediaWiki's preprocessor
-   * reads it. One that closes past `this.limit` is literal too, so a nested
-   * table's scan stays inside its cell even where the matcher and the
-   * recursive parser disagree about a construct.
-   */
-  private skipNested(at: number): number {
-    const c = this.src.charCodeAt(at);
-    if (c !== 0x7b && c !== 0x5b && c !== 0x3c) return at + 1; // only `{`, `[` and `<` open one
-    this.nestedEnds ??= this.matchNested();
-    const end = this.nestedEnds.get(at);
-    return end !== undefined && end <= this.limit ? end : at + 1;
-  }
-
-  /** Runs `matchBrackets` over the whole source, whatever `this.limit` is now. */
-  private matchNested(): ReadonlyMap<number, number> {
-    const savedLimit = this.limit;
-    this.limit = this.src.length;
-    const ends = matchBrackets(this.src, (at) => this.extensionTagEnd(at));
-    this.limit = savedLimit;
-    return ends;
-  }
-
-  /**
-   * End of the extension tag opening at `at`, its body and close tag included
-   * when it has them (see `tryTag`), or `-1` when no extension tag opens there.
-   * A closing tag never counts: `tagNameAt` finds no name after its `</`.
-   */
-  private extensionTagEnd(at: number): number {
-    if (!EXTENSION_TAGS.has(tagNameAt(this.src, at + 1))) return -1;
-    const saved = this.pos;
-    this.pos = at;
-    const end = this.tryTag(0) === null ? -1 : this.pos;
-    this.pos = saved;
-    return end;
-  }
-
-  // ── brackets: wikilinks and external links ──────────────────────────
-
-  private tryBracket(depth: number): Node | null {
-    if (this.src.charCodeAt(this.pos + 1) === 0x5b) return this.tryWikilink(depth);
-    return this.tryExternalLink(depth);
-  }
-
-  private tryWikilink(depth: number): Wikilink | null {
-    const start = this.pos;
-    const key = this.failKey(start, 2);
-    if (this.failed.has(key)) return null;
-    this.pos += 2;
-    const target = this.parseFragment({ linkEnd: true, pipe: true }, depth + 1, false);
-    const segments: Node[][] = [];
-    while (this.src.charCodeAt(this.pos) === 0x7c) {
-      this.pos++;
-      segments.push(this.parseFragment({ linkEnd: true, pipe: true }, depth + 1, false));
-    }
-    if (
-      this.pos + 1 < this.limit &&
-      this.src.charCodeAt(this.pos) === 0x5d &&
-      this.src.charCodeAt(this.pos + 1) === 0x5d
-    ) {
-      this.pos += 2;
-      return { _tag: "Wikilink", span: this.span(start), target, segments };
-    }
-    this.pos = start;
-    this.failed.add(key);
-    return null;
-  }
-
-  // URL scan plus a fail-soft cursor reset.
-  private tryExternalLink(depth: number): ExternalLink | null {
-    const start = this.pos;
-    const key = this.failKey(start, 3);
-    if (this.failed.has(key)) return null;
-    const urlStart = start + 1;
-    if (!PROTOCOL_RE.test(this.src.slice(urlStart, Math.min(urlStart + 10, this.limit)))) {
-      return null;
-    }
-    let i = urlStart;
-    while (i < this.limit) {
-      const c = this.src.charCodeAt(i);
-      // URL body ends at whitespace, a closing `]`, or an angle bracket.
-      if (
-        c === 0x20 ||
-        c === 0x09 ||
-        c === 0x0a ||
-        c === 0x0d ||
-        c === 0x5d ||
-        c === 0x3c ||
-        c === 0x3e
-      ) {
-        break;
-      }
-      i++;
-    }
-    if (i === urlStart) return null;
-    const url = this.src.slice(urlStart, i);
-    this.pos = i;
-    let label: Node[] | undefined;
-    if (this.src.charCodeAt(this.pos) !== 0x5d) {
-      label = this.parseFragment({ extLinkEnd: true }, depth + 1, false);
-    }
-    if (this.src.charCodeAt(this.pos) === 0x5d) {
-      this.pos++;
-      return { _tag: "ExternalLink", span: this.span(start), url, label };
-    }
-    this.pos = start;
-    this.failed.add(key);
-    return null;
-  }
-
-  // ── bare url autolinking ─────────────────────────────────────────────
-
-  // URL body scan plus MediaWiki's trailing-punctuation trim.
-  private tryAutoLink(): AutoLink | null {
-    const start = this.pos;
-    const protoMatch = AUTOLINK_PROTOCOL_RE.exec(
-      this.src.slice(start, Math.min(start + 8, this.limit)),
-    );
-    if (!protoMatch) return null;
-    const bodyStart = start + protoMatch[0].length;
-
-    let i = bodyStart;
-    while (i < this.limit && !isAutoLinkStop(this.src.charCodeAt(i))) i++;
-    if (i === bodyStart) return null;
-
-    const hasParen = this.src.slice(start, i).includes("(");
-    let end = i;
-    while (end > bodyStart && isAutoLinkTrailSep(this.src.charCodeAt(end - 1), hasParen)) end--;
-    // Don't split a trailing HTML-entity-looking reference by moving its `;`
-    // into the trimmed trail.
-    if (end < i && this.src.charCodeAt(end) === 0x3b /* ; */) {
-      if (ENTITY_TAIL_RE.test(this.src.slice(start, end))) end++;
-    }
-    // A lone protocol with nothing real left after trimming isn't a link.
-    if (end <= bodyStart) return null;
-
-    this.pos = end;
-    return { _tag: "AutoLink", span: this.span(start), url: this.src.slice(start, end) };
-  }
-
-  // ── angle brackets: comments and tags ───────────────────────────────
-
-  private tryAngle(depth: number): Node | null {
-    if (this.src.startsWith("<!--", this.pos)) return this.parseComment();
-    return this.tryTag(depth);
-  }
-
-  private parseComment(): Comment {
-    const start = this.pos;
-    const idx = this.src.indexOf("-->", start + 4);
-    if (idx === -1 || idx + 3 > this.limit) {
-      // Unclosed within the current region: absorb the rest (MediaWiki).
-      const text = this.src.slice(start + 4, this.limit);
-      this.pos = this.limit;
-      return { _tag: "Comment", span: this.span(start), text, closed: false };
-    }
-    const text = this.src.slice(start + 4, idx);
-    this.pos = idx + 3;
-    return { _tag: "Comment", span: this.span(start), text, closed: true };
-  }
-
-  // Tag name / attribute / extension-body scan with several fail-soft exits.
-  private tryTag(_depth: number): Tag | null {
-    const start = this.pos;
-    let i = start + 1;
-    let closing = false;
-    if (this.src.charCodeAt(i) === 0x2f) {
-      closing = true; // /
-      i++;
-    }
-    const nameStart = i;
-    while (i < this.limit && isNameChar(this.src.charCodeAt(i))) i++;
-    if (i === nameStart) return null; // no tag name → `<` is text
-    const name = this.src.slice(nameStart, i).toLowerCase();
-
-    // Scan to the closing `>`, respecting quoted attribute values.
-    let quote = 0;
-    while (i < this.limit) {
-      const c = this.src.charCodeAt(i);
-      if (quote) {
-        if (c === quote) quote = 0;
-      } else if (c === 0x22 || c === 0x27) {
-        quote = c; // " or '
-      } else if (c === 0x3e) {
-        break; // >
-      } else if (c === 0x3c) {
-        return null; // nested `<` before `>` → malformed, `<` is text
-      }
-      i++;
-    }
-    if (i >= this.limit) return null; // no `>` → `<` is text
-    const selfClosing = this.src.charCodeAt(i - 1) === 0x2f;
-    const raw = this.src.slice(start, i + 1);
-    this.pos = i + 1;
-
-    if (closing || selfClosing || !EXTENSION_TAGS.has(name)) {
-      return this.markerTag(start, name, closing, selfClosing, raw);
-    }
-
-    // Extension tag: capture the body raw up to a matching close tag.
-    const close = this.findCloseTag(name, this.pos);
-    if (!close) {
-      // Open-only: leave the following content to ordinary parsing.
-      return this.markerTag(start, name, false, false, raw);
-    }
-    const rawContent = this.src.slice(this.pos, close.start);
-    const closeRaw = this.src.slice(close.start, close.end);
-    this.pos = close.end;
-    return {
-      _tag: "Tag",
-      span: this.span(start),
-      name,
-      closing: false,
-      selfClosing: false,
-      raw,
-      rawContent,
-      closeRaw,
-    };
-  }
-
-  private markerTag(
-    start: number,
-    name: string,
-    closing: boolean,
-    selfClosing: boolean,
-    raw: string,
-  ): Tag {
-    return {
-      _tag: "Tag",
-      span: this.span(start),
-      name,
-      closing,
-      selfClosing,
-      raw,
-      rawContent: undefined,
-      closeRaw: undefined,
-    };
-  }
-
-  private findCloseTag(name: string, from: number): { start: number; end: number } | null {
-    let re = this.closeTagRe.get(name);
-    if (!re) {
-      re = new RegExp(`</${escapeRegExp(name)}\\s*>`, "ig");
-      this.closeTagRe.set(name, re);
-    }
-    re.lastIndex = from;
-    const m = re.exec(this.src);
-    if (!m || m.index + m[0].length > this.limit) return null;
-    return { start: m.index, end: m.index + m[0].length };
-  }
-
-  // ── entities ────────────────────────────────────────────────────────
-
-  // Named / decimal / hex entity scan.
-  private tryEntity(): HtmlEntity | null {
-    const start = this.pos;
-    let i = start + 1;
-    if (this.src.charCodeAt(i) === 0x23) {
-      i++; // #
-      const c = this.src.charCodeAt(i);
-      if (c === 0x78 || c === 0x58) {
-        i++; // x / X
-        const hexStart = i;
-        while (i < this.limit && isHexDigit(this.src.charCodeAt(i))) i++;
-        if (i === hexStart) return null;
-      } else {
-        const digStart = i;
-        while (i < this.limit && isDigit(this.src.charCodeAt(i))) i++;
-        if (i === digStart) return null;
-      }
-    } else {
-      const nameStart = i;
-      while (i < this.limit && isEntityNameChar(this.src.charCodeAt(i))) i++;
-      if (i === nameStart) return null;
-    }
-    if (this.src.charCodeAt(i) !== 0x3b) return null; // ;
-    i++;
-    this.pos = i;
-    return { _tag: "HtmlEntity", span: this.span(start), raw: this.src.slice(start, i) };
-  }
-
-  // ── apostrophe formatting (roles resolved later, see quotes.ts) ──────
-
-  private tryFormatting(): Formatting | null {
-    const run = this.runOf(0x27); // '
-    if (run < 2) return null;
-    const start = this.pos;
-    this.pos += run;
-    return {
-      _tag: "Formatting",
-      span: this.span(start),
-      marks: this.src.slice(start, start + run),
-      mode: "italic",
-      leadingLiterals: 0,
-    };
-  }
-
-  // ── headings (block level, whole line) ──────────────────────────────
-
-  private tryHeading(depth: number): Heading | null {
-    const start = this.pos;
-    let lineEnd = this.src.indexOf("\n", start);
-    if (lineEnd === -1) lineEnd = this.limit;
-    const line = this.src.slice(start, lineEnd);
-    const m = /^(={1,6})([\s\S]*?)(={1,6})([ \t]*)$/.exec(line);
-    if (!m) return null;
-    const [, left, inner, right, trailing] = m;
-    const innerStart = start + left.length;
-    // Parse the title over its bounded region: narrow `limit` so nested
-    // constructs cannot reach past the closing equals run, then restore.
-    const savedLimit = this.limit;
-    this.pos = innerStart;
-    this.limit = innerStart + inner.length;
-    const title = this.parseFragment({}, depth + 1, false);
-    this.limit = savedLimit;
-    this.pos = lineEnd;
-    return {
-      _tag: "Heading",
-      span: this.span(start),
-      level: Math.min(left.length, right.length),
-      leftEquals: left,
-      rightEquals: right,
-      title,
-      trailing,
-    };
-  }
-
-  // ── node helpers ────────────────────────────────────────────────────
-
-  private text(start: number, end: number): Text {
-    return { _tag: "Text", span: { start, end }, text: this.src.slice(start, end) };
-  }
-
-  private span(start: number): Span {
-    return { start, end: this.pos };
-  }
+  return parser;
 }
 
-function isDigit(c: number): boolean {
-  return c >= 0x30 && c <= 0x39;
-}
+const tag: WikiParser<Tag> = Parser.make((state) => {
+  const start = state.pos;
+  const open = tagOpen.step(state);
+  if (open === Input.Fail) return Input.Fail;
+  const [[, slash, rawName], raw] = open;
+  const name = rawName.toLowerCase();
+  const closing = slash !== undefined;
+  const selfClosing = raw.charCodeAt(raw.length - 2) === SLASH;
+  const marker = (): Tag => ({
+    _tag: "Tag",
+    span: { start, end: state.pos },
+    name,
+    closing,
+    selfClosing,
+    raw,
+    rawContent: undefined,
+    closeRaw: undefined,
+  });
+  if (closing || selfClosing || !EXTENSION_TAGS.has(name)) return marker();
+  // Extension tag: capture the body raw up to a matching close tag.
+  const afterOpen = state.pos;
+  const body = extensionBody(name).step(state);
+  if (body === Input.Fail) {
+    // Open-only: leave the following content to ordinary parsing.
+    state.pos = afterOpen;
+    return marker();
+  }
+  const [rawContent, closeRaw] = body;
+  return { ...marker(), rawContent, closeRaw };
+});
 
-function isHexDigit(c: number): boolean {
-  return isDigit(c) || (c >= 0x41 && c <= 0x46) || (c >= 0x61 && c <= 0x66);
-}
-
-function isAlpha(c: number): boolean {
-  return (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+/** The lower-cased tag name (see `tagName`) starting at `i`; `""` when there is none. */
+function tagNameAt(src: string, i: number): string {
+  let j = i;
+  while (j < src.length && isAlnum(src.charCodeAt(j))) j++;
+  return src.slice(i, j).toLowerCase();
 }
 
 function isAlnum(c: number): boolean {
-  return isAlpha(c) || isDigit(c);
+  return (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
 }
+
+/**
+ * End of the extension tag opening at `at`, its body and close tag included
+ * when it has them (see `tag`), or `-1` when no extension tag opens there.
+ * A closing tag never counts: `tagNameAt` finds no name after its `</`.
+ * Runs over the whole source, whatever the region end is now.
+ */
+function extensionTagEnd(state: State, at: number): number {
+  if (!EXTENSION_TAGS.has(tagNameAt(state.input, at + 1))) return -1;
+  const savedPos = state.pos;
+  const savedEnd = state.end;
+  state.pos = at;
+  state.end = state.input.length;
+  const end = tag.step(state) === Input.Fail ? -1 : state.pos;
+  state.pos = savedPos;
+  state.end = savedEnd;
+  return end;
+}
+
+const angled: WikiParser<Comment | Tag> = Parser.alt(comment, tag);
+
+// ── entities ──────────────────────────────────────────────────────────
 
 /**
  * Named-entity characters, as MediaWiki's `Sanitizer::CHAR_REFS_REGEX` reads
@@ -964,22 +871,123 @@ function isAlnum(c: number): boolean {
  * or any non-ASCII character. Every HTML5 name is ASCII, but MediaWiki's
  * aliases for `&rlm;` are spelt in Hebrew and in Arabic letters.
  */
-function isEntityNameChar(c: number): boolean {
-  return isAlnum(c) || c >= 0x80;
+const ENTITY_NAME = [...ALNUM, Token.range("\u0080", "\u{10ffff}")];
+
+/** `&name;`, `&#123;` or `&#x7b;`. */
+const entity: WikiParser<HtmlEntity> = Parser.map(
+  Parser.withSpan(
+    Parser.taken(
+      Parser.seq(
+        literal("&"),
+        Parser.alt(
+          Parser.preceded(
+            literal("#"),
+            Parser.alt(Parser.preceded(Token.oneOf("xX"), Ascii.hexDigit1), Ascii.digit1),
+          ),
+          Token.takeWhile(ENTITY_NAME, { min: 1 }),
+        ),
+        literal(";"),
+      ),
+    ),
+  ),
+  ([raw, span]): HtmlEntity => ({ _tag: "HtmlEntity", span, raw }),
+);
+
+// ── apostrophe formatting (roles resolved later, see quotes.ts) ────────
+
+const formatting: WikiParser<Formatting> = Parser.map(
+  Parser.withSpan(Token.takeWhile("'", { min: 2 })),
+  ([marks, span]): Formatting => ({
+    _tag: "Formatting",
+    span,
+    marks,
+    mode: "italic",
+    leadingLiterals: 0,
+  }),
+);
+
+// ── headings (block level, whole line) ────────────────────────────────
+
+const HEADING_LINE = /^(={1,6})([\s\S]*?)(={1,6})([ \t]*)$/;
+
+const restOfLine = Token.takeTill("\n");
+
+const heading: WikiParser<Heading> = Parser.preceded(
+  lineStart,
+  Parser.make((state) => {
+    const start = state.pos;
+    const line = restOfLine.step(state);
+    const m = line === Input.Fail ? null : HEADING_LINE.exec(line);
+    if (m === null) return state.backtrack("Verify", [], start);
+    const [, left, inner, right, trailing] = m;
+    const innerStart = start + left.length;
+    // The title is parsed over its bounded region, so nested constructs
+    // cannot reach past the closing equals run.
+    const title = fragmentWithin(state, innerStart, innerStart + inner.length, headingTitle);
+    state.pos = start + m[0].length;
+    return {
+      _tag: "Heading",
+      span: { start, end: state.pos },
+      level: Math.min(left.length, right.length),
+      leftEquals: left,
+      rightEquals: right,
+      title,
+      trailing,
+    };
+  }),
+);
+
+// ── construct dispatch ────────────────────────────────────────────────
+
+/** The constructs a fragment may open, by their first character. */
+interface Constructs {
+  readonly construct: WikiParser<Node>;
+  /** The characters `construct` has a case for (see {@link asciiTable}). */
+  readonly opens: Uint8Array;
 }
 
-/** The lower-cased tag name (see `isNameChar`) starting at `i`; `""` when there is none. */
-function tagNameAt(src: string, i: number): string {
-  let j = i;
-  while (j < src.length && isNameChar(src.charCodeAt(j))) j++;
-  return src.slice(i, j).toLowerCase();
-}
+const nextChar = Parser.peek(Token.any);
 
-/** Tag-name characters: a letter, then letters/digits. */
-function isNameChar(c: number): boolean {
-  return isAlnum(c);
-}
+const constructs = (cases: Readonly<Record<string, WikiParser<Node>>>): Constructs => ({
+  construct: Parser.dispatch(nextChar, cases),
+  opens: asciiTable(Object.keys(cases)),
+});
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** The constructs that may open inside any fragment. */
+const inlineCases = {
+  "[": bracketed,
+  "<": angled,
+  "&": entity,
+  "'": formatting,
+  h: autoLink,
+  H: autoLink,
+};
+
+const inlineConstructs = constructs({ ...inlineCases, "{": Parser.alt(argument, template) });
+
+/** Block level adds the line-level constructs: tables and headings. */
+const blockConstructs = constructs({
+  ...inlineCases,
+  "{": Parser.alt(table, argument, template),
+  "=": heading,
+});
+
+const document = fragment(undefined, true);
+
+/** Parses wikitext into a {@link Document}. Total and fail-soft. */
+export function parse(source: string): Document {
+  // The grammar runs on a cursor of its own rather than through
+  // `Parser.parse`, which would first look for a compiled form of it: there
+  // is none, since its `Parser.make` steps run interpreted.
+  const state = new Input.State(source, {
+    context: Context.make(Session, { failed: new Set<number>(), depth: 0, nestedEnds: undefined }),
+  });
+  const children = document.step(state);
+  return {
+    _tag: "Document",
+    span: { start: 0, end: source.length },
+    // The top-level fragment reads to the end of input and never fails.
+    children: children === Input.Fail ? [text(source, 0, source.length)] : children,
+    source,
+  };
 }

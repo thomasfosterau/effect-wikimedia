@@ -6,8 +6,8 @@
  *
  * This is a **bundle check**, not an assertion about the source graph:
  * each case runs a real `esbuild` bundle (tree-shaking + `sideEffects:
- * false` enabled, `effect` marked external so the check isolates this
- * package's own module boundaries) over an entry that imports and uses
+ * false` enabled, the dependencies marked external so the check isolates
+ * this package's own module boundaries) over an entry that imports and uses
  * exactly one surface namespace, then inspects the emitted code for each
  * surface's `Effect.fn` span-name markers (`"Action.getWikitext"`,
  * `"Rest.getPageMetadata"`, `"Commons.getFileInfo"`, `"Wikidata.getEntities"`,
@@ -87,11 +87,12 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     treeShaking: true,
     minify: false,
     logLevel: "silent",
-    // `effect` is the package's only dependency; excluding it keeps the
-    // check focused on this package's own module boundaries (and keeps the
-    // bundle fast — effect is large). `node:*` builtins are external too — the
-    // Dumps sources module is the one Node-only module.
-    external: ["effect", "effect/*", "node:*"],
+    // `effect` (the peer) and `@thomasfosterau/effect-parse` (the `Wikitext`
+    // parser's combinators) are the package's only dependencies; excluding
+    // them keeps the check focused on this package's own module boundaries
+    // (and keeps the bundle fast — effect is large). `node:*` builtins are
+    // external too — the Dumps sources module is the one Node-only module.
+    external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
   });
   const output = result.outputFiles?.[0]?.text;
   if (output === undefined) throw new Error("esbuild produced no output");

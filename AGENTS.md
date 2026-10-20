@@ -6,7 +6,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 
 ## Common pitfalls
 
-- **Module-per-surface is load-bearing.** Each namespace in `src/index.ts` imports only `Core`, with two exceptions: `Dumps` decodes through `Wikidata`'s model, and `Reconciliation` drives `Action` and `Wikidata`. `Wikitext` imports nothing. `tests/tree-shaking.test.ts` bundles each namespace with esbuild and fails on any other cross-surface import; add a new surface to its `SURFACES` table.
+- **Module-per-surface is load-bearing.** Each namespace in `src/index.ts` imports only `Core`, with two exceptions: `Dumps` decodes through `Wikidata`'s model, and `Reconciliation` drives `Action` and `Wikidata`. `Wikitext` imports no other surface (its parser is written with `@thomasfosterau/effect-parse`). `tests/tree-shaking.test.ts` bundles each namespace with esbuild and fails on any other cross-surface import; add a new surface to its `SURFACES` table.
 - **No subpath exports.** Namespaces on the one barrel give the tree-shaking property without fragmenting the API.
 - **No live network in tests.** Use the recorded fixtures in `tests/fixtures/` and stub at `FetchHttpClient.Fetch` or under `Core.wikimediaClientLayer`. Wikimedia's etiquette rules (polite `User-Agent`, `maxlag`) exist because the projects are donation-funded.
 - **Node imports stay in `src/dumps/sources.ts`.** The build is `platform: "neutral"` (`vite.config.ts`); everything else must run in a browser or a Worker.
