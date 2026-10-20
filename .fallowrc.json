@@ -69,21 +69,6 @@
         "maxCognitive": 18
       },
       {
-        "files": ["src/wikitext/parse.ts"],
-        "functions": ["parseFragment"],
-        "maxCognitive": 16
-      },
-      {
-        "files": ["src/wikitext/parse.ts"],
-        "functions": ["tryTag"],
-        "maxCognitive": 18
-      },
-      {
-        "files": ["src/wikitext/parse.ts"],
-        "functions": ["tryEntity"],
-        "maxCognitive": 26
-      },
-      {
         "files": ["src/wikitext/quotes.ts"],
         "functions": ["resolveLine"],
         "maxCognitive": 35
