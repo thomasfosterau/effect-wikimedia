@@ -51,6 +51,9 @@
     "version": "changeset version && vp fmt",
     "release": "vp run build && changeset publish"
   },
+  "dependencies": {
+    "@thomasfosterau/effect-parse": "catalog:"
+  },
   "devDependencies": {
     "@changesets/cli": "catalog:",
     "@effect/language-service": "catalog:",
