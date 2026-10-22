@@ -181,6 +181,23 @@ describe("Rest.getPageMetadata", () => {
     },
   );
 
+  // MediaWiki's default `$wgLegalTitleChars` never allows these (#165).
+  it.each(["Foo<Bar", "Foo>Bar", "Foo[Bar", "Foo]Bar", "Foo{Bar", "Foo}Bar"])(
+    "rejects the illegal-character title %j before any request",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      await expectFailureInstanceOf(
+        toEffect(layer, Rest.getParsedHtml("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
   it("requests a title with a valid surrogate pair at its percent-encoded path", async () => {
     const { urls, layer } = stubRouter({});
     await expectFailureInstanceOf(

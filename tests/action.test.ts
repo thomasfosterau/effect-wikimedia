@@ -146,6 +146,27 @@ describe("Action.getWikitext", () => {
     },
   );
 
+  // MediaWiki's default `$wgLegalTitleChars` never allows these (#165).
+  it.each(["Foo<Bar", "Foo>Bar", "Foo[Bar", "Foo]Bar", "Foo{Bar", "Foo}Bar"])(
+    "rejects the illegal-character title %j before any request, from every title-taking function",
+    async (title) => {
+      const { urls, layer } = stubRouter({});
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.getWikitext("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.getPageMetadata("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      await expectFailureInstanceOf(
+        toEffect(layer, Action.parsePage("en.wikipedia.org", title)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    },
+  );
+
   it("rejects an invalid host before any request", async () => {
     const { urls, layer } = stubRouter({});
     await expectFailureInstanceOf(
@@ -224,8 +245,9 @@ describe("Action.getPageMetadata", () => {
           query: {
             pages: {
               "-1": {
-                title: "Foo<Bar",
-                invalidreason: 'The requested page title contains invalid characters: "<".',
+                title: "Talk:../Foo",
+                invalidreason:
+                  "Title has relative path. Relative page titles (./, ../) are invalid, because they will often be unreachable when handled by user's browser.",
                 invalid: "",
               },
             },
@@ -233,7 +255,7 @@ describe("Action.getPageMetadata", () => {
         },
       },
     });
-    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Foo<Bar"))).toBeNull();
+    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Talk:../Foo"))).toBeNull();
     expect(urls).toHaveLength(1);
   });
 

@@ -436,7 +436,8 @@ export function normaliseTimeValue(raw: unknown): string | null {
 /**
  * Validates a Commons media filename (the value of a P18 image claim) and
  * builds its stable `Special:FilePath` URL. Rejects control characters, the
- * `|`/`#`/`?` that could break out of the path segment, and MediaWiki's
+ * `|`/`#`/`?` that could break out of the path segment, the `<`, `>`, `[`,
+ * `]`, `{` and `}` no MediaWiki title may contain, and MediaWiki's
  * relative-path titles (`.`, `..`, a leading `./` or `../`, a `/./` or
  * `/../` anywhere, a trailing `/.` or `/..`), which `new URL` would resolve
  * into a different path; the filename is percent-encoded into the fixed
@@ -456,7 +457,7 @@ export function normaliseCommonsImage(raw: unknown): {
   // control-character check, so it can't be relied on to reject them here.
   const trimmed = trimmedToken(raw);
   if (trimmed === null || /[|#?]/.test(trimmed)) return null;
-  // `normaliseTitle` adds the relative-path forms; its whitespace-collapsed
+  // `normaliseTitle` adds the illegal characters and relative-path forms; its whitespace-collapsed
   // result is discarded so `filename` keeps the claim's own spelling.
   if (normaliseTitle(trimmed) === null) return null;
   const iri = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`;

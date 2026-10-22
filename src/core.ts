@@ -293,14 +293,17 @@ function hasSafeCodeUnits(title: string, index: number): boolean {
  * rejects control characters, a lone UTF-16 surrogate (which makes
  * `encodeURIComponent` throw `URIError`; a valid surrogate pair such as an
  * emoji is kept), the `|`/`#` that could inject an extra query clause or a
- * fragment, and MediaWiki's relative-path titles (`.`, `..`, a leading `./`
- * or `../`, a `/./` or `/../` anywhere, a trailing `/.` or `/..`), which
- * `new URL` would otherwise resolve into a different path. The result is still placed through `encodeURIComponent` wherever it
+ * fragment, the `<`, `>`, `[`, `]`, `{` and `}` that MediaWiki's default
+ * `$wgLegalTitleChars` never allows (such a title names no page, so asking
+ * would only spend a request), and MediaWiki's relative-path titles (`.`,
+ * `..`, a leading `./` or `../`, a `/./` or `/../` anywhere, a trailing `/.`
+ * or `/..`), which `new URL` would otherwise resolve into a different path. The result is still placed through `encodeURIComponent` wherever it
  * lands (a query parameter or a REST path segment) — this validation is the
  * belt to that braces. Returns `null` for unusable input.
  *
- * This is a string-level check, not full MediaWiki title parsing: it knows
- * no wiki's namespaces, so it applies the relative-path rule to the whole
+ * This is a string-level check, not full MediaWiki title parsing: it does
+ * not decode `%XX` sequences, reject `~~~` or apply a wiki's own
+ * `$wgLegalTitleChars`, and it knows no wiki's namespaces, so it applies the relative-path rule to the whole
  * string where MediaWiki applies it after removing a namespace prefix
  * (MediaWiki rejects `Talk:../x`; this accepts it, and as `:` encodes to
  * `%3A` the path is unchanged). A caller that strips a prefix itself, as
@@ -312,7 +315,7 @@ export function normaliseTitle(raw: string): string | null {
   const collapsed = raw.trim().replace(/\s+/g, "_");
   if (Str.isEmpty(collapsed) || collapsed.length > MAX_TITLE_LENGTH) return null;
   if (!hasSafeCodeUnits(collapsed, 0)) return null;
-  if (/[|#]/.test(collapsed)) return null;
+  if (/[|#<>[\]{}]/.test(collapsed)) return null;
   if (isRelativePathTitle(collapsed)) return null;
   return collapsed;
 }
@@ -320,7 +323,7 @@ export function normaliseTitle(raw: string): string | null {
 /**
  * Validates a title/filename and fails {@link InvalidRequest} for anything
  * {@link normaliseTitle} rejects (blank, too long, control characters, a
- * lone UTF-16 surrogate, `|` or `#`, or a relative-path title such as `.` or
+ * lone UTF-16 surrogate, `|`, `#`, `<`, `>`, `[`, `]`, `{` or `}`, or a relative-path title such as `.` or
  * `..`), before any request is sent — the `yield*`-able form of {@link normaliseTitle} every surface
  * module's request-building functions start with. `kind` names the field in
  * the resulting error (`"title"` for a page title, `"filename"` for a

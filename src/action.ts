@@ -354,8 +354,8 @@ export function normalisePageMetadata(
  * Fetches a page's identity and bookkeeping metadata via the Action API's
  * `prop=info`. Returns `null` when the title names no stored page upstream:
  * the page does not exist, MediaWiki rejects the title as invalid (for
- * example one containing `<` or `[`, which {@link Core.requireTitle} lets
- * through), it is a `Special:` or `Media:` title, existing or not, or it is
+ * example `Talk:../Foo`, a relative path after the namespace prefix, which
+ * {@link Core.requireTitle} lets through), it is a `Special:` or `Media:` title, existing or not, or it is
  * an interwiki title (`fr:Foo` on an English wiki), which the API reports
  * under `query.interwiki` with no page entry.
  * Fails with {@link InvalidRequest}, before any request is sent, for an
