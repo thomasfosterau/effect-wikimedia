@@ -25,9 +25,18 @@ catalog:
   # hard-errors (UnsupportedTargetPackageVersionError) on anything else, failing
   # `pnpm install` itself: read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping either.
-  # Only the TypeScript binary is patched (no `--oxlint`): this repo does not
-  # run the Effect oxlint preset, so `vite-plus` is not tied to its oxlint.
-  "@effect/tsgo": 0.47.2
+  # `prepare` also patches oxlint (`--oxlint`), which loads the
+  # `@effect/tsgo/oxlint-presets` rules in `vp check`, so this release must also
+  # list the `oxlint` and `oxlint-tsgolint` that `vite-plus` pins: 0.55.0 ships
+  # TypeScript 7.0.2, oxlint 1.87.0 – 1.89.0 and tsgolint 7.0.2003 / 7.0.2004,
+  # and vite-plus 1.3.0 carries oxlint 1.88.0 and tsgolint 7.0.2004. Bump
+  # `@effect/tsgo`, `@typescript/native` and `vite-plus` together.
+  "@effect/tsgo": 0.55.0
+  # The Effect lint rules `vp check` runs (`effect.configs.recommended` in
+  # vite.config.ts). Its own `effect` dependency (4.0.0) is on the stable line,
+  # so the `effect` singleton override below loads it without a scoped
+  # override.
+  "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@types/node": ^26.1.2
   # Types for `unbzip2-stream` below (test-only). They describe its stream as a
   # `stream.Transform`, which it isn't: see that entry.
@@ -36,7 +45,7 @@ catalog:
   # coverage/coverage-final.json for the coverage-backed CRAP scores in `vp run
   # fallow:health` (#102). It peers on vitest at the exact version, so it moves
   # with `vite-plus` / `vite` / `vitest` (see the comment on those below).
-  "@vitest/coverage-istanbul": 4.1.11
+  "@vitest/coverage-istanbul": 5.0.5
   # `effect` is a peerDependency of the published package and a devDependency
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
@@ -59,8 +68,10 @@ catalog:
   # `@fallow-cli/*` optional dependencies, with no install script. At least
   # 3.33.1: 3.32.0 gave nearly every clone group the same fingerprint (a rank
   # suffix told them apart), so a `duplicates.ignoredClones` entry could hide
-  # a different clone (#102).
-  fallow: ^3.33.1
+  # a different clone (#102). Exact, like the rest of the family: the
+  # PreToolUse fallow gate (`.claude/hooks/fallow-gate.sh`) and CI must agree on
+  # what a finding is.
+  fallow: 3.34.1
   # The docs gate (`vp run docgen`, #20): TypeDoc renders the API reference from
   # the doc comments reachable from `src/index.ts` and, under `typedoc.json`'s
   # validation, fails on an undocumented export or an unresolved `{@link}`.
@@ -88,9 +99,10 @@ catalog:
   # vite-plus's exact pin because the `vitest: "catalog:"` override below
   # forces every resolution to the catalog singleton. Bump the three together,
   # with `@vitest/coverage-istanbul` above, which peers on that exact `vitest`.
-  vite-plus: 0.3.3
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
-  vitest: 4.1.11
+  # 1.3.0 carries oxlint 1.88.0, tsgolint 7.0.2004 and vitest 5.0.5.
+  vite-plus: 1.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  vitest: 5.0.5
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
