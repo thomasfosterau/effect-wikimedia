@@ -15,17 +15,22 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Action, Commons, Core, Rest } from "../src/index.ts";
 import { runTest } from "./helpers/effect.ts";
 
 const fixturesPath = fileURLToPath(new URL("./fixtures/douglas-adams.json", import.meta.url));
-const fixtures = JSON.parse(readFileSync(fixturesPath, "utf-8")) as {
-  readonly wikitext: unknown;
-  readonly restPageMetadata: unknown;
-  readonly restParsedHtml: string;
-  readonly commonsFileInfo: unknown;
-};
+const fixtures = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      wikitext: Schema.Unknown,
+      restPageMetadata: Schema.Unknown,
+      restParsedHtml: Schema.String,
+      commonsFileInfo: Schema.Unknown,
+    }),
+  ),
+)(readFileSync(fixturesPath, "utf-8"));
 
 /** Routes each stubbed call by a distinguishing substring of its request URL. */
 const fetch: typeof globalThis.fetch = async (input, init) => {
@@ -71,11 +76,14 @@ describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
 
   it("fetches Douglas Adams's parsed HTML via Rest, matching the wikitext's revision", async () => {
     const [wikitext, metadata, html] = await run(
-      Effect.all([
-        Action.getWikitext("en.wikipedia.org", "Douglas Adams"),
-        Rest.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
-        Rest.getParsedHtml("en.wikipedia.org", "Douglas Adams"),
-      ]),
+      Effect.all(
+        [
+          Action.getWikitext("en.wikipedia.org", "Douglas Adams"),
+          Rest.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
+          Rest.getParsedHtml("en.wikipedia.org", "Douglas Adams"),
+        ],
+        { concurrency: 1 },
+      ),
     );
     expect(html).toContain("<b>Douglas Noel Adams</b>");
     expect(html).toContain('<h2 id="Life">Life</h2>');

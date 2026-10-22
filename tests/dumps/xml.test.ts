@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
 import { runTest } from "../helpers/effect.ts";
@@ -35,11 +37,9 @@ describe("tagName", () => {
     ["PAGE", "page"],
     ["minor/", "minor"],
   ];
-  for (const [input, expected] of cases) {
-    it(`${JSON.stringify(input)} → ${expected}`, () => {
-      expect(Dumps.tagName(input)).toBe(expected);
-    });
-  }
+  it.each(cases)("%j → %s", (input, expected) => {
+    expect(Dumps.tagName(input)).toBe(expected);
+  });
 });
 
 // ── classifyTag (table-driven) ───────────────────────────────────────────
@@ -58,11 +58,9 @@ describe("classifyTag", () => {
     ["<!-- a comment -->", []],
     ["<?xml version='1.0'?>", []],
   ];
-  for (const [input, expected] of cases) {
-    it(`${JSON.stringify(input)}`, () => {
-      expect(Dumps.classifyTag(input)).toEqual(expected);
-    });
-  }
+  it.each(cases)("%j", (input, expected) => {
+    expect(Dumps.classifyTag(input)).toEqual(expected);
+  });
 });
 
 // ── decodeXmlEntities (table-driven) ─────────────────────────────────────
@@ -75,11 +73,9 @@ describe("decodeXmlEntities", () => {
     ["&#65;&#x42;", "AB"],
     ["&notanentity;", "&notanentity;"],
   ];
-  for (const [input, expected] of cases) {
-    it(`${JSON.stringify(input)} → ${JSON.stringify(expected)}`, () => {
-      expect(Dumps.decodeXmlEntities(input)).toBe(expected);
-    });
-  }
+  it.each(cases)("%j → %j", (input, expected) => {
+    expect(Dumps.decodeXmlEntities(input)).toBe(expected);
+  });
 
   it("decodes each of XML's five predefined entities", () => {
     expect(Dumps.decodeXmlEntities("&amp;&lt;&gt;&quot;&apos;")).toBe("&<>\"'");
@@ -87,11 +83,12 @@ describe("decodeXmlEntities", () => {
 
   // The lookup is own-key only: an `Object.prototype` name is a well-formed
   // entity, and an object-literal table "found" it as a built-in function.
-  for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
-    it(`keeps &${name}; as written`, () => {
+  it.each(["constructor", "toString", "valueOf", "hasOwnProperty"])(
+    "keeps &%s; as written",
+    (name) => {
       expect(Dumps.decodeXmlEntities(`a &${name}; b`)).toBe(`a &${name}; b`);
-    });
-  }
+    },
+  );
 
   it("keeps a name outside XML's five as written, even an HTML one", () => {
     expect(Dumps.decodeXmlEntities("&nbsp;&AMP;&Lt;")).toBe("&nbsp;&AMP;&Lt;");
@@ -111,11 +108,9 @@ describe("decodeXmlEntities", () => {
     ["&#0065;", "A"],
     ["&#X41;", "A"],
   ];
-  for (const [input, expected] of valid) {
-    it(`decodes ${input}, a code point XML allows`, () => {
-      expect(Dumps.decodeXmlEntities(input)).toBe(expected);
-    });
-  }
+  it.each(valid)("decodes %s, a code point XML allows", (input, expected) => {
+    expect(Dumps.decodeXmlEntities(input)).toBe(expected);
+  });
 
   const invalid: ReadonlyArray<string> = [
     "&#0;",
@@ -134,29 +129,21 @@ describe("decodeXmlEntities", () => {
     `&#x${"F".repeat(300)};`,
     `&#${"9".repeat(400)};`,
   ];
-  for (const input of invalid) {
-    it(`keeps ${input.length > 24 ? `${input.slice(0, 20)}…` : input} as written, a code point XML forbids`, () => {
+  Arr.forEach(invalid, (input) => {
+    const shown = input.length > 24 ? `${input.slice(0, 20)}…` : input;
+    it(`keeps ${shown} as written, a code point XML forbids`, () => {
       expect(Dumps.decodeXmlEntities(`a${input}b`)).toBe(`a${input}b`);
     });
-  }
+  });
 
   // Only a whole decimal or hex reference decodes; the leading digits of a
   // malformed one never do.
-  for (const input of [
-    "&#65a;",
-    "&#9f;",
-    "&#12.5;",
-    "&#1e2;",
-    "&#65.0;",
-    "&#x41g;",
-    "&#x;",
-    "&#;",
-    "&#-65;",
-  ]) {
-    it(`keeps the malformed reference ${input} as written`, () => {
+  it.each(["&#65a;", "&#9f;", "&#12.5;", "&#1e2;", "&#65.0;", "&#x41g;", "&#x;", "&#;", "&#-65;"])(
+    "keeps the malformed reference %s as written",
+    (input) => {
       expect(Dumps.decodeXmlEntities(input)).toBe(input);
-    });
-  }
+    },
+  );
 });
 
 // ── tokenizeXml carry (chunk-boundary safety) ────────────────────────────
@@ -183,6 +170,29 @@ describe("tokenizeXml", () => {
     // a text run — even mid-entity — reassembles identically).
     expect(rest).toBe("");
   });
+
+  it("emits a stray > as text, and a tag runs to the first > after its <", () => {
+    expect(Dumps.tokenizeXml("a>b<id<x>c>d")).toEqual({
+      tokens: [
+        { t: "text", value: "a>b" },
+        { t: "open", name: "id<x" },
+        { t: "text", value: "c>d" },
+      ],
+      rest: "",
+    });
+  });
+
+  it("carries from the first < after the last >", () => {
+    expect(Dumps.tokenizeXml("<id>1 < 2 <b")).toEqual({
+      tokens: [
+        { t: "open", name: "id" },
+        { t: "text", value: "1 " },
+      ],
+      rest: "< 2 <b",
+    });
+    expect(Dumps.tokenizeXml("x<y")).toEqual({ tokens: [{ t: "text", value: "x" }], rest: "<y" });
+    expect(Dumps.tokenizeXml("")).toEqual({ tokens: [], rest: "" });
+  });
 });
 
 // ── The pipeline over the fixture ────────────────────────────────────────
@@ -192,13 +202,13 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))));
     expect(records.length).toBe(3);
 
-    const hits = records.filter((r) => r._tag === "revision");
-    const errors = records.filter((r) => r._tag === "error");
+    const hits = records.filter(Predicate.isTagged("revision"));
+    const errors = records.filter(Predicate.isTagged("error"));
     expect(hits.length).toBe(2);
     expect(errors.length).toBe(1);
 
     const first = hits[0];
-    if (first?._tag !== "revision") throw new Error("expected revision");
+    if (first?._tag !== "revision") return expect.unreachable("expected revision");
     expect(first.page).toEqual({ title: "Douglas Adams", ns: 0, id: 8091 });
     expect(first.revision.id).toBe(100);
     expect(first.revision.minor).toBe(true);
@@ -207,14 +217,14 @@ describe("pageRecords pipeline", () => {
     expect(first.revision.text).toBe("'''Douglas Adams''' < check 1 & 2 > 0");
 
     const second = hits[1];
-    if (second?._tag !== "revision") throw new Error("expected revision");
+    if (second?._tag !== "revision") return expect.unreachable("expected revision");
     expect(second.revision.id).toBe(101);
     expect(second.revision.parentId).toBe(100);
     expect(second.revision.contributor).toEqual({ username: null, id: null, ip: "10.0.0.1" });
     expect(second.revision.minor).toBe(false);
 
     const error = errors[0];
-    if (error?._tag !== "error") throw new Error("expected error");
+    if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.page).toEqual({ title: "Category:Writers", ns: 14, id: 200 });
   });
@@ -241,7 +251,7 @@ describe("pageRecords pipeline", () => {
     const chunked = await collect(Dumps.pageRecords(perByte(xml)));
     expect(chunked).toEqual(whole);
     const hit = whole[0];
-    if (hit?._tag !== "revision") throw new Error("expected revision");
+    if (hit?._tag !== "revision") return expect.unreachable("expected revision");
     expect(hit.page.title).toBe("Café 日本語");
     expect(hit.revision.text).toBe("é 漢 & ok");
   });
@@ -257,7 +267,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(truncated)));
     expect(records.length).toBe(1);
     const error = records[0];
-    if (error?._tag !== "error") throw new Error("expected error");
+    if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("truncated");
     expect(error.page).toEqual({ title: "T", ns: 0, id: 1 });
@@ -270,7 +280,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(xml)));
     expect(records.length).toBe(1);
     const error = records[0];
-    if (error?._tag !== "error") throw new Error("expected error");
+    if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("not closed");
     expect(error.page).toEqual({ title: "A", ns: 0, id: 1 });
@@ -284,7 +294,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(xml)));
     expect(records.map((r) => r._tag)).toEqual(["error", "revision"]);
     const good = records[1];
-    if (good?._tag !== "revision") throw new Error("expected revision");
+    if (good?._tag !== "revision") return expect.unreachable("expected revision");
     expect(good.revision.id).toBe(9);
   });
 
@@ -298,7 +308,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(xml)));
     expect(records.length).toBe(1);
     const error = records[0];
-    if (error?._tag !== "error") throw new Error("expected error");
+    if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("exceeds");
   });

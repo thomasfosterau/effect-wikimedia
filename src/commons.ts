@@ -16,6 +16,10 @@
  */
 
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Str from "effect/String";
 import * as Schema from "effect/Schema";
 import {
   DEFAULT_RETRY_OPTIONS,
@@ -120,43 +124,48 @@ export interface FileInfo {
   readonly size: number | null;
 }
 
+/** `new URL(value)`, or `None` when it throws on an unparseable URL. */
+const parseUrl = Option.liftThrowable((value: string) => new URL(value));
+
+/** Whether `url` is `https:` on one of the hosts Commons media is served from. */
+function isMediaUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return (
+    url.protocol === "https:" &&
+    (host === "upload.wikimedia.org" ||
+      host.endsWith(".wikipedia.org") ||
+      host.endsWith(".wikimedia.org"))
+  );
+}
+
 /** A URL string re-validated against a fixed allowed-host set, or `null`. */
 function toWikimediaMediaUrl(value: unknown): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > 2000) return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "https:") return null;
-  const host = parsed.hostname.toLowerCase();
-  if (
-    host === "upload.wikimedia.org" ||
-    host.endsWith(".wikipedia.org") ||
-    host.endsWith(".wikimedia.org")
-  ) {
-    return parsed.toString();
-  }
-  return null;
+  const candidate =
+    Predicate.isString(value) && Str.isNonEmpty(value) && value.length <= 2000
+      ? parseUrl(value)
+      : Option.none();
+  return Option.match(Option.filter(candidate, isMediaUrl), {
+    onNone: () => null,
+    onSome: (url) => url.toString(),
+  });
 }
 
 /** A `FileInfoPage` carrying a real title that Wikimedia didn't flag as missing. */
 function isUsableFilePage(page: FileInfoPage): boolean {
-  return typeof page.title === "string" && page.missing === undefined;
+  return Predicate.isString(page.title) && page.missing === undefined;
 }
 
 function normaliseFileInfo(response: FileInfoResponse, title: string): FileInfo | null {
-  const page = Object.values(response.query?.pages ?? {}).find(isUsableFilePage);
+  const page = Rec.values(response.query?.pages ?? {}).find(isUsableFilePage);
   if (page === undefined) return null;
   const entry: ImageInfoEntry = page.imageinfo?.[0] ?? {};
   return {
-    title: typeof page.title === "string" ? page.title : title,
+    title: Predicate.isString(page.title) ? page.title : title,
     url: toWikimediaMediaUrl(entry.url),
     descriptionUrl: toWikimediaMediaUrl(entry.descriptionurl),
     width: toNonNegativeInt(entry.width, 100_000),
     height: toNonNegativeInt(entry.height, 100_000),
-    mime: typeof entry.mime === "string" ? entry.mime.slice(0, 100) : null,
+    mime: Predicate.isString(entry.mime) ? entry.mime.slice(0, 100) : null,
     size: toNonNegativeInt(entry.size, 10_000_000_000),
   };
 }

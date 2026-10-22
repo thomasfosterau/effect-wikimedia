@@ -8,8 +8,11 @@
  */
 
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
 import { FetchHttpClient } from "effect/http";
 import { Core, Rest } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
@@ -25,13 +28,21 @@ const stubRouter = (routes: Record<string, StubRoute>) => {
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     urls.push(request.url);
-    const key = Object.keys(routes).find((k) => request.url.includes(k));
-    const route = key ? routes[key] : undefined;
-    if (!route) return new Response("", { status: 404 });
-    const contentType = route.contentType ?? "application/json";
-    const body =
-      contentType === "application/json" ? JSON.stringify(route.body) : String(route.body);
-    return new Response(body, { status: route.status, headers: { "content-type": contentType } });
+    return Arr.findFirst(Rec.keys(routes), (k) => request.url.includes(k)).pipe(
+      Option.flatMap((key) => Rec.get(routes, key)),
+      Option.match({
+        onNone: () => new Response("", { status: 404 }),
+        onSome: (route) => {
+          const contentType = route.contentType ?? "application/json";
+          return contentType === "application/json"
+            ? Response.json(route.body, { status: route.status })
+            : new Response(String(route.body), {
+                status: route.status,
+                headers: { "content-type": contentType },
+              });
+        },
+      }),
+    );
   };
   const fetchLayer = FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
@@ -138,7 +149,7 @@ describe("Rest.getPageMetadata", () => {
 
   it("requests a title that merely contains dots at its own path", async () => {
     const { urls, layer } = stubRouter({});
-    for (const title of ["A.B", "..."]) {
+    const requestBoth = async (title: string) => {
       await expectFailureInstanceOf(
         toEffect(layer, Rest.getPageMetadata("en.wikipedia.org", title)),
         Core.RequestFailed,
@@ -147,7 +158,9 @@ describe("Rest.getPageMetadata", () => {
         toEffect(layer, Rest.getParsedHtml("en.wikipedia.org", title)),
         Core.RequestFailed,
       );
-    }
+    };
+    await requestBoth("A.B");
+    await requestBoth("...");
     expect(urls.map((url) => new URL(url).pathname)).toEqual([
       "/w/rest.php/v1/page/A.B",
       "/w/rest.php/v1/page/A.B/html",

@@ -13,23 +13,21 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Core, Sparql } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
-const fixture = JSON.parse(
+const fixture = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
   readFileSync(fileURLToPath(new URL("./fixtures/wdqs-results.json", import.meta.url)), "utf8"),
-) as unknown;
+);
 
 const stubWdqs = (body: unknown) => {
   const requests: Request[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     requests.push(request);
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+    return Response.json(body, { status: 200 });
   };
   const fetchLayer = FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
@@ -53,7 +51,7 @@ const SELECT = "SELECT ?item WHERE { ?item wdt:P31 wd:Q5 } LIMIT 10";
 const asLiteral = (
   term: Sparql.SparqlTerm | undefined,
 ): Extract<Sparql.SparqlTerm, { _tag: "literal" }> => {
-  if (term?._tag !== "literal") throw new Error(`expected a literal, got ${term?._tag}`);
+  if (term?._tag !== "literal") return expect.unreachable(`expected a literal, got ${term?._tag}`);
   return term;
 };
 
@@ -194,6 +192,6 @@ describe("Sparql.normaliseTerm", () => {
   it("degrades an unrecognised term type to a typed Unknown member", () => {
     const term = Sparql.normaliseTerm({ type: "triple", value: "<< s p o >>" });
     expect(term._tag).toBe("unknown");
-    expect(term._tag === "unknown" && term.type).toBe("triple");
+    expect(term).toMatchObject({ _tag: "unknown", type: "triple" });
   });
 });

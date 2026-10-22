@@ -27,8 +27,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Core from "../../src/core.ts";
 import {
@@ -49,9 +52,9 @@ import {
 import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
 
 /** The recorded `wbgetentities` body for Q42 (Douglas Adams), as the wire carries it. */
-const q42Fixture = JSON.parse(
+const q42Fixture = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
   readFileSync(fileURLToPath(new URL("../fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
-) as unknown;
+);
 
 // ── WikimediaClient stub ────────────────────────────────────────────────
 
@@ -200,11 +203,14 @@ describe("WikidataLookup.searchByLabel", () => {
     const { layer } = stubClient({
       "action=wbsearchentities": { fail: new Core.RateLimited({ retryAfterSeconds: 5 }) },
     });
-    const failure = (await expectFailureInstanceOf(
+    const failure = await expectFailureInstanceOf(
       withLookup(layer, (lookup) => lookup.searchByLabel("Douglas Adams")),
       LookupFailed,
-    )) as LookupFailed;
-    expect(failure.description).toContain("rate-limited");
+    );
+    expect(failure).toMatchObject({
+      _tag: "LookupFailed",
+      description: expect.stringContaining("rate-limited"),
+    });
   });
 });
 
@@ -335,7 +341,7 @@ describe("WikidataLookup.searchByIdentifier", () => {
     const enrich = requests.find((r) => r.params?.action === "wbgetentities");
     const ids = (enrich?.params?.ids ?? "").split("|");
     expect(ids).toHaveLength(20);
-    expect(ids).toEqual([...new Set(ids)]);
+    expect(ids).toEqual(Arr.dedupe(ids));
   });
 
   it("skips a P31 statement whose main snak carries no value (somevalue/novalue)", async () => {
@@ -504,9 +510,7 @@ describe("WikidataLookup.enrich", () => {
     qid: string,
   ): Promise<WikidataFacts> => {
     const facts = await runTest(enrichEffect(layer, qid));
-    expect(facts).not.toBeNull();
-    if (facts === null) throw new Error(`expected facts for ${qid}`);
-    return facts;
+    return facts ?? expect.unreachable(`expected facts for ${qid}`);
   };
 
   it("returns the item fact first, then every curated authority as an Identifier fact", async () => {
@@ -613,11 +617,11 @@ describe("WikidataLookup.enrich", () => {
         datatype: "time",
         datavalue: {
           type: "time",
-          value: {
-            time: "+1452-04-15T00:00:00Z",
-            precision: 11,
-            ...(calendarmodel === undefined ? {} : { calendarmodel }),
-          },
+          // `timeClaim(undefined)` omits the key rather than sending `undefined`.
+          value: Record.filter(
+            { time: "+1452-04-15T00:00:00Z", precision: 11, calendarmodel },
+            Predicate.isNotUndefined,
+          ),
         },
       },
     });
@@ -676,10 +680,11 @@ describe("WikidataLookup.enrich", () => {
         datatype: "time",
         datavalue: {
           type: "time",
-          value: {
-            time: "+1952-00-00T00:00:00Z",
-            ...(precision === undefined ? {} : { precision }),
-          },
+          // `timeClaim(undefined)` omits the key rather than sending `undefined`.
+          value: Record.filter(
+            { time: "+1952-00-00T00:00:00Z", precision },
+            Predicate.isNotUndefined,
+          ),
         },
       },
     });
@@ -739,9 +744,9 @@ describe("WikidataLookup.enrich", () => {
       "Date",
       "Image",
     ]);
-    for (const fact of facts.facts) {
+    Arr.forEach(facts.facts, (fact) => {
       expect(Schema.decodeSync(WikidataFact)(fact)).toEqual(fact);
-    }
+    });
     // `match` is exhaustive over the four kinds.
     const describeFact = WikidataFact.match({
       Item: (fact) => `item ${fact.qid}`,
@@ -758,10 +763,10 @@ describe("WikidataLookup.enrich", () => {
   it("carries no website mapping-table fields (mappingKind, notes)", async () => {
     const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
     const facts = await loadFacts(layer, "Q42");
-    for (const fact of facts.facts) {
+    Arr.forEach(facts.facts, (fact) => {
       expect(fact).not.toHaveProperty("mappingKind");
       expect(fact).not.toHaveProperty("notes");
-    }
+    });
     // Type level: no variant of the union declares either field.
     expectTypeOf<
       Extract<

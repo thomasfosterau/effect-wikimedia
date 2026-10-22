@@ -8,8 +8,11 @@
  */
 
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
 import { FetchHttpClient } from "effect/http";
 import { Action, Core } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
@@ -25,18 +28,13 @@ const stubRouter = (routes: Record<string, StubRoute>) => {
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     urls.push(request.url);
-    const key = Object.keys(routes).find((k) => request.url.includes(k));
-    const route = key ? routes[key] : undefined;
-    if (!route) {
-      return new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new Response(JSON.stringify(route.body), {
-      status: route.status,
-      headers: { "content-type": "application/json" },
-    });
+    return Arr.findFirst(Rec.keys(routes), (k) => request.url.includes(k)).pipe(
+      Option.flatMap((key) => Rec.get(routes, key)),
+      Option.match({
+        onNone: () => Response.json({}, { status: 200 }),
+        onSome: (route) => Response.json(route.body, { status: route.status }),
+      }),
+    );
   };
   const fetchLayer = FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),

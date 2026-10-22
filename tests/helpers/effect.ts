@@ -36,18 +36,27 @@ export const runTestExit = <A, E>(effect: Effect.Effect<A, E, never>): Promise<E
 
 /**
  * Run a fully-provided Effect expected to fail with an instance of the
- * given error class; returns the failure so callers can assert on its
- * fields.
+ * given error class; returns the failure, typed as that class, so callers
+ * can assert on its fields.
  */
-export const expectFailureInstanceOf = async <A, E>(
+export const expectFailureInstanceOf = async <
+  A,
+  E,
+  C extends abstract new (...args: never[]) => object,
+>(
   program: Effect.Effect<A, E, never>,
-  errorClass: abstract new (...args: never[]) => unknown,
-): Promise<E> => {
+  errorClass: C,
+): Promise<InstanceType<C>> => {
   const exit = await runTestExit(program);
 
   expect(Exit.isFailure(exit)).toBe(true);
-  if (!Exit.isFailure(exit)) throw new Error("Expected a failure exit");
-  const failure = Option.getOrThrow(Cause.findErrorOption(exit.cause));
+  if (!Exit.isFailure(exit)) return expect.unreachable("Expected a failure exit");
+  const failure = Option.match(Cause.findErrorOption(exit.cause), {
+    onNone: () => expect.unreachable("Expected a typed failure in the cause"),
+    onSome: (error) => error,
+  });
   expect(failure).toBeInstanceOf(errorClass);
+  const isInstance = (error: E): error is E & InstanceType<C> => error instanceof errorClass;
+  if (!isInstance(failure)) return expect.unreachable("Unexpected failure class");
   return failure;
 };

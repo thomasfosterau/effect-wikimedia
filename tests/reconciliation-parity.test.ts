@@ -18,19 +18,27 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import * as Record from "effect/Record";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import { Wikidata } from "../src/index.ts";
 
-const fixture = JSON.parse(
+const fixture: unknown = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(
   readFileSync(fileURLToPath(new URL("./fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
-) as unknown;
+);
+
+/** The recorded fixture lacks an entity the parity checks read. */
+class FixtureEntityMissing extends Schema.TaggedError<FixtureEntityMissing>()(
+  "FixtureEntityMissing",
+  { id: Schema.String },
+) {}
 
 const decodeQ42 = (): Wikidata.WikidataItem => {
   // The response schema is Unknown-heavy, so a structural view of the parsed
   // fixture is faithful — `normaliseEntities` does the real validation.
   const entities = Wikidata.normaliseEntities(fixture as Wikidata.WbGetEntitiesResponse);
   const item = entities.Q42;
-  if (item === undefined) throw new Error("Q42 missing from fixture");
+  if (item === undefined) throw new FixtureEntityMissing({ id: "Q42" });
   return item;
 };
 
@@ -46,15 +54,15 @@ interface NeutralFact {
 
 // An extraction-era parity fixture: it does not track `src/reconciliation`'s
 // `EXTERNAL_ID_AUTHORITIES` (which validates and encodes each value).
-const EXTERNAL_ID_AUTHORITIES: Record<string, { authority: string; iri: (v: string) => string }> = {
-  P214: { authority: "viaf", iri: (v) => `https://viaf.org/viaf/${v}` },
-  P496: { authority: "orcid", iri: (v) => `https://orcid.org/${v}` },
-};
+const EXTERNAL_ID_AUTHORITIES = {
+  P214: { authority: "viaf", iri: (v: string) => `https://viaf.org/viaf/${v}` },
+  P496: { authority: "orcid", iri: (v: string) => `https://orcid.org/${v}` },
+} satisfies Record.ReadonlyRecord<string, { authority: string; iri: (v: string) => string }>;
 
-const DATE_PROPERTIES: Record<string, string> = {
+const DATE_PROPERTIES = {
   P569: "date of birth",
   P570: "date of death",
-};
+} satisfies Record.ReadonlyRecord<string, string>;
 
 const IMAGE_PROPERTIES = ["P18"];
 
@@ -79,7 +87,7 @@ function qidSelfLink(item: Wikidata.WikidataItem): NeutralFact {
 
 /** `sameAs` facts — one per allowlisted external-id statement. */
 function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
-  return Object.entries(EXTERNAL_ID_AUTHORITIES).flatMap(([property, scheme]) => {
+  return Record.toEntries(EXTERNAL_ID_AUTHORITIES).flatMap(([property, scheme]) => {
     const value = firstValue(item, property);
     if (value?._tag !== "external-id") return [];
     return [
@@ -96,7 +104,7 @@ function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
 
 /** Date facts — the time member, `+`-stripped like the reconciliation normaliser. */
 function dateFacts(item: Wikidata.WikidataItem): NeutralFact[] {
-  return Object.entries(DATE_PROPERTIES).flatMap(([property, label]) => {
+  return Record.toEntries(DATE_PROPERTIES).flatMap(([property, label]) => {
     const value = firstValue(item, property);
     if (value?._tag !== "time") return [];
     return [

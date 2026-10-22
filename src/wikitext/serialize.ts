@@ -15,52 +15,48 @@
  * @module wikitext/serialize
  */
 
+import * as Match from "effect/Match";
 import type { Document, Node, Param, TableCaption, TableCell, TableRow } from "./ast.ts";
 
 /** Serializes a fragment (a list of nodes) back to wikitext. */
 export function serializeNodes(nodes: readonly Node[]): string {
-  let out = "";
-  for (const node of nodes) out += serializeNode(node);
-  return out;
+  return nodes.map(serializeNode).join("");
 }
 
 /** Serializes a single node back to wikitext. */
 export function serializeNode(node: Node): string {
-  switch (node._tag) {
-    case "Text":
-      return node.text;
-    case "Comment":
-      return `<!--${node.text}${node.closed ? "-->" : ""}`;
-    case "HtmlEntity":
-      return node.raw;
-    case "Formatting":
-      return node.marks;
-    case "Heading":
-      return node.leftEquals + serializeNodes(node.title) + node.rightEquals + node.trailing;
-    case "Template":
-      return `{{${serializeNodes(node.name)}${serializeParams(node.params)}}}`;
-    case "Argument":
-      return `{{{${serializeNodes(node.name)}${
-        node.default === undefined ? "" : `|${serializeNodes(node.default)}`
-      }}}}`;
-    case "Wikilink":
-      return `[[${serializeNodes(node.target)}${node.segments
-        .map((seg) => `|${serializeNodes(seg)}`)
-        .join("")}]]`;
-    case "ExternalLink":
-      return `[${node.url}${node.label === undefined ? "" : serializeNodes(node.label)}]`;
-    case "AutoLink":
-      return node.url;
-    case "Tag":
-      // A marker tag is just its verbatim text; an extension tag adds its
-      // captured raw body and closing tag (both absent when open-only).
-      return node.raw + (node.rawContent ?? "") + (node.closeRaw ?? "");
-    case "Table":
-      return `{|${node.open}${node.captions.map(serializeCaption).join("")}${node.rows
-        .map(serializeRow)
-        .join("")}|}`;
-  }
+  return serializeByTag(node);
 }
+
+const serializeByTag: (node: Node) => string = Match.type<Node>().pipe(
+  Match.tagsExhaustive({
+    Text: (node) => node.text,
+    Comment: (node) => `<!--${node.text}${node.closed ? "-->" : ""}`,
+    HtmlEntity: (node) => node.raw,
+    Formatting: (node) => node.marks,
+    Heading: (node) =>
+      node.leftEquals + serializeNodes(node.title) + node.rightEquals + node.trailing,
+    Template: (node) => `{{${serializeNodes(node.name)}${serializeParams(node.params)}}}`,
+    Argument: (node) =>
+      `{{{${serializeNodes(node.name)}${
+        node.default === undefined ? "" : `|${serializeNodes(node.default)}`
+      }}}}`,
+    Wikilink: (node) =>
+      `[[${serializeNodes(node.target)}${node.segments
+        .map((seg) => `|${serializeNodes(seg)}`)
+        .join("")}]]`,
+    ExternalLink: (node) =>
+      `[${node.url}${node.label === undefined ? "" : serializeNodes(node.label)}]`,
+    AutoLink: (node) => node.url,
+    // A marker tag is just its verbatim text; an extension tag adds its
+    // captured raw body and closing tag (both absent when open-only).
+    Tag: (node) => node.raw + (node.rawContent ?? "") + (node.closeRaw ?? ""),
+    Table: (node) =>
+      `{|${node.open}${node.captions.map(serializeCaption).join("")}${node.rows
+        .map(serializeRow)
+        .join("")}|}`,
+  }),
+);
 
 function serializeCaption(caption: TableCaption): string {
   return `|+${caption.attrs === undefined ? "" : `${caption.attrs}|`}${serializeNodes(caption.content)}`;
@@ -83,11 +79,10 @@ export function serialize(doc: Document): string {
 }
 
 function serializeParams(params: readonly Param[]): string {
-  let out = "";
-  for (const p of params) {
-    out += "|";
-    if (p.name !== undefined) out += `${serializeNodes(p.name)}=`;
-    out += serializeNodes(p.value);
-  }
-  return out;
+  return params
+    .map(
+      (p) =>
+        `|${p.name === undefined ? "" : `${serializeNodes(p.name)}=`}${serializeNodes(p.value)}`,
+    )
+    .join("");
 }

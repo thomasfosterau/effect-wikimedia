@@ -43,7 +43,14 @@
  */
 
 import { Ascii, Input, Parser, Token } from "@thomasfosterau/effect-parse";
+import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
+import * as HashSet from "effect/HashSet";
+import * as Match from "effect/Match";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
+import * as Record from "effect/Record";
 import {
   type Argument,
   type AutoLink,
@@ -65,7 +72,7 @@ import {
   type Text,
   type Wikilink,
 } from "./ast.ts";
-import { matchBrackets } from "./brackets.ts";
+import { type BracketEnds, matchBrackets } from "./brackets.ts";
 import { resolveQuotes } from "./quotes.ts";
 
 /** Recursion ceiling; deeper nesting degrades to text (fail-soft, no throw). */
@@ -76,6 +83,7 @@ const PIPE = 0x7c;
 const BANG = 0x21;
 const SLASH = 0x2f;
 const SEMICOLON = 0x3b;
+const APOSTROPHE = 0x27;
 
 /** The cursor every parser here reads: the source string. */
 type State = Input.State<string>;
@@ -92,14 +100,14 @@ interface SessionState {
    * includes the region end, since the same spot can be scanned under a
    * narrowed heading-title or table-cell bound.
    */
-  readonly failed: Set<number>;
+  readonly failed: MutableHashSet.MutableHashSet<number>;
   /** How many fragments enclose the cursor; constructs stop at {@link MAX_DEPTH}. */
   depth: number;
   /**
    * Where each bracketed construct in the source ends (`matchBrackets`),
    * built on the first table scan that needs it.
    */
-  nestedEnds: ReadonlyMap<number, number> | undefined;
+  nestedEnds: BracketEnds | undefined;
 }
 
 /** The per-parse state, provided to the grammar through the parse context. */
@@ -111,6 +119,8 @@ class Session extends Context.Service<Session, SessionState>()(
 type WikiParser<A> = Parser.Parser<A, never, Session>;
 
 const session = (state: State): SessionState =>
+  // SAFETY: every `WikiParser` runs only on the cursor `parse` builds, whose
+  // context is `Context.make(Session, …)`; the cursor's own type erases it.
   Context.get(state.context as Context.Context<Session>, Session);
 
 const literal = Token.literal;
@@ -132,9 +142,9 @@ function memoFailure<A>(
   return Parser.make((state) => {
     const failed = session(state).failed;
     const key = (state.pos * (state.input.length + 1) + state.end) * OPEN_KINDS + kind;
-    if (failed.has(key)) return state.backtrack("Fail");
+    if (MutableHashSet.has(failed, key)) return state.backtrack("Fail");
     const a = self.step(state);
-    if (a === Input.Fail) failed.add(key);
+    if (a === Input.Fail) MutableHashSet.add(failed, key);
     return a;
   });
 }
@@ -193,7 +203,9 @@ const PLAIN_TEXT = Token.takeTill(SPECIAL, { min: 1 });
  */
 function asciiTable(chars: Iterable<string>): Uint8Array {
   const table = new Uint8Array(0x80);
-  for (const c of chars) table[c.charCodeAt(0)] = 1;
+  Arr.forEach(Arr.fromIterable(chars), (c) => {
+    table[c.charCodeAt(0)] = 1;
+  });
   return table;
 }
 
@@ -246,6 +258,9 @@ function fragment(stop: Stop | undefined, block: boolean): WikiParser<Node[]> {
     const deep = session(state).depth >= MAX_DEPTH;
     const nodes: Node[] = [];
     let textStart = state.pos;
+    // Whether an apostrophe run (a `Formatting` marker, the only construct
+    // opening at `'`) was taken, so `resolveQuotes` has anything to do.
+    let quotes = false;
     while (state.pos < end) {
       const start = state.pos;
       const c = src.charCodeAt(start);
@@ -261,13 +276,19 @@ function fragment(stop: Stop | undefined, block: boolean): WikiParser<Node[]> {
         state.pos = start + 1;
         continue;
       }
-      if (start > textStart) nodes.push(text(src, textStart, start));
+      pushText(nodes, src, textStart, start);
       nodes.push(node);
       textStart = state.pos;
+      quotes ||= c === APOSTROPHE;
     }
-    if (state.pos > textStart) nodes.push(text(src, textStart, state.pos));
-    return resolveQuotes(nodes, src);
+    pushText(nodes, src, textStart, state.pos);
+    return quotes ? resolveQuotes(nodes, src) : nodes;
   });
+}
+
+/** Appends the text run `src[from, to)` to `nodes`, unless it is empty. */
+function pushText(nodes: Node[], src: string, from: number, to: number): void {
+  if (to > from) nodes.push(text(src, from, to));
 }
 
 /** A fragment nested in a construct, one level deeper. */
@@ -358,8 +379,8 @@ function skipNested(state: State, at: number): number {
   if (c !== 0x7b && c !== 0x5b && c !== 0x3c) return at + 1; // only `{`, `[` and `<` open one
   const s = session(state);
   s.nestedEnds ??= matchBrackets(state.input, (i) => extensionTagEnd(state, i));
-  const end = s.nestedEnds.get(at);
-  return end !== undefined && end <= state.end ? end : at + 1;
+  const end = s.nestedEnds[at];
+  return end > at && end <= state.end ? end : at + 1;
 }
 
 /**
@@ -425,11 +446,14 @@ const trailingNewline = Parser.optional(literal("\n"));
  * comes before it (MediaWiki's guard against reading a wikilink's
  * surroundings as attributes).
  */
-function splitCellAttrs(
-  state: State,
-  from: number,
-  to: number,
-): { attrs: string | undefined; contentStart: number } {
+interface CellSplit {
+  /** The attribute text, or `undefined` when no attribute `|` splits the cell. */
+  readonly attrs: string | undefined;
+  /** Where the cell's content starts. */
+  readonly contentStart: number;
+}
+
+function splitCellAttrs(state: State, from: number, to: number): CellSplit {
   const src = state.input;
   const at = findTopLevel(state, from, to, (i) => {
     const c = src.charCodeAt(i);
@@ -510,38 +534,57 @@ const tableItem: WikiParser<TableItem> = Parser.preceded(
   ),
 );
 
+/** A table's captions and rows (see {@link tableRows}). */
+interface TableBody {
+  readonly captions: TableCaption[];
+  readonly rows: TableRow[];
+}
+
+/** {@link tableRows}' running state: the body so far and the row still open. */
+interface TableBodyBuilder extends TableBody {
+  row: { start: number; open: string | undefined; cells: TableCell[] } | undefined;
+}
+
+/** Closes the open row (if any) at `end`. */
+function flushRow(body: TableBodyBuilder, end: number): void {
+  const { row } = body;
+  if (row) body.rows.push({ span: { start: row.start, end }, open: row.open, cells: row.cells });
+}
+
+/** Adds one item to the table body being built (see {@link tableRows}). */
+const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
+  Match.type<TableItem>().pipe(
+    Match.tagsExhaustive({
+      Row:
+        ({ start, open }) =>
+        (body: TableBodyBuilder) => {
+          flushRow(body, start);
+          body.row = { start, open, cells: [] };
+        },
+      Caption:
+        ({ caption }) =>
+        (body: TableBodyBuilder) => {
+          body.captions.push(caption);
+        },
+      Cells:
+        ({ cells }) =>
+        (body: TableBodyBuilder) => {
+          body.row ??= { start: cells[0].span.start, open: undefined, cells: [] };
+          body.row.cells.push(...cells);
+        },
+    }),
+  );
+
 /**
  * Groups a table's items into captions and rows. Cells before any `|-` open
  * an implicit row (`open` undefined); each row runs to the next `|-` or the
  * closing `|}` at `closeStart`, captions within it included.
  */
-function tableRows(
-  items: readonly TableItem[],
-  closeStart: number,
-): { captions: TableCaption[]; rows: TableRow[] } {
-  const captions: TableCaption[] = [];
-  const rows: TableRow[] = [];
-  let row: { start: number; open: string | undefined; cells: TableCell[] } | undefined;
-  const flush = (end: number): void => {
-    if (row) rows.push({ span: { start: row.start, end }, open: row.open, cells: row.cells });
-  };
-  for (const item of items) {
-    switch (item._tag) {
-      case "Row":
-        flush(item.start);
-        row = { start: item.start, open: item.open, cells: [] };
-        break;
-      case "Caption":
-        captions.push(item.caption);
-        break;
-      case "Cells":
-        row ??= { start: item.cells[0].span.start, open: undefined, cells: [] };
-        row.cells.push(...item.cells);
-        break;
-    }
-  }
-  flush(closeStart);
-  return { captions, rows };
+function tableRows(items: readonly TableItem[], closeStart: number): TableBody {
+  const body: TableBodyBuilder = { captions: [], rows: [], row: undefined };
+  Arr.forEach(items, (item) => addTableItem(item)(body));
+  flushRow(body, closeStart);
+  return { captions: body.captions, rows: body.rows };
 }
 
 /** `{|` at the start of a line, at block level, opens a table — see {@link Table}. */
@@ -582,7 +625,7 @@ const wikilink: WikiParser<Wikilink> = memoFailure(
  * subset of MediaWiki's `$wgUrlProtocols`. A `[` not followed by one of
  * these (then `:`), or by `//`, stays literal text.
  */
-const PROTOCOLS: ReadonlySet<string> = new Set([
+const PROTOCOLS = HashSet.make(
   "bitcoin",
   "ftp",
   "ftps",
@@ -609,11 +652,11 @@ const PROTOCOLS: ReadonlySet<string> = new Set([
   "urn",
   "worldwind",
   "xmpp",
-]);
+);
 
 const protocol = Parser.alt(
   Parser.terminated(
-    Parser.filter(Ascii.alpha1, (name) => PROTOCOLS.has(name.toLowerCase())),
+    Parser.filter(Ascii.alpha1, (name) => HashSet.has(PROTOCOLS, name.toLowerCase())),
     literal(":"),
   ),
   literal("//"),
@@ -687,21 +730,8 @@ const autoLinkCandidate = Parser.seq(
  * into the surrounding text — MediaWiki's `makeFreeExternalLink`. `)` joins
  * the set only when the URL contains no `(` at all (see {@link AutoLink}).
  */
-function isAutoLinkTrailSep(c: number, hasParen: boolean): boolean {
-  switch (c) {
-    case 0x2c: // ,
-    case 0x3b: // ;
-    case 0x2e: // .
-    case 0x3a: // :
-    case 0x21: // !
-    case 0x3f: // ?
-      return true;
-    case 0x29: // )
-      return !hasParen;
-    default:
-      return false;
-  }
-}
+const AUTOLINK_TRAIL = ",;.:!?)";
+const AUTOLINK_TRAIL_IF_PAREN = ",;.:!?";
 
 /**
  * Matches a truncated HTML-entity reference at the end of a string
@@ -712,9 +742,12 @@ const ENTITY_TAIL_RE = /&(?:[a-z]+|#x[\da-f]+|#\d+)$/i;
 
 /** The length of `body` left once trailing punctuation is trimmed off. */
 function trimmedAutoLinkBody(body: string): number {
-  const hasParen = body.includes("(");
-  let end = body.length;
-  while (end > 0 && isAutoLinkTrailSep(body.charCodeAt(end - 1), hasParen)) end--;
+  const trail = body.includes("(") ? AUTOLINK_TRAIL_IF_PAREN : AUTOLINK_TRAIL;
+  // Scans UTF-16 units (`split("")`), the units `end` counts in.
+  let end = Option.match(
+    Arr.findLastIndex(body.split(""), (unit) => !trail.includes(unit)),
+    { onNone: () => 0, onSome: (last) => last + 1 },
+  );
   // Don't split a trailing HTML-entity-looking reference by moving its `;`
   // into the trimmed trail.
   if (end < body.length && body.charCodeAt(end) === SEMICOLON) {
@@ -777,7 +810,10 @@ const tagOpen = Parser.withTaken(
   ),
 );
 
-const closeTags = new Map<string, WikiParser<readonly [rawContent: string, closeRaw: string]>>();
+const closeTags = MutableHashMap.empty<
+  string,
+  WikiParser<readonly [rawContent: string, closeRaw: string]>
+>();
 
 /**
  * An extension tag's raw body and its close tag (`</name>`, any case,
@@ -785,20 +821,23 @@ const closeTags = new Map<string, WikiParser<readonly [rawContent: string, close
  * close tag ends within the region.
  */
 function extensionBody(name: string): WikiParser<readonly [string, string]> {
-  let parser = closeTags.get(name);
-  if (parser === undefined) {
-    const re = new RegExp(`</${name}\\s*>`, "ig");
-    parser = Parser.make((state) => {
-      re.lastIndex = state.pos;
-      const m = re.exec(state.input);
-      if (m === null || m.index + m[0].length > state.end) return state.backtrack("TakeUntil");
-      const rawContent = state.slice(state.pos, m.index);
-      state.pos = m.index + m[0].length;
-      return [rawContent, m[0]] as const;
-    });
-    closeTags.set(name, parser);
-  }
-  return parser;
+  return Option.getOrElse(MutableHashMap.get(closeTags, name), () => {
+    const parser = closeTagParser(name);
+    MutableHashMap.set(closeTags, name, parser);
+    return parser;
+  });
+}
+
+function closeTagParser(name: string): WikiParser<readonly [string, string]> {
+  const re = new RegExp(`</${name}\\s*>`, "ig");
+  return Parser.make((state) => {
+    re.lastIndex = state.pos;
+    const m = re.exec(state.input);
+    if (m === null || m.index + m[0].length > state.end) return state.backtrack("TakeUntil");
+    const rawContent = state.slice(state.pos, m.index);
+    state.pos = m.index + m[0].length;
+    return [rawContent, m[0]] as const;
+  });
 }
 
 const tag: WikiParser<Tag> = Parser.make((state) => {
@@ -834,14 +873,12 @@ const tag: WikiParser<Tag> = Parser.make((state) => {
 
 /** The lower-cased tag name (see `tagName`) starting at `i`; `""` when there is none. */
 function tagNameAt(src: string, i: number): string {
-  let j = i;
-  while (j < src.length && isAlnum(src.charCodeAt(j))) j++;
-  return src.slice(i, j).toLowerCase();
+  TAG_NAME_AT.lastIndex = i;
+  return (TAG_NAME_AT.exec(src)?.[0] ?? "").toLowerCase();
 }
 
-function isAlnum(c: number): boolean {
-  return (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
-}
+/** A run of tag-name characters (see `tagName`), matched in place. */
+const TAG_NAME_AT = /[A-Za-z0-9]*/y;
 
 /**
  * End of the extension tag opening at `at`, its body and close tag included
@@ -950,7 +987,7 @@ const nextChar = Parser.peek(Token.any);
 
 const constructs = (cases: Readonly<Record<string, WikiParser<Node>>>): Constructs => ({
   construct: Parser.dispatch(nextChar, cases),
-  opens: asciiTable(Object.keys(cases)),
+  opens: asciiTable(Record.keys(cases)),
 });
 
 /** The constructs that may open inside any fragment. */
@@ -980,7 +1017,11 @@ export function parse(source: string): Document {
   // `Parser.parse`, which would first look for a compiled form of it: there
   // is none, since its `Parser.make` steps run interpreted.
   const state = new Input.State(source, {
-    context: Context.make(Session, { failed: new Set<number>(), depth: 0, nestedEnds: undefined }),
+    context: Context.make(Session, {
+      failed: MutableHashSet.empty<number>(),
+      depth: 0,
+      nestedEnds: undefined,
+    }),
   });
   const children = document.step(state);
   return {

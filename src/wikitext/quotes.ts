@@ -26,6 +26,9 @@
  * @module wikitext/quotes
  */
 
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import type { Formatting, Node } from "./ast.ts";
 
 const SPACE = 0x20;
@@ -49,86 +52,80 @@ function modeOf(markupLen: 2 | 3 | 5): Formatting["mode"] {
   return markupLen === 2 ? "italic" : markupLen === 3 ? "bold" : "bold-italic";
 }
 
+const isFormattingTag = Predicate.isTagged("Formatting");
+const isFormatting = (node: Node): node is Formatting => isFormattingTag(node);
+
 /**
  * Resolves the bold/italic role of every {@link Formatting} node in a
  * fragment, returning a new list (unchanged when the fragment has none).
  */
 export function resolveQuotes(nodes: Node[], src: string): Node[] {
-  let hasFormatting = false;
-  for (const n of nodes) {
-    if (n._tag === "Formatting") {
-      hasFormatting = true;
-      break;
-    }
-  }
-  if (!hasFormatting) return nodes;
-
-  // Resolved (mode, lead) per Formatting node, keyed by identity.
-  const resolved = new Map<Formatting, Normalised>();
-
-  // Group the formatting tokens by source line: a newline anywhere between
-  // one token's end and the next's start starts a fresh line group.
-  let group: Formatting[] = [];
-  let prevEnd = -1;
-  const flush = () => {
-    if (group.length > 0) resolveLine(group, src, resolved);
-    group = [];
-  };
-  for (const n of nodes) {
-    if (n._tag !== "Formatting") continue;
-    if (prevEnd >= 0 && src.lastIndexOf("\n", n.span.start - 1) >= prevEnd) {
-      flush();
-    }
-    group.push(n);
-    prevEnd = n.span.end;
-  }
-  flush();
-
+  if (!Arr.some(nodes, isFormatting)) return nodes;
+  // Resolved (mode, lead) per Formatting node, in the nodes' order.
+  const resolved = Arr.flatMap(lineGroups(Arr.filter(nodes, isFormatting), src), (group) =>
+    resolveLine(group, src),
+  );
+  let next = 0;
   return nodes.map((n) => {
-    if (n._tag !== "Formatting") return n;
-    const r = resolved.get(n);
-    if (!r) return n;
+    if (!isFormatting(n)) return n;
+    const r = resolved[next++];
     return { ...n, mode: modeOf(r.markupLen), leadingLiterals: r.lead };
   });
 }
 
+/**
+ * Groups the formatting tokens by source line: a newline anywhere between
+ * one token's end and the next's start starts a fresh line group.
+ */
+function lineGroups(tokens: readonly Formatting[], src: string): Formatting[][] {
+  return Arr.reduce(tokens, Arr.empty<Formatting[]>(), (groups, token, i) => {
+    const prev = tokens[i - 1];
+    const last = groups[groups.length - 1];
+    if (prev === undefined || last === undefined) groups.push([token]);
+    else if (src.lastIndexOf("\n", token.span.start - 1) >= prev.span.end) groups.push([token]);
+    else last.push(token);
+    return groups;
+  });
+}
+
+/** What precedes a `'''` run, as the odd-bold heuristic reads it. */
+type Preceding = "single-letter-word" | "multi-letter-word" | "space";
+
+/**
+ * The odd-bold heuristic's preference: the first `'''` after a single-letter
+ * word, else the first after a longer word, else the first after a space.
+ */
+const PRECEDING_PRIORITY: readonly Preceding[] = [
+  "single-letter-word",
+  "multi-letter-word",
+  "space",
+];
+
+const isLineSpace = (c: number): boolean => c === SPACE || c === NEWLINE;
+
+/** What precedes the run starting at `start` (the start of input reads as a space). */
+function precedingKind(src: string, start: number): Preceding {
+  const x1 = start - 1 >= 0 ? src.charCodeAt(start - 1) : SPACE;
+  const x2 = start - 2 >= 0 ? src.charCodeAt(start - 2) : SPACE;
+  if (isLineSpace(x1)) return "space";
+  return isLineSpace(x2) ? "single-letter-word" : "multi-letter-word";
+}
+
 // MediaWiki's per-line doQuotes resolution (run normalisation + odd-bold heuristic).
-function resolveLine(
-  tokens: readonly Formatting[],
-  src: string,
-  out: Map<Formatting, Normalised>,
-): void {
+function resolveLine(tokens: readonly Formatting[], src: string): Normalised[] {
   const norm = tokens.map((t) => normalise(t.marks.length));
-
-  let numBold = 0;
-  for (const n of norm) if (n.markupLen === 3 || n.markupLen === 5) numBold++;
-
-  if (numBold % 2 === 1) {
-    // Odd bold count: reinterpret one `'''` as `''` + a literal apostrophe.
-    let firstSingle = -1;
-    let firstMulti = -1;
-    let firstSpace = -1;
-    for (let i = 0; i < tokens.length; i++) {
-      if (norm[i].markupLen !== 3) continue;
-      const start = tokens[i].span.start;
-      const x1 = start - 1 >= 0 ? src.charCodeAt(start - 1) : SPACE;
-      const x2 = start - 2 >= 0 ? src.charCodeAt(start - 2) : SPACE;
-      const x1Space = x1 === SPACE || x1 === NEWLINE;
-      const x2Space = x2 === SPACE || x2 === NEWLINE;
-      if (x1Space) {
-        if (firstSpace === -1) firstSpace = i;
-      } else if (x2Space) {
-        firstSingle = i; // single-letter word — highest priority, stop looking
-        break;
-      } else if (firstMulti === -1) {
-        firstMulti = i;
-      }
-    }
-    const chosen = firstSingle > -1 ? firstSingle : firstMulti > -1 ? firstMulti : firstSpace;
-    if (chosen > -1) {
-      norm[chosen] = { markupLen: 2, lead: norm[chosen].lead + 1 };
-    }
-  }
-
-  for (let i = 0; i < tokens.length; i++) out.set(tokens[i], norm[i]);
+  const numBold = Arr.countBy(norm, (n) => n.markupLen === 3 || n.markupLen === 5);
+  if (numBold % 2 === 0) return norm;
+  // Odd bold count: reinterpret one `'''` as `''` + a literal apostrophe.
+  const kinds = tokens.map((t, i) =>
+    norm[i].markupLen === 3 ? Option.some(precedingKind(src, t.span.start)) : Option.none(),
+  );
+  const chosen = Arr.findFirst(PRECEDING_PRIORITY, (kind) =>
+    Arr.findFirstIndex(kinds, Option.contains(kind)),
+  );
+  return Option.match(chosen, {
+    onNone: () => norm,
+    onSome: (at): Normalised[] =>
+      norm.map((n, i) => (i === at ? { markupLen: 2, lead: n.lead + 1 } : n)),
+  });
 }

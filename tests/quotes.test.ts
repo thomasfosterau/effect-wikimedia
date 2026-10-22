@@ -6,18 +6,15 @@
  * @module tests/quotes
  */
 
+import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import { type Formatting, type Node, parse } from "../src/wikitext/index.ts";
 
+const isFormatting = (n: Node): n is Formatting => Predicate.isTagged(n, "Formatting");
+
 function formatting(src: string): Formatting[] {
-  const out: Formatting[] = [];
-  const collect = (nodes: readonly Node[]): void => {
-    for (const n of nodes) {
-      if (n._tag === "Formatting") out.push(n);
-    }
-  };
-  collect(parse(src).children);
-  return out;
+  return Arr.filter(parse(src).children, isFormatting);
 }
 
 describe("apostrophe run normalisation", () => {

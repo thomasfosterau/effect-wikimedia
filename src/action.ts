@@ -33,8 +33,13 @@
  * @module
  */
 
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import {
   DEFAULT_RETRY_OPTIONS,
   InvalidRequest,
@@ -157,17 +162,17 @@ export function normaliseWikitext(
   response: WikitextResponse,
   title: string,
 ): WikitextResult | null {
-  const pages = Object.values(response.query?.pages ?? {});
+  const pages = Rec.values(response.query?.pages ?? {});
   const page = pages.find((p) => p.missing === undefined && p.revisions !== undefined);
   if (page === undefined) return null;
   const revision = page.revisions?.[0];
   const wikitext = revision?.slots?.main?.["*"];
-  if (typeof wikitext !== "string") return null;
+  if (!Predicate.isString(wikitext)) return null;
   return {
     pageId: toNonNegativeInt(page.pageid),
     title: sanitiseText(page.title) ?? title,
     revisionId: toNonNegativeInt(revision?.revid),
-    timestamp: typeof revision?.timestamp === "string" ? revision.timestamp.slice(0, 40) : null,
+    timestamp: Predicate.isString(revision?.timestamp) ? revision.timestamp.slice(0, 40) : null,
     wikitext,
   };
 }
@@ -307,14 +312,16 @@ export interface PageMetadata {
 
 /** A URL string, re-validated as `https:` before being trusted, or `null`. */
 function toHttpsUrl(value: unknown): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > 2000) return null;
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+  if (!Predicate.isString(value) || Str.isEmpty(value) || value.length > 2000) return null;
+  return parseUrl(value).pipe(
+    Option.filter((parsed) => parsed.protocol === "https:"),
+    Option.map((parsed) => parsed.toString()),
+    Option.getOrNull,
+  );
 }
+
+/** `new URL(value)`, or `None` when it throws on an unparseable URL. */
+const parseUrl = Option.liftThrowable((value: string) => new URL(value));
 
 /**
  * Normalises a `PageMetadataResponse` for the requested `title`. Returns
@@ -326,7 +333,7 @@ export function normalisePageMetadata(
   response: PageMetadataResponse,
   title: string,
 ): PageMetadata | null {
-  const pages = Object.values(response.query?.pages ?? {});
+  const pages = Rec.values(response.query?.pages ?? {});
   const page = pages.find(
     (p) => p.missing === undefined && p.invalid === undefined && p.special === undefined,
   );
@@ -336,7 +343,7 @@ export function normalisePageMetadata(
     title: sanitiseText(page.title) ?? title,
     contentModel: sanitiseText(page.contentmodel),
     language: sanitiseText(page.pagelanguage),
-    touched: typeof page.touched === "string" ? page.touched.slice(0, 40) : null,
+    touched: Predicate.isString(page.touched) ? page.touched.slice(0, 40) : null,
     lastRevisionId: toNonNegativeInt(page.lastrevid),
     length: toNonNegativeInt(page.length, 100_000_000),
     fullUrl: toHttpsUrl(page.fullurl),
@@ -438,19 +445,17 @@ export interface SearchResult {
 
 /** Normalises a `SearchResponse`, bounding the result count and dropping unusably-titled hits. */
 export function normaliseSearch(response: SearchResponse): readonly SearchResult[] {
-  const out: SearchResult[] = [];
-  for (const hit of response.query?.search ?? []) {
-    if (out.length >= MAX_SEARCH_RESULTS) break;
-    const title = sanitiseText(hit.title);
-    if (title === null) continue;
-    out.push({
-      pageId: toNonNegativeInt(hit.pageid),
-      title,
-      snippet: sanitiseText(hit.snippet),
-      wordCount: toNonNegativeInt(hit.wordcount),
-    });
-  }
-  return out;
+  const results = Arr.getSomes(
+    Arr.map(response.query?.search ?? [], (hit) =>
+      Option.map(Option.fromNullOr(sanitiseText(hit.title)), (title): SearchResult => ({
+        pageId: toNonNegativeInt(hit.pageid),
+        title,
+        snippet: sanitiseText(hit.snippet),
+        wordCount: toNonNegativeInt(hit.wordcount),
+      })),
+    ),
+  );
+  return Arr.take(results, MAX_SEARCH_RESULTS);
 }
 
 /** Options for {@link search}. */
@@ -616,33 +621,34 @@ export const MAX_PARSE_ENTRIES = 500;
 function titledEntries(
   entries: readonly { readonly "*"?: unknown }[] | undefined,
 ): readonly string[] {
-  const out: string[] = [];
-  for (const entry of entries ?? []) {
-    if (out.length >= MAX_PARSE_ENTRIES) break;
-    const title = sanitiseText(entry["*"]);
-    if (title !== null) out.push(title);
-  }
-  return out;
+  const titles = Arr.getSomes(
+    Arr.map(entries ?? [], (entry) => Option.fromNullOr(sanitiseText(entry["*"]))),
+  );
+  return Arr.take(titles, MAX_PARSE_ENTRIES);
 }
 
 /** Normalises a `ParseResponse`; `null` when the endpoint returned no `parse` result (page missing). */
 export function normaliseParse(response: ParseResponse, title: string): ParsedPage | null {
   const parsed = response.parse;
   if (parsed === undefined) return null;
-  const sections: ParsedSection[] = [];
-  for (const section of parsed.sections ?? []) {
-    if (sections.length >= MAX_PARSE_ENTRIES) break;
-    const sectionTitle = sanitiseText(section.line);
-    if (sectionTitle === null) continue;
-    sections.push({
-      level: toNonNegativeInt(
-        typeof section.level === "string" ? Number(section.level) : section.level,
-        20,
+  const sections = Arr.take(
+    Arr.getSomes(
+      Arr.map(parsed.sections ?? [], (section) =>
+        Option.map(
+          Option.fromNullOr(sanitiseText(section.line)),
+          (sectionTitle): ParsedSection => ({
+            level: toNonNegativeInt(
+              Predicate.isString(section.level) ? Number(section.level) : section.level,
+              20,
+            ),
+            title: sectionTitle,
+            anchor: sanitiseText(section.anchor),
+          }),
+        ),
       ),
-      title: sectionTitle,
-      anchor: sanitiseText(section.anchor),
-    });
-  }
+    ),
+    MAX_PARSE_ENTRIES,
+  );
   return {
     pageId: toNonNegativeInt(parsed.pageid),
     title: sanitiseText(parsed.title) ?? title,

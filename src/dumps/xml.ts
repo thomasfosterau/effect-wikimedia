@@ -50,7 +50,10 @@
  * @module dumps/xml
  */
 
+import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
 import * as Stream from "effect/Stream";
+import * as Str from "effect/String";
 
 // ── Typed record model ───────────────────────────────────────────────────
 
@@ -259,7 +262,7 @@ export function tagName(body: string): string {
  */
 export function classifyTag(tag: string): readonly XmlToken[] {
   const inner = tag.slice(1, -1).trim();
-  if (inner.length === 0 || inner.startsWith("!") || inner.startsWith("?")) return [];
+  if (Str.isEmpty(inner) || inner.startsWith("!") || inner.startsWith("?")) return [];
   if (inner.startsWith("/")) return [{ t: "close", name: tagName(inner.slice(1)) }];
   if (inner.endsWith("/")) {
     const name = tagName(inner.slice(0, -1));
@@ -270,6 +273,21 @@ export function classifyTag(tag: string): readonly XmlToken[] {
   }
   return [{ t: "open", name: tagName(inner) }];
 }
+
+/** What {@link tokenizeXml} returns: a buffer's complete tokens and its carry. */
+export interface XmlTokenization {
+  /** The complete tokens in the buffer, in order. */
+  readonly tokens: readonly XmlToken[];
+  /**
+   * A trailing partial tag, from its `<`, to put in front of the next chunk;
+   * `""` when the buffer doesn't end inside a tag.
+   */
+  readonly rest: string;
+}
+
+// One lexeme of a buffer holding no partial tag: a whole tag, from `<` to the
+// first `>` after it (which may span a stray `<`), or a maximal run of text.
+const XML_TOKEN_RE = /<[^>]*>|[^<]+/g;
 
 /**
  * Scans a buffer into complete tokens plus the unconsumed tail (`rest`) to
@@ -283,50 +301,38 @@ export function classifyTag(tag: string): readonly XmlToken[] {
  * entities never contain `<`, no tag boundary is ever missed. Pure; the
  * streaming state is just the `rest` string.
  */
-export function tokenizeXml(buffer: string): {
-  /** The complete tokens in `buffer`, in order. */
-  readonly tokens: readonly XmlToken[];
-  /**
-   * A trailing partial tag, from its `<`, to put in front of the next chunk;
-   * `""` when `buffer` doesn't end inside a tag.
-   */
-  readonly rest: string;
-} {
-  const tokens: XmlToken[] = [];
-  let i = 0;
-  while (i < buffer.length) {
-    const lt = buffer.indexOf("<", i);
-    if (lt === -1) {
-      tokens.push({ t: "text", value: buffer.slice(i) }); // trailing text — emit, don't carry
-      return { tokens, rest: "" };
-    }
-    if (lt > i) tokens.push({ t: "text", value: buffer.slice(i, lt) });
-    const gt = buffer.indexOf(">", lt);
-    if (gt === -1) return { tokens, rest: buffer.slice(lt) }; // partial tag — carry from '<'
-    for (const token of classifyTag(buffer.slice(lt, gt + 1))) tokens.push(token);
-    i = gt + 1;
-  }
-  return { tokens, rest: "" };
+export function tokenizeXml(buffer: string): XmlTokenization {
+  // A partial tag is a `<` with no `>` after it; only the first such `<` (the
+  // first after the last `>`) matters, and everything from it is carried.
+  const partial = buffer.indexOf("<", buffer.lastIndexOf(">") + 1);
+  const complete = partial === -1 ? buffer : buffer.slice(0, partial);
+  const tokens = Arr.flatMap(
+    Array.from(complete.matchAll(XML_TOKEN_RE)),
+    ([lexeme]): readonly XmlToken[] =>
+      lexeme.startsWith("<") ? classifyTag(lexeme) : [{ t: "text", value: lexeme }],
+  );
+  return { tokens, rest: partial === -1 ? "" : buffer.slice(partial) };
 }
 
 // ── Entity decoding ──────────────────────────────────────────────────────
 
 // XML's five predefined entities, and nothing more: the MediaWiki exporter
-// escapes with these alone, and XML defines no others without a DTD. A Map,
-// not an object literal: a lookup on `{}` also finds the inherited
-// `constructor`, `toString`, … (`&constructor;` is a well-formed entity).
-const XML_NAMED_ENTITIES: ReadonlyMap<string, string> = new Map([
-  ["lt", "<"],
-  ["gt", ">"],
-  ["amp", "&"],
-  ["quot", '"'],
-  ["apos", "'"],
-]);
+// escapes with these alone, and XML defines no others without a DTD.
+type XmlEntityName = "lt" | "gt" | "amp" | "quot" | "apos";
+const XML_NAMED_ENTITIES: Readonly<Record<XmlEntityName, string>> = {
+  lt: "<",
+  gt: ">",
+  amp: "&",
+  quot: '"',
+  apos: "'",
+};
 
 // One entity: a whole hex reference (group 1), a whole decimal reference
-// (group 2) or a name (group 3). XML spells the hex marker `x`; `X` is also
-// accepted, as it always has been here.
-const XML_ENTITY_RE = /&(?:#[xX]([0-9A-Fa-f]+)|#([0-9]+)|([A-Za-z][A-Za-z0-9]*));/g;
+// (group 2) or one of the five predefined names (group 3). XML spells the hex
+// marker `x`; `X` is also accepted, as it always has been here. Any other name
+// (`&nbsp;`, `&constructor;`) doesn't match, so it stays as written and never
+// reaches the lookup above, where `constructor` would find `{}`'s prototype.
+const XML_ENTITY_RE = /&(?:#[xX]([0-9A-Fa-f]+)|#([0-9]+)|(lt|gt|amp|quot|apos));/g;
 
 // XML 1.0's `Char` production: the code points a character reference may
 // name in a well-formed document. NUL, the C0 controls other than tab, LF and
@@ -356,8 +362,8 @@ export function decodeXmlEntities(text: string): string {
   if (!text.includes("&")) return text;
   return text.replace(
     XML_ENTITY_RE,
-    (match, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
-      if (name !== undefined) return XML_NAMED_ENTITIES.get(name) ?? match;
+    (match, hex: string | undefined, dec: string | undefined, name: XmlEntityName | undefined) => {
+      if (name !== undefined) return XML_NAMED_ENTITIES[name];
       const code = hex === undefined ? Number(dec) : Number.parseInt(hex, 16);
       return isXmlChar(code) ? String.fromCodePoint(code) : match;
     },
@@ -391,7 +397,7 @@ function toInt(value: string): number | null {
 /** Trims and length-bounds a short field; `null` when empty. */
 function toField(value: string): string | null {
   const trimmed = value.trim();
-  if (trimmed.length === 0) return null;
+  if (Str.isEmpty(trimmed)) return null;
   return trimmed.length > MAX_FIELD_LENGTH ? trimmed.slice(0, MAX_FIELD_LENGTH) : trimmed;
 }
 
@@ -437,38 +443,54 @@ const freshRevision = (): MutableRevision => ({
   hasContributor: false,
 });
 
+/** A leaf setter: stores one captured field's decoded text on its record. */
+type Setter<T> = (record: T, value: string) => void;
+
 /** Page-level leaf setters, keyed by element name. */
-const PAGE_SETTERS: Readonly<Record<string, (p: MutablePage, value: string) => void>> = {
+const PAGE_SETTERS = {
   title: (p, v) => (p.title = toField(v)),
   ns: (p, v) => (p.ns = toInt(v)),
   id: (p, v) => (p.id = toInt(v)),
-};
+} satisfies Readonly<Record<string, Setter<MutablePage>>>;
 
 /** Revision-level leaf setters, keyed by element name. */
-const REVISION_SETTERS: Readonly<Record<string, (r: MutableRevision, value: string) => void>> = {
+const REVISION_SETTERS = {
   id: (r, v) => (r.id = toInt(v)),
   parentid: (r, v) => (r.parentId = toInt(v)),
   timestamp: (r, v) => (r.timestamp = toField(v)),
   comment: (r, v) => (r.comment = toField(v)),
   model: (r, v) => (r.model = toField(v)),
   format: (r, v) => (r.format = toField(v)),
-  text: (r, v) => (r.text = v.length === 0 ? null : v),
+  text: (r, v) => (r.text = Str.isEmpty(v) ? null : v),
   sha1: (r, v) => (r.sha1 = toField(v)),
-};
+} satisfies Readonly<Record<string, Setter<MutableRevision>>>;
 
 /** Contributor leaf setters, keyed by element name. */
-const CONTRIBUTOR_SETTERS: Readonly<Record<string, (r: MutableRevision, value: string) => void>> = {
+const CONTRIBUTOR_SETTERS = {
   username: (r, v) => (r.contributorUsername = toField(v)),
   ip: (r, v) => (r.contributorIp = toField(v)),
   id: (r, v) => (r.contributorId = toInt(v)),
-};
+} satisfies Readonly<Record<string, Setter<MutableRevision>>>;
 
-/** Element names that capture a text child in some context. */
-const CAPTURED = new Set<string>([
-  ...Object.keys(PAGE_SETTERS),
-  ...Object.keys(REVISION_SETTERS),
-  ...Object.keys(CONTRIBUTOR_SETTERS),
-]);
+/**
+ * Stores `value` on `record` with the setter `setters` holds for element
+ * `name`; a no-op when it holds none. An own-property test, so an inherited
+ * name (`constructor`, `toString`, …) finds nothing.
+ */
+function applySetter<T>(
+  setters: Readonly<Record<string, Setter<T>>>,
+  name: string,
+  record: T,
+  value: string,
+): void {
+  if (Object.hasOwn(setters, name)) setters[name]?.(record, value);
+}
+
+/** Whether element `name` captures a text child in some context. */
+const isCaptured = (name: string): boolean =>
+  Object.hasOwn(PAGE_SETTERS, name) ||
+  Object.hasOwn(REVISION_SETTERS, name) ||
+  Object.hasOwn(CONTRIBUTOR_SETTERS, name);
 
 /**
  * The scanner + assembler as one stateful reader: `push` folds a text chunk
@@ -491,7 +513,7 @@ export class XmlPageReader {
     const { tokens, rest } = tokenizeXml(this.carry + chunk);
     this.carry = rest;
     const out: PageRevisionRecord[] = [];
-    for (const token of tokens) this.consume(token, out);
+    Arr.forEach(tokens, (token) => this.consume(token, out));
     return out;
   }
 
@@ -554,7 +576,7 @@ export class XmlPageReader {
       if (this.rev !== null) this.rev.minor = true;
       return;
     }
-    if (CAPTURED.has(name)) {
+    if (isCaptured(name)) {
       this.capturing = name;
       this.textBuf = "";
     }
@@ -605,14 +627,14 @@ export class XmlPageReader {
   private store(name: string, raw: string): void {
     const value = decodeXmlEntities(raw);
     if (this.inContributor && this.rev !== null) {
-      CONTRIBUTOR_SETTERS[name]?.(this.rev, value);
+      applySetter(CONTRIBUTOR_SETTERS, name, this.rev, value);
       return;
     }
     if (this.rev !== null) {
-      REVISION_SETTERS[name]?.(this.rev, value);
+      applySetter(REVISION_SETTERS, name, this.rev, value);
       return;
     }
-    PAGE_SETTERS[name]?.(this.page, value);
+    applySetter(PAGE_SETTERS, name, this.page, value);
   }
 
   private startPage(): void {
@@ -714,7 +736,7 @@ export const incrementalRecords = <E, R>(
 
 /** Refines a {@link PageRevisionRecord} to a successful {@link PageRevisionHit}. */
 const isRevisionHit = (record: PageRevisionRecord): record is PageRevisionHit =>
-  record._tag === "revision";
+  Predicate.isTagged(record, "revision");
 
 /**
  * Projects a {@link PageRevisionRecord} stream down to just the successfully

@@ -95,6 +95,7 @@ export {
   tagName,
   tokenizeXml,
   type XmlToken,
+  type XmlTokenization,
   XmlPageReader,
 } from "./xml.ts";
 export {

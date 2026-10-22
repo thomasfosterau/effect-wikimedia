@@ -11,24 +11,30 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Record from "effect/Record";
+import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Core, Wikidata } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
-const fixture = JSON.parse(
+/** JSON text ↔ a JSON value, through the Schema JSON codec. */
+const Json = Schema.fromJsonString(Schema.Json);
+
+const fixture = Schema.decodeSync(Json)(
   readFileSync(fileURLToPath(new URL("./fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
-) as unknown;
+);
 
 /** A fetch stub that dispatches on the Action `action` param, recording every URL. */
-const stubWikidata = (handler: (url: URL) => unknown) => {
+const stubWikidata = (handler: (url: URL) => Schema.Json) => {
   const urls: string[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     urls.push(request.url);
     const body = handler(new URL(request.url));
-    return new Response(JSON.stringify(body), {
+    return new Response(Schema.encodeSync(Json)(body), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -53,7 +59,7 @@ const run = <A, E>(
 
 /** Narrows a snak to its value snak, or fails the test. */
 const valueOf = (snak: Wikidata.Snak | undefined): Wikidata.DataValue => {
-  if (snak?._tag !== "value") throw new Error(`expected a value snak, got ${snak?._tag}`);
+  if (snak?._tag !== "value") return expect.unreachable(`expected a value snak, got ${snak?._tag}`);
   return snak.value;
 };
 
@@ -62,7 +68,7 @@ const dataValueOfKind = <K extends Wikidata.DataValue["_tag"]>(
   value: Wikidata.DataValue,
   tag: K,
 ): Extract<Wikidata.DataValue, { _tag: K }> => {
-  if (value._tag !== tag) throw new Error(`expected ${tag}, got ${value._tag}`);
+  if (value._tag !== tag) return expect.unreachable(`expected ${tag}, got ${value._tag}`);
   return value as Extract<Wikidata.DataValue, { _tag: K }>;
 };
 
@@ -102,7 +108,7 @@ describe("Wikidata sitelink caps", () => {
   const badgeCap = Wikidata.MAX_LIST_ENTRIES;
   /** `count` sitelinks keyed `site0wiki`, `site1wiki`, …, each with a title. */
   const sitelinks = (count: number) =>
-    Object.fromEntries(
+    Record.fromEntries(
       Array.from({ length: count }, (_, i) => [`site${i}wiki`, { title: `Page ${i}` }]),
     );
 
@@ -110,7 +116,7 @@ describe("Wikidata sitelink caps", () => {
     const entities = Wikidata.normaliseEntities({
       entities: { Q1: { id: "Q1", sitelinks: sitelinks(cap + 5) } },
     });
-    const keys = Object.keys(entities.Q1?.sitelinks ?? {});
+    const keys = Record.keys(entities.Q1?.sitelinks ?? {});
     expect(keys).toHaveLength(cap);
     expect(keys[0]).toBe("site0wiki");
     expect(keys.at(-1)).toBe(`site${cap - 1}wiki`);
@@ -121,7 +127,7 @@ describe("Wikidata sitelink caps", () => {
       id: "Q1",
       sitelinks: { untitledwiki: { site: "untitledwiki" }, ...sitelinks(cap) },
     });
-    const keys = Object.keys(item?.sitelinks ?? {});
+    const keys = Record.keys(item?.sitelinks ?? {});
     expect(keys).toHaveLength(cap);
     expect(keys).not.toContain("untitledwiki");
   });
@@ -152,7 +158,7 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     const entities = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
     const item = entities.Q42;
     expect(item).toBeDefined();
-    if (item === undefined) throw new Error("Q42 missing");
+    if (item === undefined) return expect.unreachable("Q42 missing");
     expect(item.id).toBe("Q42");
     expect(item.type).toBe("item");
     expect(item.labels.en).toBe("Douglas Adams");
@@ -255,12 +261,12 @@ describe("Wikidata.getEntities — batching", () => {
     // Echo each requested id as a minimal present entity.
     const { urls, layer } = stubWikidata((url) => {
       const requested = (url.searchParams.get("ids") ?? "").split("|").filter(Boolean);
-      const entities: Record<string, unknown> = {};
-      for (const id of requested) entities[id] = { id, type: "item" };
-      return { entities };
+      return {
+        entities: Record.fromEntries(Arr.map(requested, (id) => [id, { id, type: "item" }])),
+      };
     });
     const result = await run(layer, Wikidata.getEntities("www.wikidata.org", ids));
-    expect(Object.keys(result)).toHaveLength(60);
+    expect(Record.keys(result)).toHaveLength(60);
     expect(result.Q1?.id).toBe("Q1");
     expect(result.Q60?.id).toBe("Q60");
     // 60 ids → two requests (50 + 10).

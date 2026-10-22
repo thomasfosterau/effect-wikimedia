@@ -7,8 +7,11 @@
  */
 
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
 import { FetchHttpClient } from "effect/http";
 import { Commons, Core } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
@@ -44,25 +47,19 @@ describe("filePathUrl", () => {
     expect(Commons.filePathUrl("Foo#Bar.jpg")).toBeNull();
   });
 
-  it("rejects a relative-path filename, with or without the File: prefix", () => {
-    for (const filename of [
-      ".",
-      "..",
-      "File:..",
-      "file:.",
-      "./Foo.jpg",
-      "Foo/../Bar.jpg",
-      "Foo/..",
-    ]) {
+  it.each([".", "..", "File:..", "file:.", "./Foo.jpg", "Foo/../Bar.jpg", "Foo/.."])(
+    "rejects the relative-path filename %j, with or without the File: prefix",
+    (filename) => {
       expect(Commons.filePathUrl(filename), filename).toBeNull();
-    }
-  });
+    },
+  );
 
-  it("rejects a filename with a lone UTF-16 surrogate", () => {
-    for (const filename of ["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg", "\uD83D.jpg"]) {
-      expect(Commons.filePathUrl(filename), JSON.stringify(filename)).toBeNull();
-    }
-  });
+  it.each(["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg", "\uD83D.jpg"])(
+    "rejects a filename with a lone UTF-16 surrogate (%j)",
+    (filename) => {
+      expect(Commons.filePathUrl(filename)).toBeNull();
+    },
+  );
 
   it("keeps a filename with a valid surrogate pair", () => {
     expect(Commons.filePathUrl("Smile \u{1F600}.jpg")).toBe(
@@ -97,18 +94,13 @@ const stubRouter = (routes: Record<string, StubRoute>) => {
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     urls.push(request.url);
-    const key = Object.keys(routes).find((k) => request.url.includes(k));
-    const route = key ? routes[key] : undefined;
-    if (!route) {
-      return new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new Response(JSON.stringify(route.body), {
-      status: route.status,
-      headers: { "content-type": "application/json" },
-    });
+    return Arr.findFirst(Rec.keys(routes), (k) => request.url.includes(k)).pipe(
+      Option.flatMap((key) => Rec.get(routes, key)),
+      Option.match({
+        onNone: () => Response.json({}, { status: 200 }),
+        onSome: (route) => Response.json(route.body, { status: route.status }),
+      }),
+    );
   };
   const fetchLayer = FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),

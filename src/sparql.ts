@@ -31,8 +31,14 @@
  * @module
  */
 
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import {
   DEFAULT_RETRY_OPTIONS,
   InvalidRequest,
@@ -56,7 +62,7 @@ export const WDQS_PATH = "/sparql";
  * caller determined to write one.
  */
 export function hasLimitClause(sparql: string): boolean {
-  if (typeof sparql !== "string") return false;
+  if (!Predicate.isString(sparql)) return false;
   // Strip line comments (`#...` to end of line) before scanning.
   const withoutComments = sparql.replace(/#[^\n\r]*/g, "");
   return /\blimit\s+\d+/i.test(withoutComments);
@@ -171,7 +177,7 @@ export type SparqlTerm = UriTerm | LiteralTerm | BlankNodeTerm | UnknownTerm;
 export type LiteralKind = "time" | "quantity" | "string" | "monolingualtext" | "other";
 
 const XSD = "http://www.w3.org/2001/XMLSchema#";
-const XSD_NUMERIC = new Set(
+const XSD_NUMERIC = HashSet.fromIterable(
   [
     "decimal",
     "integer",
@@ -203,7 +209,7 @@ export function literalKind(datatype: string | null, language: string | null): L
   if (language !== null) return "monolingualtext";
   if (datatype === null || datatype === `${XSD}string`) return "string";
   if (datatype === `${XSD}dateTime` || datatype === `${XSD}date`) return "time";
-  if (XSD_NUMERIC.has(datatype)) return "quantity";
+  if (HashSet.has(XSD_NUMERIC, datatype)) return "quantity";
   return "other";
 }
 
@@ -286,19 +292,19 @@ export interface SparqlResults {
 const MAX_TERM_LENGTH = 10_000;
 
 function boundedValue(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+  if (!Predicate.isString(value)) return null;
   return value.length > MAX_TERM_LENGTH ? value.slice(0, MAX_TERM_LENGTH) : value;
 }
 
 /** Normalises one raw term into the typed {@link SparqlTerm} union; never throws. */
 export function normaliseTerm(raw: RawTerm): SparqlTerm {
-  const type = typeof raw.type === "string" ? raw.type : null;
+  const type = Predicate.isString(raw.type) ? raw.type : null;
   const value = boundedValue(raw.value);
   if (type === "uri") return { _tag: "uri", value: value ?? "" };
   if (type === "bnode") return { _tag: "bnode", value: value ?? "" };
   if (type === "literal" || type === "typed-literal") {
-    const datatype = typeof raw.datatype === "string" ? raw.datatype.slice(0, 2000) : null;
-    const language = typeof raw["xml:lang"] === "string" ? raw["xml:lang"].slice(0, 40) : null;
+    const datatype = Predicate.isString(raw.datatype) ? raw.datatype.slice(0, 2000) : null;
+    const language = Predicate.isString(raw["xml:lang"]) ? raw["xml:lang"].slice(0, 40) : null;
     return {
       _tag: "literal",
       value: value ?? "",
@@ -312,18 +318,14 @@ export function normaliseTerm(raw: RawTerm): SparqlTerm {
 
 /** Normalises a SPARQL JSON results envelope into typed {@link SparqlResults}. */
 export function normaliseResults(response: SparqlResultsResponse): SparqlResults {
-  const vars: string[] = [];
-  for (const v of response.head?.vars ?? []) {
-    if (typeof v === "string") vars.push(v.slice(0, 200));
-  }
-  const bindings: SparqlBinding[] = [];
-  for (const row of response.results?.bindings ?? []) {
-    const binding: Record<string, SparqlTerm> = {};
-    for (const [name, term] of Object.entries(row)) {
-      binding[name] = normaliseTerm(term);
-    }
-    bindings.push(binding);
-  }
+  const vars = Arr.getSomes(
+    Arr.map(response.head?.vars ?? [], (v) =>
+      Predicate.isString(v) ? Option.some(v.slice(0, 200)) : Option.none(),
+    ),
+  );
+  const bindings = Arr.map(response.results?.bindings ?? [], (row): SparqlBinding =>
+    Rec.map(row, normaliseTerm),
+  );
   return { vars, bindings };
 }
 
@@ -358,7 +360,7 @@ export const query = Effect.fn("Sparql.query")(function* (
   options?: QueryOptions,
   retry?: RetryOptions,
 ) {
-  if (typeof sparql !== "string" || sparql.trim().length === 0) {
+  if (!Predicate.isString(sparql) || Str.isEmpty(sparql.trim())) {
     return yield* new InvalidRequest({ kind: "query", value: String(sparql) });
   }
   if (sparql.length > MAX_QUERY_LENGTH) {

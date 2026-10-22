@@ -36,8 +36,10 @@
 
 import { createReadStream } from "node:fs";
 import { compose, Duplex, isReadable, isWritable, Readable } from "node:stream";
+import { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { createGunzip } from "node:zlib";
 import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/http";
@@ -51,22 +53,30 @@ export class SourceError extends Schema.TaggedError<SourceError>()("SourceError"
 }) {}
 
 const describe = (reason: unknown): string =>
-  reason instanceof Error ? reason.message : String(reason);
+  Predicate.isError(reason) ? reason.message : String(reason);
 
 /**
- * Bridges Node's web-stream types to the DOM `ReadableStream` the `effect`
- * `Stream` combinators are typed against. `@types/node` and the `dom` lib
- * each declare an incompatible `ReadableStream`; the cast (through `unknown`)
- * is the sanctioned reconciliation at the one interop seam — used only to turn
- * an effect-produced web stream back into a Node `Readable` for a Node
- * `Transform` stage.
+ * Turns an effect-produced web stream back into a Node `Readable`, for a Node
+ * `Transform` stage. `@types/node` and the `dom` lib each declare their own
+ * `ReadableStream`, and the `effect` `Stream` combinators are typed against
+ * the DOM one; in Node they are one class, so the `instanceof` test always
+ * passes, and it narrows the value to the type `Readable.fromWeb` takes. A
+ * runtime where they differ fails the stream with a {@link SourceError}.
  */
 type WebByteStream = ReadableStream<Uint8Array>;
-const webToNode = (web: WebByteStream): Readable =>
-  Readable.fromWeb(web as unknown as Parameters<typeof Readable.fromWeb>[0]);
+const webToNode = (web: WebByteStream): Readable => {
+  if (!(web instanceof NodeWebReadableStream)) {
+    throw new TypeError("the runtime's ReadableStream is not Node's `stream/web` ReadableStream");
+  }
+  return Readable.fromWeb(web);
+};
 
 const sourceError = (reason: unknown): SourceError =>
   new SourceError({ description: `dumps/source-read-failed: ${describe(reason)}` });
+
+/** Runs a synchronous Node call, failing with a {@link SourceError} if it throws. */
+const tryNode = <A>(step: () => A): Effect.Effect<A, SourceError> =>
+  Effect.try({ try: step, catch: sourceError });
 
 // ── Structural stream types ──────────────────────────────────────────────
 
@@ -83,7 +93,7 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
   /** Whether the stream has been destroyed; teardown skips `destroy()` when it is. */
   readonly destroyed: boolean;
   /** Destroys the stream and releases what it holds (a file descriptor, a decompressor). */
-  destroy(): unknown;
+  destroy(): void;
 }
 
 /**
@@ -100,14 +110,14 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
  */
 export interface NodeDuplexLike extends NodeReadableLike {
   /** Writes a chunk of compressed input. */
-  write(chunk: Uint8Array): unknown;
+  write(chunk: Uint8Array): void;
   /** Signals the end of the compressed input. */
-  end(): unknown;
+  end(): void;
 }
 
 /**
  * Recovers the Node `Duplex` a {@link Decompressor} returns from its
- * structural type, for `compose`, and throws unless it is a fresh one; a
+ * structural type, for `compose`, and fails unless it is a fresh one; a
  * classic stream is adapted into a `Duplex` once it has passed the check. The
  * contract on {@link NodeDuplexLike} is that the value is a real Node stream,
  * but the type admits a plain object, and `compose` doesn't reject one: the
@@ -115,8 +125,7 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * on one destroyed or whose input has ended, but only once the upstream has
  * been opened, which then leaks (#111), and accepts one whose output has
  * ended, which yields nothing or never settles. So this checks first, before
- * anything is opened, and throws a `TypeError`, which {@link fromNodeReadable}
- * turns into a {@link SourceError}. `isReadable` / `isWritable` return `true`
+ * anything is opened, and fails with a {@link SourceError}. `isReadable` / `isWritable` return `true`
  * only for a Node stream that is neither destroyed nor ended on that side (a
  * new `zlib.createGunzip()` gives `true` for both), `false` for a used one or
  * an object without a stream's `pipe` / `write` / `on`, and `null` for a
@@ -126,15 +135,24 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * `readable: true`, `writable: true` and `pipe` / `write` / `on` functions
  * still passes it, is adapted as a classic stream, and hangs in `compose`.
  */
-const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
-  const duplex = stream as unknown as Duplex;
+const asNodeDuplex = (stream: NodeDuplexLike): Effect.Effect<Duplex, SourceError> => {
+  // SAFETY: only `isReadable` / `isWritable` read the value as a `Duplex`
+  // before the check below; they test any value at runtime, and the value
+  // is returned as one only once both have passed.
+  const duplex = stream as Duplex;
   if (isReadable(duplex) !== true || isWritable(duplex) !== true) {
-    throw new TypeError(
-      "the decompressor must return a fresh Node stream (a Duplex, a Transform or a classic duplex stream), not a plain object or a stream already destroyed or ended",
+    return Effect.fail(
+      sourceError(
+        "the decompressor must return a fresh Node stream (a Duplex, a Transform or a classic duplex stream), not a plain object or a stream already destroyed or ended",
+      ),
     );
   }
-  return hasStreamState(duplex) ? duplex : adaptClassicDuplex(duplex);
+  return Effect.succeed(hasStreamState(duplex) ? duplex : adaptClassicDuplex(duplex));
 };
+
+/** Calls a {@link Decompressor} and checks the stage it returns ({@link asNodeDuplex}). */
+const openStage = (decompressor: Decompressor): Effect.Effect<Duplex, SourceError> =>
+  Effect.flatMap(tryNode(decompressor), asNodeDuplex);
 
 /**
  * Whether `stream` is a streams2 `Duplex` (a `Transform`, a `zlib` stream, a
@@ -143,15 +161,20 @@ const asNodeDuplex = (stream: NodeDuplexLike): Duplex => {
  * stream utilities tell the two apart by the same fields; `compose` needs
  * both sides, as it reads the stage with `read()` and waits for its `finish`.
  */
-const hasStreamState = (stream: Duplex): boolean => {
-  const state = stream as unknown as Partial<Record<"_readableState" | "_writableState", unknown>>;
-  return (
-    typeof state._readableState === "object" &&
-    state._readableState !== null &&
-    typeof state._writableState === "object" &&
-    state._writableState !== null
-  );
-};
+const hasStreamState = (stream: Duplex): boolean =>
+  Predicate.hasProperty(stream, "_readableState") &&
+  Predicate.isObjectOrArray(stream._readableState) &&
+  Predicate.hasProperty(stream, "_writableState") &&
+  Predicate.isObjectOrArray(stream._writableState);
+
+/**
+ * A failure inside a classic-stream adapter, raised in Node land where an
+ * `Error` is what a stream is destroyed with. Its `message` becomes the
+ * {@link SourceError} description the stream fails with.
+ */
+class StageError extends Schema.TaggedError<StageError>()("StageError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Returns what `step` returns, or passes what it throws to `callback` and
@@ -162,7 +185,7 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefi
   try {
     return step();
   } catch (error) {
-    callback(error instanceof Error ? error : new Error(describe(error)));
+    callback(Predicate.isError(error) ? error : new StageError({ message: describe(error) }));
     return undefined;
   }
 };
@@ -212,30 +235,34 @@ const adaptClassicDuplex = (classic: Duplex): Duplex => {
   });
   classic.on("error", (error: Error) => adapter.destroy(error));
   classic.on("close", () => {
-    if (!ended) adapter.destroy(new Error("the decompressor closed before its output ended"));
+    if (!ended)
+      adapter.destroy(
+        new StageError({ message: "the decompressor closed before its output ended" }),
+      );
   });
   return adapter;
 };
 
 /**
- * Composes `head` into `stage`, destroying both if `compose` throws: nothing
- * else owns them yet, so a throw would otherwise leave `head` (an open file,
- * a source behind a web stream) open. {@link asNodeDuplex} already rejects
+ * Composes `head` into `stage`, destroying both if `compose` throws (the
+ * failure is a {@link SourceError}): nothing else owns them yet, so a throw
+ * would otherwise leave `head` (an open file, a source behind a web stream)
+ * open. {@link asNodeDuplex} already rejects
  * the stages `compose` throws on, so this is a second line of defence. Both
  * go through `destroyReadable`, which adds a no-op `error` listener first:
  * destroying a fresh `fs.ReadStream` still runs its pending open, and if that
  * open fails (a missing file) the `error` it emits would otherwise crash the
  * process as an uncaught exception, as in #109.
  */
-const composeOrDestroy = (head: Readable, stage: Duplex): Duplex => {
-  try {
-    return compose(head, stage);
-  } catch (error) {
-    destroyReadable(head);
-    destroyReadable(stage);
-    throw error;
-  }
-};
+const composeOrDestroy = (head: Readable, stage: Duplex): Effect.Effect<Duplex, SourceError> =>
+  tryNode(() => compose(head, stage)).pipe(
+    Effect.tapError(() =>
+      Effect.sync(() => {
+        destroyReadable(head);
+        destroyReadable(stage);
+      }),
+    ),
+  );
 
 // ── Node Readable → Stream<Uint8Array> ───────────────────────────────────
 
@@ -251,8 +278,9 @@ const composeOrDestroy = (head: Readable, stage: Duplex): Duplex => {
  */
 const destroyReadable = (readable: NodeReadableLike): void => {
   if (readable.destroyed) return;
-  const emitter = readable as Partial<Pick<Readable, "on">>;
-  if (typeof emitter.on === "function") emitter.on("error", () => undefined);
+  if (Predicate.hasProperty(readable, "on") && Predicate.isFunction(readable.on)) {
+    readable.on("error", () => undefined);
+  }
   readable.destroy();
 };
 
@@ -339,19 +367,27 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
  */
 export const fromNodeReadable = (
   evaluate: () => NodeReadableLike,
+): Stream.Stream<Uint8Array, SourceError> => openNodeReadable(tryNode(evaluate));
+
+/**
+ * {@link fromNodeReadable} over an `open` effect: the stream of the Readable
+ * it succeeds with, or its failure. `open` runs uninterruptibly, so it must
+ * be short and synchronous in effect, as opening a Node stream is.
+ */
+const openNodeReadable = (
+  open: Effect.Effect<NodeReadableLike, SourceError>,
 ): Stream.Stream<Uint8Array, SourceError> =>
   Stream.unwrap(
     Effect.gen(function* () {
       // Opening the Readable and registering its `destroy()` as a scope
       // finalizer are one uninterruptible step, so no interruption can land
-      // between them and leave it open (#95); `evaluate` is synchronous, so
+      // between them and leave it open (#95); opening is synchronous, so
       // that costs nothing. The finalizer covers teardown that lands before
       // `Stream.fromAsyncIterable` has created the iterator and registered its
       // `return()` as a finalizer: an interruption the fiber observes between
       // this step and that one.
-      const readable = yield* Effect.acquireRelease(
-        Effect.try({ try: evaluate, catch: sourceError }),
-        (readable) => Effect.sync(() => destroyReadable(readable)),
+      const readable = yield* Effect.acquireRelease(open, (readable) =>
+        Effect.sync(() => destroyReadable(readable)),
       );
       return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
     }),
@@ -414,29 +450,32 @@ export const decompressWith =
       // chain — the web-source reader and the transform — leaving no orphaned
       // decompression work behind.
       Effect.map(Effect.context<R>(), (context) =>
-        fromNodeReadable(() => {
-          // Building `web` starts the source on a fiber of its own that only
-          // `web.cancel()` stops, so build it here, inside `fromNodeReadable`'s
-          // uninterruptible open: an interruption can't then land between
-          // starting the source and registering the teardown that cancels it
-          // (#109). A rejected stage must cancel it too, or the upstream (an
-          // HTTP body, a file) stays open.
-          const web = Stream.toReadableStreamWith(source, context);
-          // Cancel only here: once `webToNode` has run, `web` is locked, and
-          // destroying the Node Readable it returns is what cancels it. If
-          // the source has already failed, `web` is errored and `cancel()`
-          // rejects with that error; swallow it, since the stage rejection is
-          // what this stream reports, and an unhandled rejection would crash
-          // the process.
-          let stage: Duplex;
-          try {
-            stage = asNodeDuplex(transform());
-          } catch (error) {
-            web.cancel().catch(() => undefined);
-            throw error;
-          }
-          return composeOrDestroy(webToNode(web), stage);
-        }),
+        openNodeReadable(
+          Effect.gen(function* () {
+            // Building `web` starts the source on a fiber of its own that only
+            // `web.cancel()` stops, so build it here, inside the uninterruptible
+            // open: an interruption can't then land between starting the
+            // source and registering the teardown that cancels it (#109). A
+            // rejected stage must cancel it too, or the upstream (an HTTP
+            // body, a file) stays open.
+            const web = yield* tryNode(() => Stream.toReadableStreamWith(source, context));
+            // Cancel only here: once `webToNode` has run, `web` is locked, and
+            // destroying the Node Readable it returns is what cancels it. If
+            // the source has already failed, `web` is errored and `cancel()`
+            // rejects with that error; swallow it, since the stage rejection
+            // is what this stream reports, and an unhandled rejection would
+            // crash the process.
+            const stage = yield* openStage(transform).pipe(
+              Effect.tapError(() =>
+                Effect.sync(() => {
+                  web.cancel().catch(() => undefined);
+                }),
+              ),
+            );
+            const head = yield* tryNode(() => webToNode(web));
+            return yield* composeOrDestroy(head, stage);
+          }),
+        ),
       ),
     );
 
@@ -478,22 +517,21 @@ export const fromFile = (
   options?: FromFileOptions,
 ): Stream.Stream<Uint8Array, SourceError> => {
   const decompressor = decompressorFor(path, options?.decompressor);
-  return fromNodeReadable(() => {
-    if (decompressor === null) return createReadStream(path);
-    // Check the stage before opening the file, so a rejected one leaks no fd.
-    const stage = asNodeDuplex(decompressor());
-    // `compose` so destroying the decompressor also destroys the file read —
-    // the fd is closed on interruption, not orphaned. If opening the file
-    // throws, destroy the stage, which nothing else owns yet.
-    let file: Readable;
-    try {
-      file = createReadStream(path);
-    } catch (error) {
-      stage.destroy();
-      throw error;
-    }
-    return composeOrDestroy(file, stage);
-  });
+  const open = (): Effect.Effect<NodeReadableLike, SourceError> =>
+    decompressor === null
+      ? tryNode(() => createReadStream(path))
+      : Effect.gen(function* () {
+          // Check the stage before opening the file, so a rejected one leaks no fd.
+          const stage = yield* openStage(decompressor);
+          // `compose` so destroying the decompressor also destroys the file
+          // read — the fd is closed on interruption, not orphaned. If opening
+          // the file throws, destroy the stage, which nothing else owns yet.
+          const file = yield* tryNode(() => createReadStream(path)).pipe(
+            Effect.tapError(() => Effect.sync(() => stage.destroy())),
+          );
+          return yield* composeOrDestroy(file, stage);
+        });
+  return openNodeReadable(Effect.suspend(open));
 };
 
 // ── HTTP range source (resumable) ────────────────────────────────────────

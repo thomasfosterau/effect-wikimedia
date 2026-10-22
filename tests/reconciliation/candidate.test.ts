@@ -8,7 +8,11 @@
  * @module tests/candidate
  */
 
-import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
+import * as Record from "effect/Record";
+import * as Str from "effect/String";
+import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import {
   EXTERNAL_ID_AUTHORITIES,
   MAX_LABEL_QUERY_LENGTH,
@@ -31,13 +35,14 @@ describe("normaliseLabelQuery", () => {
 
   it("returns null for whitespace-only or non-string input", () => {
     expect(normaliseLabelQuery("   ")).toBeNull();
-    expect(normaliseLabelQuery(undefined as unknown as string)).toBeNull();
+    // SAFETY: deliberately ill-typed — a JS caller can pass anything, and
+    // the validator re-checks at runtime.
+    expect(normaliseLabelQuery(undefined as never)).toBeNull();
   });
 
   it("clamps an over-long query to the max length", () => {
     const result = normaliseLabelQuery("x".repeat(MAX_LABEL_QUERY_LENGTH + 100));
-    expect(result).not.toBeNull();
-    expect(result!.length).toBe(MAX_LABEL_QUERY_LENGTH);
+    expect(result?.length).toBe(MAX_LABEL_QUERY_LENGTH);
   });
 });
 
@@ -104,17 +109,18 @@ describe("sanitiseCandidateText", () => {
 
   it("clamps an over-long value to the max field length", () => {
     const result = sanitiseCandidateText("x".repeat(MAX_CANDIDATE_TEXT_LENGTH + 500));
-    expect(result).not.toBeNull();
-    expect(result!.length).toBe(MAX_CANDIDATE_TEXT_LENGTH);
+    expect(result?.length).toBe(MAX_CANDIDATE_TEXT_LENGTH);
   });
 });
 
 describe("candidate text names on the barrel", () => {
   it("no longer shadow Core's MAX_TEXT_FIELD_LENGTH / sanitiseText", () => {
-    // @ts-expect-error renamed to MAX_CANDIDATE_TEXT_LENGTH (#63)
-    expect(Reconciliation.MAX_TEXT_FIELD_LENGTH).toBeUndefined();
-    // @ts-expect-error renamed to sanitiseCandidateText (#63)
-    expect(Reconciliation.sanitiseText).toBeUndefined();
+    // Renamed to MAX_CANDIDATE_TEXT_LENGTH and sanitiseCandidateText (#63):
+    // gone from the namespace's type and from its runtime value.
+    expectTypeOf(Reconciliation).not.toHaveProperty("MAX_TEXT_FIELD_LENGTH");
+    expectTypeOf(Reconciliation).not.toHaveProperty("sanitiseText");
+    expect(Predicate.hasProperty(Reconciliation, "MAX_TEXT_FIELD_LENGTH")).toBe(false);
+    expect(Predicate.hasProperty(Reconciliation, "sanitiseText")).toBe(false);
     expect(Reconciliation.MAX_CANDIDATE_TEXT_LENGTH).toBe(2000);
     expect(Reconciliation.sanitiseCandidateText).toBe(sanitiseCandidateText);
   });
@@ -210,12 +216,12 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     "../119008064",
   ];
 
-  it.each(Object.entries(EXTERNAL_ID_AUTHORITIES))(
+  it.each(Record.toEntries(EXTERNAL_ID_AUTHORITIES))(
     "%s refuses every relative-path value",
     (_property, scheme) => {
-      for (const value of relativePathValues) {
-        expect(scheme.iri(value), value).toBeNull();
-      }
+      expect(Arr.map(relativePathValues, scheme.iri)).toEqual(
+        Arr.map(relativePathValues, () => null),
+      );
     },
   );
 
@@ -237,31 +243,32 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
   });
 
   it("keeps every built IRI inside the authority's identifier path", () => {
-    const valid: Record<string, string> = {
-      P214: "113230702",
-      P213: "0000 0001 2103 2683",
-      P496: "0000-0002-1825-0097",
-      P244: "n79021164",
-      P227: "4015701-7",
-      P268: "119008064",
-    };
-    for (const [property, scheme] of Object.entries(EXTERNAL_ID_AUTHORITIES)) {
-      const value = valid[property];
-      expect(value, property).toBeDefined();
-      const iri = scheme.iri(value!);
-      expect(iri, property).not.toBeNull();
+    const valid = Record.fromEntries([
+      ["P214", "113230702"],
+      ["P213", "0000 0001 2103 2683"],
+      ["P496", "0000-0002-1825-0097"],
+      ["P244", "n79021164"],
+      ["P227", "4015701-7"],
+      ["P268", "119008064"],
+    ]);
+    expect(Record.keys(valid)).toEqual(Record.keys(EXTERNAL_ID_AUTHORITIES));
+    Arr.forEach(Record.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) => {
+      const iri = scheme.iri(valid[property] ?? "");
+      expect(iri, property).toEqual(expect.any(String));
       // Resolving the IRI must not move it: no dot segment, no extra `/`.
-      expect(new URL(iri!).href, property).toBe(iri);
-    }
+      expect(new URL(iri ?? "").href, property).toBe(iri);
+    });
   });
 
   it("names every curated property with its authority", () => {
-    expect(Object.keys(EXTERNAL_ID_AUTHORITIES)).toEqual(
+    expect(Record.keys(EXTERNAL_ID_AUTHORITIES)).toEqual(
       expect.arrayContaining(["P214", "P213", "P496", "P244", "P227", "P268"]),
     );
-    for (const scheme of Object.values(EXTERNAL_ID_AUTHORITIES)) {
-      expect(scheme.authority.length).toBeGreaterThan(0);
-    }
+    expect(
+      Arr.every(Record.values(EXTERNAL_ID_AUTHORITIES), ({ authority }) =>
+        Str.isNonEmpty(authority),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -274,7 +281,7 @@ describe("normaliseTimeValue", () => {
   it("rejects anything that isn't a Wikidata-shaped timestamp", () => {
     expect(normaliseTimeValue("yesterday")).toBeNull();
     expect(normaliseTimeValue("1952-03-11")).toBeNull();
-    expect(normaliseTimeValue(42 as unknown as string)).toBeNull();
+    expect(normaliseTimeValue(42)).toBeNull();
   });
 });
 
@@ -299,38 +306,37 @@ describe("normaliseCommonsImage", () => {
     expect(normaliseCommonsImage("evil#name.jpg")).toBeNull();
     expect(normaliseCommonsImage("a?b.jpg")).toBeNull();
     expect(normaliseCommonsImage("")).toBeNull();
-    expect(normaliseCommonsImage(null as unknown as string)).toBeNull();
+    expect(normaliseCommonsImage(null)).toBeNull();
   });
 
-  it("rejects control characters inside a filename, including whitespace ones", () => {
-    for (const filename of [
-      "Foo\tBar.jpg",
-      "Foo\nBar.jpg",
-      "Foo\rBar.jpg",
-      "Foo\u000bBar.jpg",
-      "Foo\u000cBar.jpg",
-      "Foo\u0000Bar.jpg",
-      "Foo\u007fBar.jpg",
-    ]) {
-      expect(normaliseCommonsImage(filename), JSON.stringify(filename)).toBeNull();
-    }
+  it.each([
+    "Foo\tBar.jpg",
+    "Foo\nBar.jpg",
+    "Foo\rBar.jpg",
+    "Foo\u000bBar.jpg",
+    "Foo\u000cBar.jpg",
+    "Foo\u0000Bar.jpg",
+    "Foo\u007fBar.jpg",
+  ])("rejects the control character in %j, including whitespace ones", (filename) => {
+    expect(normaliseCommonsImage(filename)).toBeNull();
   });
 
-  it("rejects MediaWiki's relative-path filenames, which new URL would resolve away", () => {
-    for (const filename of [
-      ".",
-      "..",
-      " .. ",
-      "./Foo.jpg",
-      "../Foo.jpg",
-      "Foo/./Bar.jpg",
-      "Foo/../Bar.jpg",
-      "Foo/.",
-      "Foo/..",
-    ]) {
-      expect(normaliseCommonsImage(filename), filename).toBeNull();
-    }
-  });
+  it.each([
+    ".",
+    "..",
+    " .. ",
+    "./Foo.jpg",
+    "../Foo.jpg",
+    "Foo/./Bar.jpg",
+    "Foo/../Bar.jpg",
+    "Foo/.",
+    "Foo/..",
+  ])(
+    "rejects MediaWiki's relative-path filename %j, which new URL would resolve away",
+    (filename) => {
+      expect(normaliseCommonsImage(filename)).toBeNull();
+    },
+  );
 
   it("keeps a filename that merely contains dots", () => {
     expect(normaliseCommonsImage("Mr. Smith.jpg")).toEqual({

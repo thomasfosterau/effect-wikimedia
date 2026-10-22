@@ -52,6 +52,9 @@
  * @module wikitext/entities
  */
 
+import * as Arr from "effect/Array";
+import * as HashMap from "effect/HashMap";
+
 const DATA = `
 c6=AElig 26=AMP,amp c1=Aacute 102=Abreve c2=Acirc 410=Acy 1d504=Afr c0=Agrave 391=Alpha 100=Amacr
 2a53=And 104=Aogon 1d538=Aopf 2061=ApplyFunction,af c5=Aring,angst 1d49c=Ascr
@@ -315,22 +318,22 @@ ff=yuml 17a=zacute 17e=zcaron 437=zcy 17c=zdot 3b6=zeta 1d537=zfr 436=zhcy 21dd=
 1d4cf=zscr 200d=zwj 200c=zwnj
 `;
 
-function buildTable(data: string): ReadonlyMap<string, string> {
-  const table = new Map<string, string>();
-  for (const entry of data.trim().split(/\s+/)) {
-    const [codePoints = "", names = ""] = entry.split("=");
-    const text = String.fromCodePoint(
-      ...codePoints.split(",").map((hex) => Number.parseInt(hex, 16)),
-    );
-    for (const name of names.split(",")) table.set(name, text);
-  }
-  return table;
+function buildTable(data: string): HashMap.HashMap<string, string> {
+  return HashMap.fromIterable(
+    Arr.flatMap(data.trim().split(/\s+/), (entry) => {
+      const [codePoints = "", names = ""] = entry.split("=");
+      const text = String.fromCodePoint(
+        ...codePoints.split(",").map((hex) => Number.parseInt(hex, 16)),
+      );
+      return names.split(",").map((name) => [name, text] as const);
+    }),
+  );
 }
 
 /**
  * Every HTML5 named character reference wikitext accepts, from its name
  * (case-sensitive, without the `&` and the `;`, such as `eacute`) to the one
- * or two code points it stands for. A `Map`, so a name that is only an
+ * or two code points it stands for. A `HashMap`, so a name that is only an
  * `Object.prototype` member (`constructor`, `toString`) finds nothing.
  */
-export const NAMED_ENTITIES: ReadonlyMap<string, string> = /* @__PURE__ */ buildTable(DATA);
+export const NAMED_ENTITIES: HashMap.HashMap<string, string> = /* @__PURE__ */ buildTable(DATA);

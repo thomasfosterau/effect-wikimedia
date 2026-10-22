@@ -12,7 +12,11 @@
  * @module reconciliation/candidate
  */
 
+import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
+import type * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import { normaliseTitle } from "../core.ts";
 
 /**
@@ -71,10 +75,36 @@ export const MAX_LABEL_QUERY_LENGTH = 300;
  * whitespace and clamps to `Core.MAX_TEXT_FIELD_LENGTH` (4000).
  */
 export function sanitiseCandidateText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+  return collapseAndClamp(value, MAX_CANDIDATE_TEXT_LENGTH);
+}
+
+/**
+ * Trims `value`, collapses each internal whitespace run to one space and
+ * clamps it to `max` code units; `null` for a non-string or a value with
+ * nothing left.
+ */
+function collapseAndClamp(value: unknown, max: number): string | null {
+  if (!Predicate.isString(value)) return null;
   const collapsed = value.replace(/\s+/g, " ").trim();
-  if (collapsed.length === 0) return null;
-  return collapsed.slice(0, MAX_CANDIDATE_TEXT_LENGTH);
+  return Str.isEmpty(collapsed) ? null : collapsed.slice(0, max);
+}
+
+/**
+ * Trims an untrusted short token (an external-id value, a Commons filename)
+ * and returns it, or `null` for a non-string, an empty value, one over 256
+ * code units, or one holding an ASCII control character. A codepoint check
+ * (not a literal-control-char regex) keeps this source file free of control
+ * bytes.
+ */
+function trimmedToken(raw: unknown): string | null {
+  if (!Predicate.isString(raw)) return null;
+  const trimmed = raw.trim();
+  if (Str.isEmpty(trimmed) || trimmed.length > 256) return null;
+  const hasControl = Arr.some(Arr.fromIterable(trimmed), (char) => {
+    const code = char.charCodeAt(0);
+    return code < 0x20 || code === 0x7f;
+  });
+  return hasControl ? null : trimmed;
 }
 
 // ── Input validation (SSRF / injection defence) ───────────────────────
@@ -90,10 +120,7 @@ export function sanitiseCandidateText(value: unknown): string | null {
  * text never reaches the request builder.
  */
 export function normaliseLabelQuery(raw: string): string | null {
-  if (typeof raw !== "string") return null;
-  const collapsed = raw.replace(/\s+/g, " ").trim();
-  if (collapsed.length === 0) return null;
-  return collapsed.slice(0, MAX_LABEL_QUERY_LENGTH);
+  return collapseAndClamp(raw, MAX_LABEL_QUERY_LENGTH);
 }
 
 /**
@@ -107,7 +134,7 @@ export function normaliseLabelQuery(raw: string): string | null {
  * intended position.
  */
 export function normaliseQid(raw: string): string | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   if (/^Q[1-9]\d{0,18}$/.test(cleaned)) return cleaned;
   return null;
@@ -123,7 +150,7 @@ export function normaliseQid(raw: string): string | null {
  * it must be exclusively `P` plus digits.
  */
 export function normalisePropertyId(raw: string): string | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   if (/^P[1-9]\d{0,18}$/.test(cleaned)) return cleaned;
   return null;
@@ -143,16 +170,9 @@ export function normalisePropertyId(raw: string): string | null {
  * even built.
  */
 export function normaliseExternalIdValue(raw: string): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0 || trimmed.length > 256) return null;
-  // Reject ASCII control characters defensively. A codepoint check (not a
-  // literal-control-char regex) keeps this source file free of control
-  // bytes.
-  for (let i = 0; i < trimmed.length; i++) {
-    const code = trimmed.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return null;
-  }
+  // Rejects ASCII control characters defensively.
+  const trimmed = trimmedToken(raw);
+  if (trimmed === null) return null;
   // `haswbstatement` uses `|` to OR terms; refuse it so a value can never
   // smuggle a second statement clause into the search.
   if (!/^[A-Za-z0-9 ._:/-]+$/.test(trimmed)) return null;
@@ -321,7 +341,7 @@ const externalIdAuthority = (
 ): ExternalIdAuthority => ({
   authority,
   iri: (value) =>
-    typeof value === "string" && format.test(value)
+    Predicate.isString(value) && format.test(value)
       ? template(encodeURIComponent(canonical(value)))
       : null,
 });
@@ -350,7 +370,7 @@ const externalIdAuthority = (
  * Wikidata's spaced form (`0000 0001 2103 2683`) and the compact form; its
  * IRI always uses the compact form.
  */
-export const EXTERNAL_ID_AUTHORITIES: Readonly<Record<string, ExternalIdAuthority>> = {
+export const EXTERNAL_ID_AUTHORITIES: Record.ReadonlyRecord<string, ExternalIdAuthority> = {
   P214: externalIdAuthority(
     "viaf",
     /^[1-9]\d(?:\d{0,7}|\d{17,20})$/,
@@ -388,7 +408,7 @@ export const EXTERNAL_ID_AUTHORITIES: Readonly<Record<string, ExternalIdAuthorit
  * Wikidata properties whose value is a calendar date we lift as a
  * {@link DateFact}, mapped to the English label reported as its `label`.
  */
-export const DATE_PROPERTIES: Readonly<Record<string, string>> = {
+export const DATE_PROPERTIES: Record.ReadonlyRecord<string, string> = {
   P569: "date of birth",
   P570: "date of death",
   P571: "inception",
@@ -406,7 +426,7 @@ export const IMAGE_PROPERTIES: readonly string[] = ["P18"];
  * so it must be exclusively a sign, digits, and the fixed separators.
  */
 export function normaliseTimeValue(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const trimmed = raw.trim();
   // Wikidata times are `±YYYYYYYYYYY-MM-DDThh:mm:ssZ` (year up to 16 digits).
   if (!/^[+-]\d{1,16}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(trimmed)) return null;
@@ -431,17 +451,11 @@ export function normaliseCommonsImage(raw: unknown): {
   /** `https://commons.wikimedia.org/wiki/Special:FilePath/` plus `filename` percent-encoded as one path segment (a space becomes `%20`). */
   readonly iri: string;
 } | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0 || trimmed.length > 256) return null;
-  // Checked on the raw string: `normaliseTitle` collapses whitespace
-  // (tab, newline, CR, ...) to `_` before its own control-character check,
-  // so it can't be relied on to reject them here.
-  for (let i = 0; i < trimmed.length; i++) {
-    const code = trimmed.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return null;
-  }
-  if (/[|#?]/.test(trimmed)) return null;
+  // Control characters are checked on the raw string: `normaliseTitle`
+  // collapses whitespace (tab, newline, CR, ...) to `_` before its own
+  // control-character check, so it can't be relied on to reject them here.
+  const trimmed = trimmedToken(raw);
+  if (trimmed === null || /[|#?]/.test(trimmed)) return null;
   // `normaliseTitle` adds the relative-path forms; its whitespace-collapsed
   // result is discarded so `filename` keeps the claim's own spelling.
   if (normaliseTitle(trimmed) === null) return null;
