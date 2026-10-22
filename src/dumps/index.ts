@@ -33,10 +33,12 @@
  *
  * **bz2 — a pluggable stage, not a bundled decoder.** Node `zlib` covers gzip
  * ({@link gunzip}); it has no bzip2, and pure-JS bzip2 decoders are heavy.
- * Decompression is an injectable Node `Transform` factory
- * ({@link Decompressor}) — a `.json.bz2` consumer supplies their own bzip2
- * transform to {@link fromFile} / {@link decompressWith}. No bzip2 dependency
- * ships.
+ * Decompression is an injectable stage factory ({@link Decompressor}): it
+ * returns a Node `Duplex` or `Transform`, or a classic (pre-streams2) duplex
+ * stream such as `unbzip2-stream`'s, which is adapted before
+ * `stream.compose`. A `.json.bz2` consumer supplies their own bzip2 decoder to
+ * {@link fromFile} / {@link decompressWith}; the {@link Decompressor} docs
+ * show the recipe with `unbzip2-stream`. No bzip2 dependency ships.
  *
  * ## Worked example — count all items with a `P569` (date of birth) claim
  *
