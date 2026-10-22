@@ -145,6 +145,145 @@ describe("Wikidata sitelink caps", () => {
   });
 });
 
+describe("Wikidata.decodeEntity on containers of the wrong kind (#147)", () => {
+  // Each threw a TypeError before #147; a dump line like this ended a whole
+  // `Dumps` stream as a defect.
+  const malformed: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ["a null statement", { claims: { P31: [null] } }],
+    ["a null mainsnak", { claims: { P31: [{ mainsnak: null }] } }],
+    [
+      "a null datavalue",
+      { claims: { P31: [{ mainsnak: { snaktype: "value", property: "P31", datavalue: null } }] } },
+    ],
+    ["a statement list that is a number", { claims: { P31: 5 } }],
+    [
+      "a null qualifier list",
+      {
+        claims: {
+          P31: [{ mainsnak: { snaktype: "novalue", property: "P31" }, qualifiers: { P1: null } }],
+        },
+      },
+    ],
+    [
+      "a null reference",
+      {
+        claims: {
+          P31: [{ mainsnak: { snaktype: "novalue", property: "P31" }, references: [null] }],
+        },
+      },
+    ],
+    ["a null sitelink", { sitelinks: { enwiki: null } }],
+    [
+      "badges that are a number",
+      { sitelinks: { enwiki: { site: "enwiki", title: "X", badges: 5 } } },
+    ],
+    ["a null alias list", { aliases: { en: null } }],
+    ["a claims map that is a string", { claims: "P31" }],
+    [
+      "references that are an object",
+      {
+        claims: {
+          P31: [{ mainsnak: { snaktype: "novalue", property: "P31" }, references: { 0: null } }],
+        },
+      },
+    ],
+  ];
+
+  it.each(malformed)("keeps a best-effort item for %s instead of throwing", (_, fields) => {
+    const item = Wikidata.decodeEntity({ type: "item", id: "Q1", ...fields });
+    expect(item?.id).toBe("Q1");
+  });
+
+  it("drops only the unusable entries, keeping the rest of the item", () => {
+    const item = Wikidata.decodeEntity({
+      type: "item",
+      id: "Q1",
+      labels: { en: { language: "en", value: "One" }, de: null },
+      aliases: { en: [null, { value: "Uno" }, 5] },
+      sitelinks: { dewiki: null, enwiki: { site: "enwiki", title: "One", badges: "Q17437796" } },
+      claims: {
+        P31: [
+          null,
+          { mainsnak: { snaktype: "value", property: "P31", datavalue: null } },
+          { mainsnak: { snaktype: "novalue", property: "P31" }, qualifiers: null, references: 5 },
+        ],
+      },
+    });
+    expect(item).toEqual({
+      id: "Q1",
+      type: "item",
+      labels: { en: "One" },
+      descriptions: {},
+      aliases: { en: ["Uno"] },
+      sitelinks: { enwiki: { site: "enwiki", title: "One", badges: [] } },
+      claims: {
+        P31: [
+          {
+            id: null,
+            rank: "normal",
+            mainsnak: { _tag: "somevalue", property: "P31", datatype: null },
+            qualifiers: {},
+            references: [],
+          },
+          {
+            id: null,
+            rank: "normal",
+            mainsnak: { _tag: "novalue", property: "P31", datatype: null },
+            qualifiers: {},
+            references: [],
+          },
+        ],
+      },
+    });
+  });
+});
+
+describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
+  // JSON decoding makes `__proto__` an own key, as a dump line or a decoded
+  // `wbgetentities` body would carry it.
+  const parseJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
+  const item = Wikidata.decodeEntity(
+    parseJson(
+      '{"id":"Q1"' +
+        ',"labels":{"__proto__":{"value":"Proto"},"en":{"value":"En"}}' +
+        ',"descriptions":{"__proto__":{"value":"Proto"},"en":{"value":"En"}}' +
+        ',"aliases":{"__proto__":[{"value":"Proto"}],"en":[{"value":"En"}]}' +
+        ',"sitelinks":{"__proto__":{"title":"Proto"},"enwiki":{"title":"En"}}}',
+    ),
+  );
+
+  it.each(["labels", "descriptions", "aliases", "sitelinks"] as const)(
+    "drops the key from %s, keeping the map's prototype and its other entries",
+    (map) => {
+      const value: Readonly<Record<string, unknown>> = item?.[map] ?? {};
+      expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+      expect(Record.keys(value)).toEqual([map === "sitelinks" ? "enwiki" : "en"]);
+      expect(value["title"]).toBeUndefined();
+      expect(value["value"]).toBeUndefined();
+    },
+  );
+
+  it("does not count the key towards MAX_SITELINKS", () => {
+    const sitelinks = Arr.makeBy(
+      Wikidata.MAX_SITELINKS,
+      (i) => `"site${i}wiki":{"title":"P${i}"}`,
+    ).join(",");
+    const raw = parseJson(`{"id":"Q1","sitelinks":{"__proto__":{"title":"Proto"},${sitelinks}}}`);
+    const keys = Record.keys(Wikidata.decodeEntity(raw)?.sitelinks ?? {});
+    expect(keys).toHaveLength(Wikidata.MAX_SITELINKS);
+    expect(keys.at(-1)).toBe(`site${Wikidata.MAX_SITELINKS - 1}wiki`);
+  });
+
+  it("drops the key on the normaliseEntities path too", () => {
+    const response = Schema.decodeUnknownSync(Wikidata.WbGetEntitiesResponse)(
+      parseJson('{"entities":{"Q1":{"id":"Q1","sitelinks":{"__proto__":{"title":"Proto"}}}}}'),
+    );
+    const entities = Wikidata.normaliseEntities(response);
+    expect(Object.getPrototypeOf(entities["Q1"]?.sitelinks)).toBe(Object.prototype);
+    expect(Record.keys(entities["Q1"]?.sitelinks ?? {})).toEqual([]);
+  });
+});
+
 // ── Fixture round-trip: decode → typed access ────────────────────────────
 
 describe("Wikidata.getEntities — recorded fixture round-trip", () => {

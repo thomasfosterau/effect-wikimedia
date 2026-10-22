@@ -166,12 +166,35 @@ describe("predicates", () => {
     if (q42 === null) return expect.unreachable("fixture decode failed");
     expect(Dumps.hasSitelink(q42, "enwiki")).toBe(true);
     expect(Dumps.hasSitelink(q42, "dewiki")).toBe(false);
+    // Inherited names are never sitelinks (#164).
+    expect(Dumps.hasSitelink(q42, "toString")).toBe(false);
+    expect(Dumps.hasSitelink(q42, "constructor")).toBe(false);
+    expect(Dumps.hasSitelink(q42, "__proto__")).toBe(false);
   });
 });
 
 // ── The pipeline over the fixture ────────────────────────────────────────
 
 describe("entityRecords pipeline", () => {
+  it("keeps streaming past a line whose nested containers are the wrong kind (#147)", async () => {
+    const lines = [
+      "[",
+      `${toJson({ type: "item", id: "Q1", claims: { P31: [null] } })},`,
+      `${toJson({ type: "item", id: "Q2", sitelinks: { enwiki: null } })},`,
+      toJson({ type: "item", id: "Q3" }),
+      "]",
+    ];
+    const bytes = Stream.make(new TextEncoder().encode(lines.join("\n")));
+    const records = await collect(Dumps.entityRecords(bytes));
+    expect(records.filter(isLineError)).toEqual([]);
+    const hits = records.filter((r): r is Dumps.EntityHit => !isLineError(r));
+    expect(hits.map((r) => [r.line, r.item.id])).toEqual([
+      [2, "Q1"],
+      [3, "Q2"],
+      [4, "Q3"],
+    ]);
+  });
+
   it("decodes the fixture: 5 entities + 2 error elements, in line order", async () => {
     const records = await collect(Dumps.entityRecords(Dumps.fromFile(slicePath)));
     const entities = records.filter(Predicate.isTagged("entity"));

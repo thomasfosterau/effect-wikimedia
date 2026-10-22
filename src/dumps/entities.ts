@@ -20,9 +20,8 @@
  * by construction** — a line that fails to parse or is not a valid entity
  * becomes a typed {@link DumpLineError} *element* rather than a stream
  * failure, so one corrupt line in a 100M-line dump does not tear the pipeline
- * down. One case escapes this today: a line whose nested containers are the
- * wrong kind can make the entity decoder throw, which ends the stream as a
- * defect (#147).
+ * down; a line whose nested containers are the wrong kind still decodes to
+ * a best-effort entity, as {@link Wikidata.decodeEntity} documents.
  *
  * Runtime-agnostic: this module imports only `effect` and the pure `Wikidata`
  * model (never its HTTP client). The byte source and decompression stages
@@ -73,10 +72,8 @@ export type DumpLineErrorReason = "dumps/invalid-json" | "dumps/not-an-entity";
 /**
  * A dump line that did not decode to an entity — the lenient degrade. The
  * pipeline emits this as an element and continues, rather than failing the
- * stream. One case escapes it today: a line whose nested containers are the
- * wrong kind (such as a `null` statement) can make the entity decoder throw,
- * which ends the stream as a defect instead (#147). `raw` is the offending
- * line, bounded so a hostile dump cannot blow memory.
+ * stream. `raw` is the offending line, bounded so a hostile dump cannot blow
+ * memory.
  */
 export interface DumpLineError {
   /** Always `"error"`; tells a per-line error from an {@link EntityHit} (`"entity"`). */
@@ -137,7 +134,10 @@ function boundRaw(text: string): string {
  * {@link Wikidata.decodeEntity} rejects one with reason
  * `dumps/not-an-entity`: for example `null`, a number, a string, an array, or
  * an object that has no valid entity id or that Wikibase flagged `missing`.
- * Never a throw.
+ * Never a throw: an object with a valid id whose nested containers are the
+ * wrong kind (a `null` statement, a sitelinks map that is a number) yields an
+ * {@link EntityHit} carrying a best-effort item, as
+ * {@link Wikidata.decodeEntity} documents.
  */
 export function decodeEntityLine(line: string, lineNumber: number): EntityRecord | null {
   const body = stripFraming(line);
@@ -212,9 +212,13 @@ export function hasClaim(item: WikidataItem, property: string): boolean {
   return statements !== undefined && Arr.isReadonlyArrayNonEmpty(statements);
 }
 
-/** Whether an item has a sitelink to the given wiki (`"enwiki"`, `"commonswiki"`). */
+/**
+ * Whether an item has a sitelink to the given wiki (`"enwiki"`,
+ * `"commonswiki"`). Only the item's own sitelinks count, so a name such as
+ * `"toString"` is never one.
+ */
 export function hasSitelink(item: WikidataItem, site: string): boolean {
-  return item.sitelinks[site] !== undefined;
+  return Object.hasOwn(item.sitelinks, site);
 }
 
 // ── Stream combinators over decoded items ────────────────────────────────
