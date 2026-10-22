@@ -482,7 +482,8 @@ export interface Table {
    */
   readonly open: string;
   /**
-   * Every `|+` caption, in source order; empty when there is none.
+   * Every caption, in source order (one per `||`-separated piece of each
+   * `|+` line); empty when there is none.
    * {@link serialize} writes them all before the rows, so a caption written
    * after a row or cell marker does not round-trip.
    */
@@ -498,7 +499,11 @@ export interface Table {
  * A table caption `|+ … `. Zero or more may occur (MediaWiki only really
  * gives meaning to one; this vocabulary does not privilege a particular
  * occurrence and keeps every `|+` line encountered, so round-trip never
- * depends on picking "the real one"; see {@link Table.captions}).
+ * depends on picking "the real one"; see {@link Table.captions}). A `|+`
+ * line splits on `||` (outside the constructs a cell's `||` ignores, see
+ * {@link TableCell}) into one caption per piece, as MediaWiki's
+ * `handleTables` emits a `<caption>` per piece; the pieces after the first
+ * have `inline` set. `!!` does not split a caption line.
  *
  * `attrs` / `content` follow the single-pipe rule shared with
  * {@link TableCell}: the first `|` on the caption's opening line, outside any
@@ -514,7 +519,12 @@ export interface TableCaption {
    */
   readonly span: Span;
   /**
-   * The text between `|+` and the first `|` on its line outside a template,
+   * Whether the caption opened with `||` on the line of the caption before
+   * it, rather than with `|+` at the start of a line.
+   */
+  readonly inline: boolean;
+  /**
+   * The text between `|+` (or `||`) and the first `|` on its line outside a template,
    * argument, wikilink, comment or extension tag, verbatim and untrimmed;
    * `undefined` when there is no such `|` or a `[[` outside those comes
    * before it. In `|+ {{flag|France}} results` there is none, so the
@@ -522,8 +532,9 @@ export interface TableCaption {
    */
   readonly attrs: string | undefined;
   /**
-   * The caption as wikitext, after the `|+` or the attribute `|`, up to the
-   * next table marker line; line breaks included.
+   * The caption as wikitext, after the `|+`, `||` or the attribute `|`. It
+   * ends at the next `||` on the line; the line's last caption runs on up to
+   * the next table marker line, line breaks included.
    */
   readonly content: readonly Node[];
 }
@@ -563,12 +574,10 @@ export interface TableRow {
  *
  * `inline` distinguishes a cell that continues its row's opening line via
  * `!!`/`||` from one that opens on its own line via a fresh `!`/`|` (both are
- * cells of the *same* row; only the marker differs, and round-trip needs to
- * know which was written). Mixing header and data cells via `!!`/`||` on one
- * line is not specially recognised: a header line is split only on `!!` and
- * a data line only on `||`, matching the documented common usage — a stray
- * `||` in a `!`-opened line is just literal text within that cell's content,
- * not a type change.
+ * cells of the *same* row). As in MediaWiki's `handleTables`, a data line
+ * (opened with `|`) splits on `||` only, and a header line (opened with `!`)
+ * on `!!` and `||` alike, every piece of it a header cell: `! a || b` is two
+ * header cells. `marker` records which was written.
  *
  * `attrs` / `content`: MediaWiki's single-pipe rule (`Parser::handleTables`)
  * splits the cell's opening-line text at the first `|` into attributes and
@@ -594,6 +603,12 @@ export interface TableCell {
    * it, rather than with `!` or `|` at the start of a line.
    */
   readonly inline: boolean;
+  /**
+   * The cell's marker as written, which {@link serialize} writes back: `!`
+   * or `|` at the start of a line, else `!!` or `||` (a header line's
+   * inline cells may use either).
+   */
+  readonly marker: "!" | "|" | "!!" | "||";
   /**
    * The text between the marker and the first `|` in the cell's part of its
    * opening line outside a template, argument, wikilink, comment or

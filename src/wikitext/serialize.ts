@@ -59,7 +59,8 @@ const serializeByTag: (node: Node) => string = Match.type<Node>().pipe(
 );
 
 function serializeCaption(caption: TableCaption): string {
-  return `|+${caption.attrs === undefined ? "" : `${caption.attrs}|`}${serializeNodes(caption.content)}`;
+  const marker = caption.inline ? "||" : "|+";
+  return `${marker}${caption.attrs === undefined ? "" : `${caption.attrs}|`}${serializeNodes(caption.content)}`;
 }
 
 function serializeRow(row: TableRow): string {
@@ -68,9 +69,8 @@ function serializeRow(row: TableRow): string {
 }
 
 function serializeCell(cell: TableCell): string {
-  const marker = cell.inline ? (cell.header ? "!!" : "||") : cell.header ? "!" : "|";
   const attrs = cell.attrs === undefined ? "" : `${cell.attrs}|`;
-  return marker + attrs + serializeNodes(cell.content);
+  return cell.marker + attrs + serializeNodes(cell.content);
 }
 
 /** Serializes a document (its top-level fragment). */
