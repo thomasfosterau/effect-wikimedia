@@ -98,6 +98,7 @@ assert<
 // --- Sparql -----------------------------------------------------------------
 
 assert<Equals<Sparql.SparqlTerm["_tag"], "uri" | "literal" | "bnode" | "unknown">>();
+assert<Equals<Sparql.SparqlResults["boolean"], boolean | null>>();
 assert<
   Equals<
     ReturnType<typeof Sparql.query>,
