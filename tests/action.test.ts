@@ -310,7 +310,10 @@ describe("Action.parsePage", () => {
           parse: {
             title: "Douglas Adams",
             pageid: 42,
-            sections: [{ toclevel: 1, level: "2", line: "Life", anchor: "Life" }],
+            tocdata: {
+              sections: [{ tocLevel: 1, hLevel: 2, line: "Life", anchor: "Life" }],
+              extensionData: [],
+            },
             links: [{ ns: 0, "*": "The Hitchhiker's Guide to the Galaxy" }],
             categories: [{ sortkey: "", "*": "English novelists" }],
             templates: [{ ns: 10, "*": "Infobox writer" }],
@@ -327,6 +330,63 @@ describe("Action.parsePage", () => {
       categories: ["English novelists"],
       templates: ["Infobox writer"],
     });
+  });
+
+  // Hand-derived from MediaWiki's ApiParse (`prop=tocdata`, which writes
+  // `jsonCodec->toJsonArray(TOCData)`) and Parsoid's
+  // `SectionMetadata::toJsonArray()`, which omits a field at its default and
+  // `linkAnchor` when it equals `anchor` (#144). No live network.
+  it("reads the tocdata table of contents and requests it rather than sections", async () => {
+    const { urls, layer } = stubRouter({
+      "action=parse": {
+        status: 200,
+        body: {
+          parse: {
+            title: "Douglas Adams",
+            pageid: 8091,
+            tocdata: {
+              sections: [
+                {
+                  tocLevel: 1,
+                  hLevel: 2,
+                  line: "Early life",
+                  number: "1",
+                  index: "1",
+                  fromTitle: "Douglas_Adams",
+                  codepointOffset: 3054,
+                  anchor: "Early_life",
+                },
+                {
+                  tocLevel: 2,
+                  hLevel: 3,
+                  line: "<i>The Hitchhiker's Guide</i> & radio",
+                  number: "1.1",
+                  index: "2",
+                  fromTitle: "Douglas_Adams",
+                  codepointOffset: 5120,
+                  anchor: "The_Hitchhiker's_Guide_&_radio",
+                  linkAnchor: "The_Hitchhiker's_Guide_&amp;_radio",
+                },
+                { tocLevel: 1, hLevel: 2, number: "2", index: "3", anchor: "Empty" },
+              ],
+              extensionData: [],
+            },
+            showtoc: true,
+          },
+        },
+      },
+    });
+    const result = await run(layer, Action.parsePage("en.wikipedia.org", "Douglas Adams"));
+    expect(result?.sections).toEqual([
+      { level: 2, title: "Early life", anchor: "Early_life" },
+      {
+        level: 3,
+        title: "<i>The Hitchhiker's Guide</i> & radio",
+        anchor: "The_Hitchhiker's_Guide_&_radio",
+      },
+    ]);
+    const prop = new URL(urls[0] ?? "").searchParams.get("prop");
+    expect(prop?.split("|")).toEqual(["tocdata", "links", "categories", "templates"]);
   });
 
   it("returns null when the endpoint has no parse result", async () => {
