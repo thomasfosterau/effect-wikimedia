@@ -632,6 +632,67 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
   });
 });
 
+describe("wikitables: separators on header and caption lines (#157)", () => {
+  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
+  function table(src: string): Table {
+    const doc = parse(src);
+    expect(serialize(doc)).toBe(src);
+    walk(doc, (n) => {
+      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+        src.slice(n.span.start, n.span.end),
+      );
+    });
+    return only(src, "Table") as Table;
+  }
+
+  it("splits a header line on || as well as !!, every piece a header cell", () => {
+    const cells = table("{|\n! a || b !! c\n|}").rows[0].cells;
+    expect(cells.map((c) => [c.marker, c.header, c.inline, c.attrs, text(c.content)])).toEqual([
+      ["!", true, false, undefined, " a "],
+      ["||", true, true, undefined, " b "],
+      ["!!", true, true, undefined, " c\n"],
+    ]);
+    expect(cells.map((c) => c.span)).toEqual([
+      { start: 3, end: 7 },
+      { start: 7, end: 12 },
+      { start: 12, end: 17 },
+    ]);
+  });
+
+  it("splits a header cell's attributes after the || split, not on its first pipe", () => {
+    const cells = table('{|\n! scope="col" | a || b\n|}').rows[0].cells;
+    expect(cells.map((c) => [c.attrs, text(c.content)])).toEqual([
+      [' scope="col" ', " a "],
+      [undefined, " b\n"],
+    ]);
+  });
+
+  it("still splits a data line on || only", () => {
+    const cells = table("{|\n| a !! b || c\n|}").rows[0].cells;
+    expect(cells.map((c) => [c.marker, c.header, text(c.content)])).toEqual([
+      ["|", false, " a !! b "],
+      ["||", false, " c\n"],
+    ]);
+  });
+
+  it("doesn't split a header line on a || or !! inside a nested construct", () => {
+    const cells = table("{|\n! {{x||y}} [[a|b!!c]] <!-- || --> || d\n|}").rows[0].cells;
+    expect(cells.map((c) => text(c.content))).toEqual([
+      " {{x||y}} [[a|b!!c]] <!-- || --> ",
+      " d\n",
+    ]);
+  });
+
+  it("splits a |+ line on || into one caption per piece, keeping every character", () => {
+    const t = table('{|\n|+ a || style="x" | b !! c\nmore\n|-\n| d\n|}');
+    expect(t.captions.map((c) => [c.inline, c.attrs, text(c.content), c.span])).toEqual([
+      [false, undefined, " a ", { start: 3, end: 8 }],
+      [true, ' style="x" ', " b !! c\nmore\n", { start: 8, end: 35 }],
+    ]);
+    expect(t.rows).toHaveLength(1);
+  });
+});
+
 describe("regression: existing vocabulary is unaffected by tables/autolink (issue #1287)", () => {
   const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
   const ada = readFileSync(`${fixturesDir}ada-lovelace.txt`, "utf8");

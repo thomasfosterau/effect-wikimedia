@@ -62,6 +62,7 @@ import {
   type Heading,
   type HtmlEntity,
   type Node,
+  type Span,
   type Param,
   type Table,
   type TableCaption,
@@ -463,42 +464,36 @@ function splitCellAttrs(state: State, from: number, to: number): CellSplit {
   return { attrs: src.slice(from, at), contentStart: at + 1 };
 }
 
-const tableCaption: WikiParser<TableCaption> = Parser.make((state) => {
-  const start = state.pos;
-  if (literal("|+").step(state) === Input.Fail) return Input.Fail;
-  const lineEnd = tableLineEnd(state, state.pos);
-  const { attrs, contentStart } = splitCellAttrs(state, state.pos, lineEnd);
-  state.pos = lineEnd;
-  trailingNewline.step(state);
-  tableFiller.step(state);
-  const content = fragmentWithin(state, contentStart, state.pos, cellContent);
-  return { span: { start, end: state.pos }, attrs, content };
-});
+/** One `||`-separated piece of a cell or caption line (see `linePieces`). */
+interface LinePiece {
+  readonly span: Span;
+  readonly marker: string;
+  readonly attrs: string | undefined;
+  readonly content: Node[];
+}
 
 /**
- * Every cell opened on a `!`/`|` marker line (further split by `!!`/`||`
- * outside nested constructs), the last one extended across any following
+ * Splits the cell or caption line whose `markerLength`-character marker
+ * starts at the cursor into pieces at each separator `isSep` finds outside
+ * a nested construct (see `findTopLevel`), as MediaWiki's `handleTables`
+ * explodes a line on `||`. Each piece is split into attributes and content
+ * by the single-pipe rule; the last runs on through any following
  * non-marker lines. Leaves the cursor at the next marker line (or the
  * region end).
  */
-const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
-  const src = state.input;
-  const marker = src.charCodeAt(state.pos);
-  if (state.pos >= state.end || !isTableMarker(marker)) return state.backtrack("OneOf");
-  const header = marker === BANG;
-  const isSep = (i: number): boolean =>
-    src.charCodeAt(i) === marker && src.charCodeAt(i + 1) === marker; // !! or ||
+function linePieces(
+  state: State,
+  markerLength: number,
+  isSep: (i: number) => boolean,
+): LinePiece[] {
   const lineEnd = tableLineEnd(state, state.pos);
-  const cells: TableCell[] = [];
+  const pieces: LinePiece[] = [];
   let openStart = state.pos;
-  let segStart = state.pos + 1; // past the single marker char
-  let inline = false;
-
+  let segStart = state.pos + markerLength;
   for (;;) {
     const sepIdx = findTopLevel(state, segStart, lineEnd, isSep);
     const hasMore = sepIdx < lineEnd;
     const { attrs, contentStart } = splitCellAttrs(state, segStart, sepIdx);
-
     let contentEnd = sepIdx;
     if (!hasMore) {
       state.pos = lineEnd;
@@ -507,19 +502,62 @@ const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
       contentEnd = state.pos;
     }
     const content = fragmentWithin(state, contentStart, contentEnd, cellContent);
-    cells.push({ span: { start: openStart, end: contentEnd }, header, inline, attrs, content });
-
-    if (!hasMore) return cells;
+    const marker = state.input.slice(openStart, segStart);
+    pieces.push({ span: { start: openStart, end: contentEnd }, marker, attrs, content });
+    if (!hasMore) return pieces;
     openStart = sepIdx;
     segStart = sepIdx + 2;
-    inline = true;
   }
+}
+
+/** Whether `||` starts at `i`. */
+const isDoublePipe = (state: State, i: number): boolean =>
+  state.input.charCodeAt(i) === PIPE && state.input.charCodeAt(i + 1) === PIPE;
+
+/**
+ * A `|+` caption line, split on `||` into one caption per piece, as
+ * MediaWiki emits a `<caption>` per piece (#157).
+ */
+const tableCaptions: WikiParser<TableCaption[]> = Parser.make((state) => {
+  const start = state.pos;
+  if (literal("|+").step(state) === Input.Fail) return Input.Fail;
+  state.pos = start;
+  return linePieces(state, 2, (i) => isDoublePipe(state, i)).map(
+    ({ span, attrs, content }, i): TableCaption => ({ span, inline: i > 0, attrs, content }),
+  );
+});
+
+/**
+ * Every cell opened on a `!`/`|` marker line, the last one extended across
+ * any following non-marker lines. A data line splits on `||`; a header line
+ * on `!!` and `||` alike, since MediaWiki rewrites `!!` to `||` there before
+ * splitting (#157). Leaves the cursor at the next marker line (or the
+ * region end).
+ */
+const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
+  const src = state.input;
+  const first = src.charCodeAt(state.pos);
+  if (state.pos >= state.end || !isTableMarker(first)) return state.backtrack("OneOf");
+  const header = first === BANG;
+  const isSep = (i: number): boolean =>
+    isDoublePipe(state, i) ||
+    (header && src.charCodeAt(i) === BANG && src.charCodeAt(i + 1) === BANG);
+  return linePieces(state, 1, isSep).map(({ span, marker, attrs, content }, i): TableCell => ({
+    span,
+    header,
+    inline: i > 0,
+    // SAFETY: the first piece's marker is the line's `!` or `|`
+    // (`isTableMarker`), every later one the `!!` or `||` `isSep` matched.
+    marker: marker as TableCell["marker"],
+    attrs,
+    content,
+  }));
 });
 
 /** One item between a table's `{|` line and its `|}`. */
 type TableItem =
   | { readonly _tag: "Row"; readonly start: number; readonly open: string }
-  | { readonly _tag: "Caption"; readonly caption: TableCaption }
+  | { readonly _tag: "Captions"; readonly captions: TableCaption[] }
   | { readonly _tag: "Cells"; readonly cells: TableCell[] };
 
 const tableItem: WikiParser<TableItem> = Parser.preceded(
@@ -529,7 +567,7 @@ const tableItem: WikiParser<TableItem> = Parser.preceded(
       Parser.withSpan(Parser.preceded(literal("|-"), markerLine)),
       ([open, span]): TableItem => ({ _tag: "Row", start: span.start, open }),
     ),
-    Parser.map(tableCaption, (caption): TableItem => ({ _tag: "Caption", caption })),
+    Parser.map(tableCaptions, (captions): TableItem => ({ _tag: "Captions", captions })),
     Parser.map(tableCells, (cells): TableItem => ({ _tag: "Cells", cells })),
   ),
 );
@@ -561,10 +599,10 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
           flushRow(body, start);
           body.row = { start, open, cells: [] };
         },
-      Caption:
-        ({ caption }) =>
+      Captions:
+        ({ captions }) =>
         (body: TableBodyBuilder) => {
-          body.captions.push(caption);
+          body.captions.push(...captions);
         },
       Cells:
         ({ cells }) =>
