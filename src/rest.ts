@@ -46,7 +46,7 @@ const LatestRevision = Schema.Struct({
 });
 
 /**
- * Lenient schema for `GET /w/rest.php/v1/page/{title}`: the decode step
+ * Lenient schema for `GET /w/rest.php/v1/page/{title}/bare`: the decode step
  * {@link getPageMetadata} runs before {@link normalisePageMetadata}. Every
  * field is optional and every leaf `Unknown`, so a partial, extended or
  * future-shaped response decodes, but a container of the wrong kind (a `latest`
@@ -72,16 +72,16 @@ export const PageMetadataResponse = Schema.Struct({
   /** The wiki's content license, which is site-wide rather than per page. */
   license: Schema.optional(License),
   /**
-   * The URL of the page's `/html` endpoint; not read. MediaWiki 1.47 and later
-   * (including Wikimedia's wikis) send it on `/page/{title}` whenever the HTML
-   * isn't inlined; earlier versions sent it only on `/page/{title}/bare`.
+   * The URL of the page's `/html` endpoint; not read. `/page/{title}/bare`
+   * has always sent it; MediaWiki 1.47 and later (including Wikimedia's
+   * wikis) also send it on `/page/{title}` whenever the HTML isn't inlined.
    */
   html_url: Schema.optional(Schema.Unknown),
 });
 export type PageMetadataResponse = typeof PageMetadataResponse.Type;
 
 /**
- * Lenient schema for `GET /w/rest.php/v1/revision/{id}`: the decode step
+ * Lenient schema for `GET /w/rest.php/v1/revision/{id}/bare`: the decode step
  * {@link getRevisionMetadata} runs before {@link normaliseRevisionMetadata}.
  * Every field is optional and every leaf `Unknown`, so a partial, extended or
  * future-shaped response decodes, but a container of the wrong kind (a `page`
@@ -261,7 +261,9 @@ export function normaliseRevisionMetadata(
 }
 
 /**
- * Fetches a page's REST-surface metadata via `GET /w/rest.php/v1/page/{title}`.
+ * Fetches a page's REST-surface metadata via `GET /w/rest.php/v1/page/{title}/bare`,
+ * the metadata-only variant of `/page/{title}`: the same fields without the
+ * page's wikitext (`source`), which this function doesn't return.
  * Fails with `InvalidRequest`, before any request is sent, for a title
  * `normaliseTitle` rejects, including a lone UTF-16 surrogate (which would
  * make `encodeURIComponent` throw) and the relative-path titles `.` and `..`
@@ -275,14 +277,23 @@ export const getPageMetadata = Effect.fn("Rest.getPageMetadata")(function* (
   const validTitle = yield* requireTitle(title);
   const client = yield* WikimediaClient;
   const response = yield* client.getJson(
-    { host, path: `/w/rest.php/v1/page/${encodeURIComponent(validTitle)}`, maxlagSeconds: null },
+    {
+      host,
+      path: `/w/rest.php/v1/page/${encodeURIComponent(validTitle)}/bare`,
+      maxlagSeconds: null,
+    },
     PageMetadataResponse,
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
   return normalisePageMetadata(response, validTitle);
 });
 
-/** Fetches a revision's REST-surface metadata via `GET /w/rest.php/v1/revision/{id}`. */
+/**
+ * Fetches a revision's REST-surface metadata via
+ * `GET /w/rest.php/v1/revision/{id}/bare`, the metadata-only variant of
+ * `/revision/{id}`: the same fields without the revision's wikitext
+ * (`source`), which this function doesn't return.
+ */
 export const getRevisionMetadata = Effect.fn("Rest.getRevisionMetadata")(function* (
   host: string,
   revisionId: number,
@@ -291,7 +302,7 @@ export const getRevisionMetadata = Effect.fn("Rest.getRevisionMetadata")(functio
   const validId = yield* requireRevisionId(revisionId);
   const client = yield* WikimediaClient;
   const response = yield* client.getJson(
-    { host, path: `/w/rest.php/v1/revision/${validId}`, maxlagSeconds: null },
+    { host, path: `/w/rest.php/v1/revision/${validId}/bare`, maxlagSeconds: null },
     RevisionMetadataResponse,
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
