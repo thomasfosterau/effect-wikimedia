@@ -16,7 +16,7 @@
  */
 
 import * as Match from "effect/Match";
-import type { Document, Node, Param, TableCaption, TableCell, TableRow } from "./ast.ts";
+import type { Document, Node, Param, Table, TableCaption, TableCell, TableRow } from "./ast.ts";
 
 /** Serializes a fragment (a list of nodes) back to wikitext. */
 export function serializeNodes(nodes: readonly Node[]): string {
@@ -51,12 +51,28 @@ const serializeByTag: (node: Node) => string = Match.type<Node>().pipe(
     // A marker tag is just its verbatim text; an extension tag adds its
     // captured raw body and closing tag (both absent when open-only).
     Tag: (node) => node.raw + (node.rawContent ?? "") + (node.closeRaw ?? ""),
-    Table: (node) =>
-      `{|${node.open}${node.captions.map(serializeCaption).join("")}${node.rows
-        .map(serializeRow)
-        .join("")}|}`,
+    Table: (node) => `{|${node.open}${serializeTableBody(node)}|}`,
   }),
 );
+
+/**
+ * A table's captions and rows, each caption written just before the row it
+ * precedes ({@link TableCaption.row}, read as `0` below zero and as after the
+ * last row past it), in {@link Table.captions} order.
+ */
+function serializeTableBody(table: Table): string {
+  const last = table.rows.length;
+  const at = (caption: TableCaption): number => Math.min(Math.max(caption.row, 0), last);
+  const captionsAt = (index: number): string =>
+    table.captions
+      .filter((caption) => at(caption) === index)
+      .map(serializeCaption)
+      .join("");
+  return (
+    table.rows.map((row, index) => captionsAt(index) + serializeRow(row)).join("") +
+    captionsAt(last)
+  );
+}
 
 function serializeCaption(caption: TableCaption): string {
   const marker = caption.inline ? "||" : "|+";
