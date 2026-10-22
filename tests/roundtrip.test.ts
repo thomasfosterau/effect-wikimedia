@@ -147,9 +147,9 @@ describe("fuzz: never throws, always round-trips", () => {
 
 // Table-heavy fuzz (#132): the table scans step over nested constructs, so
 // mix table markers with their openers and closers, balanced or not.
-// A caption only ever opens the table: one after a row doesn't round-trip yet (#131).
 const TABLE_ATOMS = [
   "|}",
+  "\n|+",
   "\n|",
   "\n!",
   "\n|-",

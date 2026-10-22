@@ -485,9 +485,9 @@ export interface Table {
   readonly open: string;
   /**
    * Every caption, in source order (one per `||`-separated piece of each
-   * `|+` line); empty when there is none.
-   * {@link serialize} writes them all before the rows, so a caption written
-   * after a row or cell marker does not round-trip.
+   * `|+` line); empty when there is none. Each records, in
+   * {@link TableCaption.row}, the row it precedes, which is where
+   * {@link serialize} writes it.
    */
   readonly captions: readonly TableCaption[];
   /**
@@ -526,6 +526,17 @@ export interface TableCaption {
    */
   readonly inline: boolean;
   /**
+   * The index in {@link Table.rows} of the row this caption precedes:
+   * `0` for a caption before any row, and `rows.length` for one after the
+   * last. A caption after a row or cell ends that row, as an HTML parser
+   * closes the row at the `<caption>` MediaWiki emits there; cells after it
+   * open a new row, with no `|-` (`open` `undefined`) unless one is written.
+   * The pieces of one `|+` line share a `row`. {@link serialize} writes the
+   * caption just before that row; captions sharing a `row` keep their order
+   * in {@link Table.captions}.
+   */
+  readonly row: number;
+  /**
    * The text between `|+` (or `||`) and the first `|` on its line outside a template,
    * argument, wikilink, comment or extension tag, verbatim and untrimmed;
    * `undefined` when there is no such `|` or a `[[` outside those comes
@@ -542,8 +553,9 @@ export interface TableCaption {
 }
 
 /**
- * One table row. Rows are separated by `|-`; the table's very first row
- * needs no explicit marker (`open` is `undefined` for that implicit row —
+ * One table row. Rows are separated by `|-`; the table's very first row,
+ * and a row whose cells follow a caption (see {@link TableCaption.row}),
+ * need no explicit marker (`open` is `undefined` for such an implicit row —
  * distinct from an explicit `|-` with no attribute text, which is its line
  * break, `"\n"`).
  *
@@ -554,8 +566,8 @@ export interface TableCaption {
  */
 export interface TableRow {
   /**
-   * The row's source range, from its `|-` (or, for the implicit first row,
-   * its first cell marker) to the next `|-` or the closing `|}`;
+   * The row's source range, from its `|-` (or, for an implicit row, its
+   * first cell marker) to the next `|-`, caption or the closing `|}`;
    * {@link serialize} ignores it.
    */
   readonly span: Span;

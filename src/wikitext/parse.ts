@@ -588,12 +588,17 @@ const isDoublePipe = (state: State, i: number): boolean =>
  * A `|+` caption line, split on `||` into one caption per piece, as
  * MediaWiki emits a `<caption>` per piece (#157).
  */
-const tableCaptions: WikiParser<TableCaption[]> = Parser.make((state) => {
+const tableCaptions: WikiParser<Omit<TableCaption, "row">[]> = Parser.make((state) => {
   const start = state.pos;
   if (literal("|+").step(state) === Input.Fail) return Input.Fail;
   state.pos = start;
   return linePieces(state, 2, (i) => isDoublePipe(state, i)).map(
-    ({ span, attrs, content }, i): TableCaption => ({ span, inline: i > 0, attrs, content }),
+    ({ span, attrs, content }, i): Omit<TableCaption, "row"> => ({
+      span,
+      inline: i > 0,
+      attrs,
+      content,
+    }),
   );
 });
 
@@ -627,7 +632,7 @@ const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
 /** One item between a table's `{|` line and its `|}`. */
 type TableItem =
   | { readonly _tag: "Row"; readonly start: number; readonly open: string }
-  | { readonly _tag: "Captions"; readonly captions: TableCaption[] }
+  | { readonly _tag: "Captions"; readonly captions: Omit<TableCaption, "row">[] }
   | { readonly _tag: "Cells"; readonly cells: TableCell[] };
 
 const tableItem: WikiParser<TableItem> = Parser.preceded(
@@ -657,6 +662,7 @@ interface TableBodyBuilder extends TableBody {
 function flushRow(body: TableBodyBuilder, end: number): void {
   const { row } = body;
   if (row) body.rows.push({ span: { start: row.start, end }, open: row.open, cells: row.cells });
+  body.row = undefined;
 }
 
 /** Adds one item to the table body being built (see {@link tableRows}). */
@@ -672,7 +678,11 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
       Captions:
         ({ captions }) =>
         (body: TableBodyBuilder) => {
-          body.captions.push(...captions);
+          // A caption line ends the row it interrupts (#131); its pieces
+          // all precede the next row.
+          flushRow(body, captions[0].span.start);
+          const row = body.rows.length;
+          body.captions.push(...captions.map((caption) => ({ ...caption, row })));
         },
       Cells:
         ({ cells }) =>
@@ -684,9 +694,12 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
   );
 
 /**
- * Groups a table's items into captions and rows. Cells before any `|-` open
- * an implicit row (`open` undefined); each row runs to the next `|-` or the
- * closing `|}` at `closeStart`, captions within it included.
+ * Groups a table's items into captions and rows. Cells before any `|-`, or
+ * after a caption, open an implicit row (`open` undefined); each row runs to
+ * the next `|-`, the next caption or the closing `|}` at `closeStart`. A
+ * caption ends the row it interrupts, as an HTML parser closes the row at
+ * the `<caption>` MediaWiki emits there and opens a new one for the next
+ * cell (#131); each caption records the index of the row it precedes.
  */
 function tableRows(items: readonly TableItem[], closeStart: number): TableBody {
   const body: TableBodyBuilder = { captions: [], rows: [], row: undefined };

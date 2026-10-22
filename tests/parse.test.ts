@@ -693,6 +693,74 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
   });
 });
 
+describe("wikitables: a caption after a row or cell (#131)", () => {
+  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
+  function table(src: string): Table {
+    const doc = parse(src);
+    expect(serialize(doc)).toBe(src);
+    walk(doc, (n) => {
+      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+        src.slice(n.span.start, n.span.end),
+      );
+    });
+    return only(src, "Table") as Table;
+  }
+
+  /** The table's captions and rows in source order, as `caption:<text>` / `row:<cell texts>`. */
+  const layout = (t: Table): string[] => {
+    const last = t.rows.length;
+    const captionsAt = (index: number): string[] =>
+      t.captions
+        .filter((c) => Math.min(Math.max(c.row, 0), last) === index)
+        .map((c) => `caption:${text(c.content).trim()}`);
+    return [
+      ...t.rows.flatMap((row, index) => [
+        ...captionsAt(index),
+        `row:${row.cells.map((c) => text(c.content).trim()).join(",")}`,
+      ]),
+      ...captionsAt(last),
+    ];
+  };
+
+  it("keeps a caption between two cells where it was, ending the first row (the issue's first repro)", () => {
+    const t = table("{|\n|a\n|+cap\n|b\n|}");
+    expect(layout(t)).toEqual(["row:a", "caption:cap", "row:b"]);
+    expect(t.rows.map((r) => [r.open, r.span])).toEqual([
+      [undefined, { start: 3, end: 6 }],
+      [undefined, { start: 12, end: 15 }],
+    ]);
+    expect(t.captions.map((c) => [c.row, c.span])).toEqual([[1, { start: 6, end: 12 }]]);
+  });
+
+  it("keeps a caption after a bare |- where it was (the issue's second repro)", () => {
+    const t = table("{|\n|-\n|+cap\n|a\n|}");
+    expect(layout(t)).toEqual(["row:", "caption:cap", "row:a"]);
+    expect(t.rows[0].open).toBe("\n");
+  });
+
+  it("gives every piece of a mid-table |+ … || … line the same row", () => {
+    const t = table("{|\n|a\n|+ c1 || c2\n|b\n|}");
+    expect(layout(t)).toEqual(["row:a", "caption:c1", "caption:c2", "row:b"]);
+    expect(t.captions.map((c) => [c.row, c.inline])).toEqual([
+      [1, false],
+      [1, true],
+    ]);
+  });
+
+  it("places leading, middle and trailing captions in order", () => {
+    const t = table("{|\n|+c1\n|-\n|a\n|+c2\n|+c3\n|-\n|b\n|+c4\n|}");
+    expect(layout(t)).toEqual([
+      "caption:c1",
+      "row:a",
+      "caption:c2",
+      "caption:c3",
+      "row:b",
+      "caption:c4",
+    ]);
+    expect(t.captions.map((c) => c.row)).toEqual([0, 1, 1, 2]);
+  });
+});
+
 describe("regression: existing vocabulary is unaffected by tables/autolink (issue #1287)", () => {
   const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
   const ada = readFileSync(`${fixturesDir}ada-lovelace.txt`, "utf8");
