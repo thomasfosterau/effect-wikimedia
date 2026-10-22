@@ -106,7 +106,9 @@ export interface NodeReadableLike extends AsyncIterable<Uint8Array> {
  * Node's `stream.compose`, a classic stream after it has been adapted into a
  * `Duplex`. A value that `node:stream` doesn't recognise as a stream, or a
  * stream already destroyed or ended, fails the stream with a
- * {@link SourceError}; pass a new Node stream each time.
+ * {@link SourceError}; pass a new Node stream each time. That check can't
+ * see a stream another dump stream is still using: one stage returned to
+ * two streams passes it, and their bytes interleave in it.
  */
 export interface NodeDuplexLike extends NodeReadableLike {
   /** Writes a chunk of compressed input. */
@@ -117,7 +119,8 @@ export interface NodeDuplexLike extends NodeReadableLike {
 
 /**
  * Recovers the Node `Duplex` a {@link Decompressor} returns from its
- * structural type, for `compose`, and fails unless it is a fresh one; a
+ * structural type, for `compose`, and fails unless it is a Node stream that
+ * is neither destroyed nor ended; a
  * classic stream is adapted into a `Duplex` once it has passed the check. The
  * contract on {@link NodeDuplexLike} is that the value is a real Node stream,
  * but the type admits a plain object, and `compose` doesn't reject one: the
@@ -134,6 +137,11 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * The check is a heuristic, not a proof: a plain object with
  * `readable: true`, `writable: true` and `pipe` / `write` / `on` functions
  * still passes it, is adapted as a classic stream, and hangs in `compose`.
+ * Nor does it see a stage that another stream is still using (one shared
+ * `createGunzip()` returned twice): that is neither destroyed nor ended (#129).
+ * A composed streams2 stage has a non-`null` `readableFlowing`, but a classic
+ * stream has no such field, and a check on it was not verified against the
+ * stream libraries a stage may come from, so none is made.
  */
 const asNodeDuplex = (stream: NodeDuplexLike): Effect.Effect<Duplex, SourceError> => {
   // SAFETY: only `isReadable` / `isWritable` read the value as a `Duplex`
@@ -143,7 +151,7 @@ const asNodeDuplex = (stream: NodeDuplexLike): Effect.Effect<Duplex, SourceError
   if (isReadable(duplex) !== true || isWritable(duplex) !== true) {
     return Effect.fail(
       sourceError(
-        "the decompressor must return a fresh Node stream (a Duplex, a Transform or a classic duplex stream), not a plain object or a stream already destroyed or ended",
+        "the decompressor must return a Node stream (a Duplex, a Transform or a classic duplex stream) that is neither destroyed nor ended, not a plain object",
       ),
     );
   }
@@ -402,7 +410,9 @@ const openNodeReadable = (
  * duplex stream, which is adapted for Node's `stream.compose`. Return a new
  * Node stream on each call: a value that `node:stream` doesn't recognise as a
  * stream, or a stream already destroyed or ended, fails the stream it feeds
- * with a {@link SourceError}.
+ * with a {@link SourceError}. A stream returned to two dump streams at once
+ * isn't detected, so they would write into and read from the same stage,
+ * interleaving their bytes.
  *
  * For bzip2 (Wikidata's `.json.bz2` entity dumps), which Node's `zlib` lacks,
  * pass a bzip2 decoder from a library. `unbzip2-stream` works, though its

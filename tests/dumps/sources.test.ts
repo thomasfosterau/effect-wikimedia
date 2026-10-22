@@ -340,7 +340,9 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
     const stage = unbzip2();
     stage.end();
     const error = await failsPromptly(Dumps.fromFile(SLICE_BZ2, { decompressor: () => stage }));
-    expect(error).toMatchObject({ description: expect.stringContaining("fresh Node stream") });
+    expect(error).toMatchObject({
+      description: expect.stringContaining("neither destroyed nor ended"),
+    });
   });
 });
 
@@ -500,7 +502,9 @@ describe("a decompressor that returns a used stream", () => {
       await withoutUncaught(async () => {
         const error = await failsPromptly(source.pipe(Dumps.decompressWith(() => stage)));
         expect(await orHung(closed)).toBe("closed");
-        expect(error).toMatchObject({ description: expect.stringContaining("fresh Node stream") });
+        expect(error).toMatchObject({
+          description: expect.stringContaining("neither destroyed nor ended"),
+        });
       });
     },
   );
@@ -533,7 +537,7 @@ describe("a decompressor that returns a used stream", () => {
         // Rejected before the file is opened at all.
         expect(opened()).toEqual([]);
         expect(error).toMatchObject({
-          description: expect.stringContaining("fresh Node stream"),
+          description: expect.stringContaining("neither destroyed nor ended"),
         });
       });
     },
