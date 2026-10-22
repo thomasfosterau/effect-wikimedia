@@ -10,10 +10,14 @@
  * - a run's markup length normalises to 2, 3 or 5 apostrophes — a run of
  *   four is `'` (literal) + `'''`, a run of six-plus is the surplus as
  *   literals + `'''''`;
- * - if a line has an odd number of bold markers, one `'''` is reinterpreted
- *   as `''` + a literal apostrophe, chosen by the classic
- *   single-letter-word / multi-letter-word / space heuristic on the
- *   character(s) preceding the run.
+ * - if a line has an odd number of bold markers *and* an odd number of
+ *   italic markers (a `'''''` counts as one of each), one `'''` is
+ *   reinterpreted as a literal apostrophe + `''`. The first `'''` whose
+ *   preceding text ends in a single-letter word (`x '''`) is chosen; failing
+ *   that, the first ending in a longer word or in nothing at all (the line
+ *   start); failing that, the first ending in a space. "Preceding text" is
+ *   MediaWiki's: the line from the previous run (or the line start) up to
+ *   this one, plus the literal apostrophe a run of four sheds.
  *
  * **Deliberate divergence from MediaWiki.** MediaWiki runs `doQuotes` on
  * fully *expanded* output, line by line, after templates and tags resolve.
@@ -31,8 +35,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import type { Formatting, Node } from "./ast.ts";
 
-const SPACE = 0x20;
-const NEWLINE = 0x0a;
+const SPACE = " ";
 
 interface Normalised {
   markupLen: 2 | 3 | 5;
@@ -101,24 +104,48 @@ const PRECEDING_PRIORITY: readonly Preceding[] = [
   "space",
 ];
 
-const isLineSpace = (c: number): boolean => c === SPACE || c === NEWLINE;
+/**
+ * What `before`, the text preceding a `'''` run, ends in, as `doQuotes`
+ * reads it: only `' '` counts as a space, an empty text (the run starts the
+ * line) is a longer word, and, as in PHP's `substr($s, -2, 1)`, the
+ * second-to-last character of a one-character text is that character (#137).
+ */
+function precedingKind(before: string): Preceding {
+  const x1 = before.at(-1);
+  const x2 = before.length >= 2 ? before.at(-2) : before.at(0);
+  if (x1 === SPACE) return "space";
+  return x2 === SPACE ? "single-letter-word" : "multi-letter-word";
+}
 
-/** What precedes the run starting at `start` (the start of input reads as a space). */
-function precedingKind(src: string, start: number): Preceding {
-  const x1 = start - 1 >= 0 ? src.charCodeAt(start - 1) : SPACE;
-  const x2 = start - 2 >= 0 ? src.charCodeAt(start - 2) : SPACE;
-  if (isLineSpace(x1)) return "space";
-  return isLineSpace(x2) ? "single-letter-word" : "multi-letter-word";
+/**
+ * The text `doQuotes` sees before token `i`: the line from the previous run
+ * on it (or from the line start) up to this run, plus the literal apostrophe
+ * a run of four sheds (#137).
+ */
+function precedingText(
+  tokens: readonly Formatting[],
+  norm: readonly Normalised[],
+  i: number,
+  src: string,
+): string {
+  const start = tokens[i].span.start;
+  const prev = tokens[i - 1];
+  const from = prev === undefined ? src.lastIndexOf("\n", start - 1) + 1 : prev.span.end;
+  return src.slice(from, start) + "'".repeat(norm[i].lead);
 }
 
 // MediaWiki's per-line doQuotes resolution (run normalisation + odd-bold heuristic).
 function resolveLine(tokens: readonly Formatting[], src: string): Normalised[] {
   const norm = tokens.map((t) => normalise(t.marks.length));
-  const numBold = Arr.countBy(norm, (n) => n.markupLen === 3 || n.markupLen === 5);
-  if (numBold % 2 === 0) return norm;
-  // Odd bold count: reinterpret one `'''` as `''` + a literal apostrophe.
-  const kinds = tokens.map((t, i) =>
-    norm[i].markupLen === 3 ? Option.some(precedingKind(src, t.span.start)) : Option.none(),
+  const numBold = Arr.countBy(norm, (n) => n.markupLen !== 2);
+  const numItalics = Arr.countBy(norm, (n) => n.markupLen !== 3);
+  // MediaWiki requires an odd count of both (#137).
+  if (numBold % 2 === 0 || numItalics % 2 === 0) return norm;
+  // Reinterpret one `'''` as a literal apostrophe + `''`.
+  const kinds = tokens.map((_, i) =>
+    norm[i].markupLen === 3
+      ? Option.some(precedingKind(precedingText(tokens, norm, i, src)))
+      : Option.none(),
   );
   const chosen = Arr.findFirst(PRECEDING_PRIORITY, (kind) =>
     Arr.findFirstIndex(kinds, Option.contains(kind)),

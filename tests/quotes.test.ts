@@ -58,3 +58,54 @@ describe("odd-bold single-letter heuristic", () => {
     expect(runs[runs.length - 1].mode).toBe("italic");
   });
 });
+
+describe("odd-bold heuristic matches doQuotes (#137)", () => {
+  /** Which run on a one-line `src` is a reinterpreted `'''` (`-1` for none), checking it reads as `'` + `''`. */
+  const reinterpreted = (src: string): number => {
+    const runs = formatting(src);
+    const isReinterpreted = (r: Formatting): boolean =>
+      r.marks.length >= 3 && r.marks.length - r.leadingLiterals === 2;
+    expect(runs.filter(isReinterpreted).map((r) => r.mode)).not.toContain("bold");
+    return runs.findIndex(isReinterpreted);
+  };
+
+  it("leaves a lone bold run bold when the line has no italics (the issue's repro)", () => {
+    const [f] = formatting("The '''bold");
+    expect(f).toMatchObject({ mode: "bold", leadingLiterals: 0 });
+  });
+
+  it("leaves odd bold with even italics alone", () => {
+    expect(reinterpreted("The '''bold and ''it'' too")).toBe(-1);
+  });
+
+  it("reinterprets one bold run when both counts are odd", () => {
+    expect(reinterpreted("The '''bold and ''it")).toBe(0);
+    // A ''''' counts as one bold and one italic: these lines have even bold.
+    expect(reinterpreted("a '''b '''''c")).toBe(-1);
+    expect(reinterpreted("x a'''b '''''c ''d")).toBe(-1);
+  });
+
+  it("prefers a single-letter word, then a longer word, then a space", () => {
+    // Runs: after a space, after a multi-letter word, after a single-letter word.
+    expect(reinterpreted("x '''a bc'''d e'''f ''g")).toBe(2);
+    // No single-letter word: the multi-letter one beats the space.
+    expect(reinterpreted("x '''a bc'''d '''e ''f")).toBe(1);
+    // Only spaces: the first.
+    expect(reinterpreted("x '''a b '''c d '''e ''f")).toBe(0);
+  });
+
+  it("counts the line start as a longer word, not a space", () => {
+    expect(reinterpreted("'''a bc'''d '''e ''f")).toBe(0);
+    expect(formatting("z\n'''a bc'''d '''e ''f")[0]).toMatchObject({
+      mode: "italic",
+      leadingLiterals: 1,
+    });
+  });
+
+  it("reads the apostrophe a run of four sheds as part of the preceding text", () => {
+    // `x ''''a`: MediaWiki sees `x '` before the `'''`, a single-letter word.
+    const runs = formatting("x ''''a bc'''d '''e ''f");
+    expect(runs[0]).toMatchObject({ mode: "italic", leadingLiterals: 2 });
+    expect(runs[1].mode).toBe("bold");
+  });
+});
