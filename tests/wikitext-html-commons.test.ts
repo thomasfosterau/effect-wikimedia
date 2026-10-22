@@ -48,7 +48,7 @@ const fetch: typeof globalThis.fetch = async (input, init) => {
       headers: { "content-type": "text/html; charset=utf-8" },
     });
   }
-  if (url.includes("/w/rest.php/v1/page/Douglas_Adams")) {
+  if (url.includes("/w/rest.php/v1/page/Douglas_Adams/bare")) {
     return Response.json(fixtures.restPageMetadata);
   }
   return new Response("not found", { status: 404 });

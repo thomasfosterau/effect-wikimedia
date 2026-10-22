@@ -65,7 +65,7 @@ const run = <A, E>(
  * MediaWiki's relative-path title forms (`TitleParser`'s
  * `title-invalid-relative`). Unrejected, `.` and `..` are removed by
  * `new URL`'s dot-segment normalisation: `getPageMetadata("..")` requests
- * `/w/rest.php/v1/` and `getParsedHtml(".")` requests `/w/rest.php/v1/page/html`.
+ * `/w/rest.php/v1/bare` and `getParsedHtml(".")` requests `/w/rest.php/v1/page/html`.
  */
 const RELATIVE_TITLES = [
   ".",
@@ -115,7 +115,7 @@ describe("Rest.getPageMetadata", () => {
       latestTimestamp: "2024-01-01T00:00:00Z",
       licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     });
-    expect(urls[0]).toContain("/w/rest.php/v1/page/Douglas_Adams");
+    expect(new URL(urls[0] ?? "").pathname).toBe("/w/rest.php/v1/page/Douglas_Adams/bare");
   });
 
   it("fails with RequestFailed on a REST 404 rather than decoding a synthetic empty page", async () => {
@@ -162,9 +162,9 @@ describe("Rest.getPageMetadata", () => {
     await requestBoth("A.B");
     await requestBoth("...");
     expect(urls.map((url) => new URL(url).pathname)).toEqual([
-      "/w/rest.php/v1/page/A.B",
+      "/w/rest.php/v1/page/A.B/bare",
       "/w/rest.php/v1/page/A.B/html",
-      "/w/rest.php/v1/page/...",
+      "/w/rest.php/v1/page/.../bare",
       "/w/rest.php/v1/page/.../html",
     ]);
   });
@@ -192,7 +192,7 @@ describe("Rest.getPageMetadata", () => {
       Core.RequestFailed,
     );
     expect(urls.map((url) => new URL(url).pathname)).toEqual([
-      "/w/rest.php/v1/page/Smile_%F0%9F%98%80",
+      "/w/rest.php/v1/page/Smile_%F0%9F%98%80/bare",
       "/w/rest.php/v1/page/Smile_%F0%9F%98%80/html",
     ]);
   });
@@ -200,8 +200,8 @@ describe("Rest.getPageMetadata", () => {
 
 describe("Rest.getRevisionMetadata", () => {
   it("extracts revision identity metadata", async () => {
-    const { layer } = stubRouter({
-      "/revision/987654": {
+    const { urls, layer } = stubRouter({
+      "/revision/987654/bare": {
         status: 200,
         body: {
           id: 987654,
@@ -225,6 +225,8 @@ describe("Rest.getRevisionMetadata", () => {
       contentModel: "wikitext",
       licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     });
+    // The metadata-only variant, without the revision's wikitext (#148).
+    expect(new URL(urls[0] ?? "").pathname).toBe("/w/rest.php/v1/revision/987654/bare");
   });
 
   it("rejects a non-positive revision id before any request", async () => {

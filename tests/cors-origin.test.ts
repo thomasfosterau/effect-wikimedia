@@ -160,8 +160,8 @@ describe("REST and WDQS requests", () => {
       ),
     );
     expect(urls.map((url) => url.pathname)).toEqual([
-      "/w/rest.php/v1/page/Douglas_Adams",
-      "/w/rest.php/v1/revision/1",
+      "/w/rest.php/v1/page/Douglas_Adams/bare",
+      "/w/rest.php/v1/revision/1/bare",
       "/w/rest.php/v1/page/Douglas_Adams/html",
       "/w/rest.php/v1/revision/1/html",
       Sparql.WDQS_PATH,
