@@ -489,15 +489,26 @@ export const search = Effect.fn("Action.search")(function* (
 
 // ── Parse (action=parse) ─────────────────────────────────────────────────
 
+/**
+ * One `tocdata` section: Parsoid's `SectionMetadata` as MediaWiki's JSON
+ * codec writes it, which leaves out a field at its default (an empty string,
+ * `0` or `-1`).
+ */
 const ParseSection = Schema.Struct({
   /** The heading's nesting depth in the table of contents; not read. */
-  toclevel: Schema.optional(Schema.Unknown),
-  /** The heading level, as a numeric string (`"2"` for `== x ==`). */
-  level: Schema.optional(Schema.Unknown),
+  tocLevel: Schema.optional(Schema.Unknown),
+  /** The heading level, as a number (`2` for `== x ==`). */
+  hLevel: Schema.optional(Schema.Unknown),
   /** The heading's text, as HTML. */
   line: Schema.optional(Schema.Unknown),
   /** The heading's fragment ID. */
   anchor: Schema.optional(Schema.Unknown),
+});
+
+/** The `tocdata` table of contents, from `prop=tocdata`. */
+const ParseTocData = Schema.Struct({
+  /** The page's section headings, in document order. */
+  sections: Schema.optional(Schema.Array(ParseSection)),
 });
 
 /** A link/category/template entry keyed by the wikitext `"*"` (page-title) convention. */
@@ -511,8 +522,11 @@ const ParseResult = Schema.Struct({
   title: Schema.optional(Schema.Unknown),
   /** The parsed page's ID. */
   pageid: Schema.optional(Schema.Unknown),
-  /** The page's section headings, in document order. */
-  sections: Schema.optional(Schema.Array(ParseSection)),
+  /**
+   * The page's table of contents (`prop=tocdata`, which replaced
+   * `prop=sections`, deprecated in MediaWiki 1.46).
+   */
+  tocdata: Schema.optional(ParseTocData),
   /** The wiki pages the page links to. */
   links: Schema.optional(Schema.Array(TitledEntry)),
   /** The categories the page is in. */
@@ -542,7 +556,7 @@ export interface ParsedSection {
   /**
    * The heading's level: the number of `=` around it in wikitext, so `2` for
    * `== Life ==`, or the `<hN>` number of an HTML heading. `null` unless the
-   * response's `level` is a number, or a numeric string, from 0 to 20; a
+   * response's `hLevel` is a number, or a numeric string, from 0 to 20; a
    * fraction is truncated, and an empty string reads as `0`.
    */
   readonly level: number | null;
@@ -633,12 +647,12 @@ export function normaliseParse(response: ParseResponse, title: string): ParsedPa
   if (parsed === undefined) return null;
   const sections = Arr.take(
     Arr.getSomes(
-      Arr.map(parsed.sections ?? [], (section) =>
+      Arr.map(parsed.tocdata?.sections ?? [], (section) =>
         Option.map(
           Option.fromNullOr(sanitiseText(section.line)),
           (sectionTitle): ParsedSection => ({
             level: toNonNegativeInt(
-              Predicate.isString(section.level) ? Number(section.level) : section.level,
+              Predicate.isString(section.hLevel) ? Number(section.hLevel) : section.hLevel,
               20,
             ),
             title: sectionTitle,
@@ -660,8 +674,9 @@ export function normaliseParse(response: ParseResponse, title: string): ParsedPa
 }
 
 /**
- * Parses a page via `action=parse`, returning its section outline, outgoing
- * links, categories, and transcluded templates. Returns `null` when the
+ * Parses a page via `action=parse` (`prop=tocdata|links|categories|templates`),
+ * returning its section outline, outgoing links, categories, and transcluded
+ * templates. Returns `null` when the
  * page does not exist upstream (the endpoint answers an `error` body with
  * no `parse` key, which decodes cleanly under the lenient schema).
  */
@@ -673,7 +688,7 @@ export const parsePage = Effect.fn("Action.parsePage")(function* (
   const validTitle = yield* requireTitle(title);
   const client = yield* WikimediaClient;
   const response = yield* client.getJson(
-    actionRequest(host, "parse", { page: validTitle, prop: "sections|links|categories|templates" }),
+    actionRequest(host, "parse", { page: validTitle, prop: "tocdata|links|categories|templates" }),
     ParseResponse,
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
