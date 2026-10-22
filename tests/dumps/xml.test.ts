@@ -310,7 +310,51 @@ describe("pageRecords pipeline", () => {
     const error = records[0];
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.detail).toContain("exceeds");
+    expect(error.detail).toBe("revision field exceeds the 16777216-code-unit cap");
+  });
+
+  it("counts the cap in UTF-16 code units of the escaped text, not bytes (#155)", async () => {
+    const revisionWith = (text: string) =>
+      "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
+      `<revision><id>10</id><text>${text}</text></revision></page></mediawiki>`;
+    // 16,777,216 code units of 3-byte UTF-8 (50 MB) is within the cap.
+    const atCap = await collect(Dumps.pageRecords(bytesOf(revisionWith("€".repeat(16_777_216)))));
+    expect(atCap.map((r) => r._tag)).toEqual(["revision"]);
+    // 3,355,444 `&amp;` decode to that many characters but are 16,777,220 escaped code units.
+    const escaped = await collect(
+      Dumps.pageRecords(bytesOf(revisionWith("&amp;".repeat(3_355_444)))),
+    );
+    expect(escaped.map((r) => r._tag)).toEqual(["error"]);
+  });
+
+  describe("a multi-slot revision (export schema 0.11) (#154)", () => {
+    const multiSlot = (extraSlotText: string) =>
+      "<mediawiki><page><title>File:T.jpg</title><ns>6</ns><id>1</id><revision><id>5</id>\n" +
+      '<model>wikitext</model><format>text/x-wiki</format><text bytes="4">main</text>\n' +
+      "<content><role>mediainfo</role><origin>5</origin><model>wikibase-mediainfo</model>\n" +
+      `<format>application/json</format><text bytes="2">${extraSlotText}</text></content>\n` +
+      "<sha1>x</sha1></revision></page></mediawiki>";
+
+    it("reads model, format and text from the main slot (the issue's repro)", async () => {
+      const records = await collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
+      expect(records.map((r) => r._tag)).toEqual(["revision"]);
+      const hit = records[0];
+      if (hit?._tag !== "revision") return expect.unreachable("expected revision");
+      expect(hit.revision).toMatchObject({
+        id: 5,
+        model: "wikitext",
+        format: "text/x-wiki",
+        text: "main",
+        sha1: "x",
+      });
+    });
+
+    it("doesn't count another slot's text towards the field cap", async () => {
+      const records = await collect(
+        Dumps.pageRecords(bytesOf(multiSlot("z".repeat(17 * 1024 * 1024)))),
+      );
+      expect(records.map((r) => r._tag)).toEqual(["revision"]);
+    });
   });
 
   it("onlyRevisions drops the error elements", async () => {
