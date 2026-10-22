@@ -82,7 +82,8 @@ export class LookupFailed extends Schema.TaggedError<LookupFailed>()("LookupFail
    * A human-readable account of the failure, for logs rather than parsing.
    * It is the `description` of the underlying `Core.RequestFailed`, or a
    * sentence naming a `Core.RateLimited` that outlasted the client's
-   * retries (with the seconds the server asked to wait) or an unexpected
+   * retries or asked for a longer wait than they allow (with the seconds
+   * the server asked to wait) or an unexpected
    * `Core.InvalidRequest` (with its `kind` and `value`). The underlying
    * error's tag and fields are not kept separately.
    */
