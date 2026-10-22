@@ -173,6 +173,26 @@ describe("decompression stages", () => {
     );
     expect(decodeUtf8(bytes)).toBe(DUMP);
   });
+
+  // A stage that errors in a later tick, after its output has ended, once the
+  // stream has completed and nothing listens any more (#139).
+  const lateErroringStage = (): PassThrough => {
+    const stage = new PassThrough();
+    stage.once("end", () =>
+      setImmediate(() => stage.emit("error", new FakeFailure({ message: "late error" }))),
+    );
+    return stage;
+  };
+
+  it("survives a decompressWith stage that errors after its output ended", async () => {
+    await withoutUncaught(async () => {
+      const source = Dumps.fromNodeReadable(() => Readable.from([Buffer.from(DUMP)]));
+      const bytes = await runTest(
+        Stream.runCollect(source.pipe(Dumps.decompressWith(lateErroringStage))),
+      );
+      expect(decodeUtf8(bytes)).toBe(DUMP);
+    });
+  });
 });
 
 // ── bzip2 through a classic stream (#128) ────────────────────────────────
