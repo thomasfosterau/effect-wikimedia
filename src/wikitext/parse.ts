@@ -108,6 +108,20 @@ interface SessionState {
    * built on the first table scan that needs it.
    */
   nestedEnds: BracketEnds | undefined;
+  /** The last search for each closing delimiter (see {@link nextClose}), keyed by delimiter. */
+  readonly closes: MutableHashMap.MutableHashMap<string, CloseSearch>;
+}
+
+/** A match of a closing delimiter in the source: where it starts, and its length. */
+interface CloseMatch {
+  readonly index: number;
+  readonly length: number;
+}
+
+/** One {@link nextClose} search: the offset it ran from, and its first match (if any). */
+interface CloseSearch {
+  readonly from: number;
+  readonly match: CloseMatch | undefined;
 }
 
 /** The per-parse state, provided to the grammar through the parse context. */
@@ -148,6 +162,60 @@ function memoFailure<A>(
     return a;
   });
 }
+
+/**
+ * The first match of a closing delimiter at or after `from` anywhere in the
+ * source (not only the current region), found by `search`, which must
+ * return the leftmost match at or after the offset it is given. The last
+ * search per `key` is remembered: its match is also the first one for any
+ * later offset up to that match (or, with no match, any later offset at
+ * all), so a run of unclosed openers (`<!--`, `<ref>`, `{|`) costs one scan
+ * of the source rather than one per opener (#152, #159).
+ */
+function nextClose(
+  state: State,
+  key: string,
+  from: number,
+  search: (from: number) => CloseMatch | undefined,
+): CloseMatch | undefined {
+  const closes = session(state).closes;
+  const last = Option.getOrUndefined(MutableHashMap.get(closes, key));
+  if (
+    last !== undefined &&
+    last.from <= from &&
+    (last.match === undefined || from <= last.match.index)
+  ) {
+    return last.match;
+  }
+  const match = search(from);
+  MutableHashMap.set(closes, key, { from, match });
+  return match;
+}
+
+/** {@link nextClose} for a fixed string. */
+function nextLiteral(state: State, needle: string, from: number): CloseMatch | undefined {
+  return nextClose(state, needle, from, (at) => {
+    const index = state.input.indexOf(needle, at);
+    return index < 0 ? undefined : { index, length: needle.length };
+  });
+}
+
+/** Whether `match` lies wholly within the current region. */
+const endsInRegion = (state: State, match: CloseMatch | undefined): match is CloseMatch =>
+  match !== undefined && match.index + match.length <= state.end;
+
+/**
+ * Succeeds, consuming nothing, when `close` occurs in the rest of the
+ * region, and fails otherwise. A construct that can only end at `close`
+ * checks this first, so a run of unclosed openers fails each at once
+ * instead of scanning the rest of the input each (#159).
+ */
+const canClose = (close: string): WikiParser<void> =>
+  Parser.make((state) =>
+    endsInRegion(state, nextLiteral(state, close, state.pos))
+      ? undefined
+      : state.backtrack("Verify"),
+  );
 
 /** Runs `self` one nesting level deeper (see {@link MAX_DEPTH}). */
 function nested<A>(self: WikiParser<A>): WikiParser<A> {
@@ -313,12 +381,13 @@ const argument: WikiParser<Argument> = memoFailure(
     Parser.withSpan(
       Parser.seq(
         literal("{{{"),
+        canClose("}}}"),
         argumentName,
         Parser.optional(Parser.preceded(pipe, argumentDefault)),
         literal("}}}"),
       ),
     ),
-    ([[, name, def], span]): Argument => ({ _tag: "Argument", span, name, default: def }),
+    ([[, , name, def], span]): Argument => ({ _tag: "Argument", span, name, default: def }),
   ),
 );
 
@@ -334,12 +403,13 @@ const template: WikiParser<Template> = memoFailure(
     Parser.withSpan(
       Parser.seq(
         literal("{{"),
+        canClose("}}"),
         templatePart,
         Parser.repeat(Parser.preceded(pipe, param)),
         literal("}}"),
       ),
     ),
-    ([[, name, params], span]): Template => ({ _tag: "Template", span, name, params }),
+    ([[, , name, params], span]): Template => ({ _tag: "Template", span, name, params }),
   ),
 );
 
@@ -592,9 +662,17 @@ const table: WikiParser<Table> = memoFailure(
   Open.Table,
   Parser.map(
     Parser.withSpan(
-      Parser.seq(lineStart, literal("{|"), markerLine, Parser.repeat(tableItem), literal("|}")),
+      Parser.seq(
+        lineStart,
+        literal("{|"),
+        // A table closes only on a line starting `|}`.
+        canClose("\n|}"),
+        markerLine,
+        Parser.repeat(tableItem),
+        literal("|}"),
+      ),
     ),
-    ([[, , open, items], span]): Table => ({
+    ([[, , , open, items], span]): Table => ({
       _tag: "Table",
       span,
       open,
@@ -611,12 +689,13 @@ const wikilink: WikiParser<Wikilink> = memoFailure(
     Parser.withSpan(
       Parser.seq(
         literal("[["),
+        canClose("]]"),
         linkPart,
         Parser.repeat(Parser.preceded(pipe, linkPart)),
         literal("]]"),
       ),
     ),
-    ([[, target, segments], span]): Wikilink => ({ _tag: "Wikilink", span, target, segments }),
+    ([[, , target, segments], span]): Wikilink => ({ _tag: "Wikilink", span, target, segments }),
   ),
 );
 
@@ -770,15 +849,26 @@ const autoLink: WikiParser<AutoLink> = Parser.make((state) => {
 
 // ── angle brackets: comments and tags ─────────────────────────────────
 
+/**
+ * A comment's body and its `-->`, when the first `-->` after the cursor ends
+ * within the region; fails otherwise. The search is {@link nextClose}'s, so
+ * a run of unclosed `<!--` in table cells scans the rest of the source once
+ * (#152).
+ */
+const commentBody: WikiParser<string> = Parser.make((state) => {
+  const close = nextLiteral(state, "-->", state.pos);
+  if (!endsInRegion(state, close)) return state.backtrack("TakeUntil");
+  const body = state.slice(state.pos, close.index);
+  state.pos = close.index + close.length;
+  return body;
+});
+
 const comment: WikiParser<Comment> = Parser.map(
   Parser.withSpan(
     Parser.preceded(
       literal("<!--"),
       Parser.alt(
-        Parser.map(Parser.terminated(Token.takeUntil("-->"), literal("-->")), (body) => ({
-          body,
-          closed: true,
-        })),
+        Parser.map(commentBody, (body) => ({ body, closed: true })),
         // Unclosed within the current region: absorb the rest (MediaWiki).
         Parser.map(Token.rest, (body) => ({ body, closed: false })),
       ),
@@ -818,7 +908,8 @@ const closeTags = MutableHashMap.empty<
 /**
  * An extension tag's raw body and its close tag (`</name>`, any case,
  * optional whitespace before the `>`), memoised per tag name. Fails when no
- * close tag ends within the region.
+ * close tag ends within the region. The search is {@link nextClose}'s, so a
+ * run of unclosed `<ref>` scans the rest of the source once (#152).
  */
 function extensionBody(name: string): WikiParser<readonly [string, string]> {
   return Option.getOrElse(MutableHashMap.get(closeTags, name), () => {
@@ -830,13 +921,17 @@ function extensionBody(name: string): WikiParser<readonly [string, string]> {
 
 function closeTagParser(name: string): WikiParser<readonly [string, string]> {
   const re = new RegExp(`</${name}\\s*>`, "ig");
+  const search = (input: string, from: number): CloseMatch | undefined => {
+    re.lastIndex = from;
+    const m = re.exec(input);
+    return m === null ? undefined : { index: m.index, length: m[0].length };
+  };
   return Parser.make((state) => {
-    re.lastIndex = state.pos;
-    const m = re.exec(state.input);
-    if (m === null || m.index + m[0].length > state.end) return state.backtrack("TakeUntil");
-    const rawContent = state.slice(state.pos, m.index);
-    state.pos = m.index + m[0].length;
-    return [rawContent, m[0]] as const;
+    const close = nextClose(state, `</${name}`, state.pos, (from) => search(state.input, from));
+    if (!endsInRegion(state, close)) return state.backtrack("TakeUntil");
+    const rawContent = state.slice(state.pos, close.index);
+    state.pos = close.index + close.length;
+    return [rawContent, state.slice(close.index, state.pos)] as const;
   });
 }
 
@@ -1021,6 +1116,7 @@ export function parse(source: string): Document {
       failed: MutableHashSet.empty<number>(),
       depth: 0,
       nestedEnds: undefined,
+      closes: MutableHashMap.empty<string, CloseSearch>(),
     }),
   });
   const children = document.step(state);
