@@ -159,9 +159,11 @@ export interface Formatting {
   /**
    * What the run toggles once its literal apostrophes are set aside: `''`
    * italic, `'''` bold, `'''''` both. Resolved per source line within the
-   * fragment: when a line has an odd number of bold runs, one `'''` is read
-   * as `'` + `''`. MediaWiki does this only when the line's italic count is
-   * odd too.
+   * fragment, as MediaWiki's `doQuotes` does: when a line has an odd
+   * number of bold runs and an odd number of italic runs (`'''''` counting
+   * as one of each), one `'''` is read as `'` + `''`, preferring one after a
+   * single-letter word, then one after a longer word or at the line start,
+   * then one after a space.
    */
   readonly mode: "italic" | "bold" | "bold-italic";
   /**
