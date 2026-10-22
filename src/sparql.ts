@@ -152,8 +152,8 @@ export interface UnknownTerm {
    */
   readonly _tag: "unknown";
   /**
-   * The raw term's `type`, copied whole: not trimmed or length-capped
-   * (#150). `null` when it is absent or not a string.
+   * The raw term's `type`, cut at 200 UTF-16 code units but not trimmed;
+   * `null` when it is absent or not a string.
    */
   readonly type: string | null;
   /**
@@ -263,9 +263,8 @@ export const SparqlResultsResponse = Schema.Struct({
   ),
   /**
    * An `ASK` query's answer, `true` or `false`, which the response carries in
-   * place of `results`; not read. {@link normaliseResults} ignores it, so an
-   * `ASK` through {@link query} yields empty `vars` and `bindings` whatever
-   * the answer (#149).
+   * place of `results`; {@link normaliseResults} reads it into
+   * {@link SparqlResults.boolean}.
    */
   boolean: Schema.optional(Schema.Unknown),
 });
@@ -274,7 +273,7 @@ export type SparqlResultsResponse = typeof SparqlResultsResponse.Type;
 /** One decoded result row — variable name → typed term. */
 export type SparqlBinding = Readonly<Record<string, SparqlTerm>>;
 
-/** A decoded SPARQL SELECT result set. */
+/** A decoded SPARQL result: a `SELECT` query's rows, or an `ASK` query's answer. */
 export interface SparqlResults {
   /**
    * The `SELECT` variable names as the server sent them, in its order (the
@@ -283,13 +282,24 @@ export interface SparqlResults {
    * the response has no `head.vars`.
    */
   readonly vars: readonly string[];
-  /** The result rows; each maps a (possibly-partial) subset of `vars` to a term. */
+  /**
+   * The result rows; each maps a (possibly-partial) subset of `vars` to a
+   * term. Empty for an `ASK` query.
+   */
   readonly bindings: readonly SparqlBinding[];
+  /**
+   * An `ASK` query's answer; `null` for any other query, that is, when the
+   * response's top-level `boolean` is absent or not a boolean.
+   */
+  readonly boolean: boolean | null;
 }
 
 // ── Normalisers ──────────────────────────────────────────────────────────
 
 const MAX_TERM_LENGTH = 10_000;
+
+/** Upper bound on an unrecognised term's `type` ({@link UnknownTerm.type}). */
+const MAX_UNKNOWN_TYPE_LENGTH = 200;
 
 function boundedValue(value: unknown): string | null {
   if (!Predicate.isString(value)) return null;
@@ -313,7 +323,7 @@ export function normaliseTerm(raw: RawTerm): SparqlTerm {
       kind: literalKind(datatype, language),
     };
   }
-  return { _tag: "unknown", type, value };
+  return { _tag: "unknown", type: type?.slice(0, MAX_UNKNOWN_TYPE_LENGTH) ?? null, value };
 }
 
 /** Normalises a SPARQL JSON results envelope into typed {@link SparqlResults}. */
@@ -326,7 +336,8 @@ export function normaliseResults(response: SparqlResultsResponse): SparqlResults
   const bindings = Arr.map(response.results?.bindings ?? [], (row): SparqlBinding =>
     Rec.map(row, normaliseTerm),
   );
-  return { vars, bindings };
+  const answer = Predicate.isBoolean(response.boolean) ? response.boolean : null;
+  return { vars, bindings, boolean: answer };
 }
 
 // ── Query ────────────────────────────────────────────────────────────────
@@ -340,7 +351,8 @@ export interface QueryOptions {
    * Allow a query with no `LIMIT` clause. Off by default — the whole point of
    * the helper is to make an unbounded query a deliberate, visible choice (set
    * this only for a query that is intrinsically bounded, e.g. a single `VALUES`
-   * block; an `ASK` answer is not read yet, #149). See {@link hasLimitClause}.
+   * block or an `ASK`, whose answer is {@link SparqlResults.boolean}). See
+   * {@link hasLimitClause}.
    */
   readonly allowUnbounded?: boolean;
   /** The WDQS host. Defaults to {@link WDQS_HOST}. */
@@ -349,7 +361,7 @@ export interface QueryOptions {
 
 /**
  * Runs a SPARQL query against WDQS and decodes the JSON results into typed
- * terms. Enforces the LIMIT discipline: unless `allowUnbounded` is set, a
+ * terms, or, for an `ASK`, its answer ({@link SparqlResults.boolean}). Enforces the LIMIT discipline: unless `allowUnbounded` is set, a
  * query with no `LIMIT` clause fails {@link InvalidRequest} before
  * any request is made. The query text is sent as a percent-encoded query
  * parameter (never interpolated into the path), over the shared client's UA

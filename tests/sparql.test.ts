@@ -194,4 +194,30 @@ describe("Sparql.normaliseTerm", () => {
     expect(term._tag).toBe("unknown");
     expect(term).toMatchObject({ _tag: "unknown", type: "triple" });
   });
+
+  it("cuts an unrecognised type at 200 UTF-16 code units (#150)", () => {
+    const term = Sparql.normaliseTerm({ type: "z".repeat(20_000) });
+    expect(term).toEqual({ _tag: "unknown", type: "z".repeat(200), value: null });
+    expect(Sparql.normaliseTerm({ type: 5 })).toEqual({ _tag: "unknown", type: null, value: null });
+  });
+});
+
+// ── ASK ──────────────────────────────────────────────────────────────────
+
+describe("Sparql.query — ASK (#149)", () => {
+  // The SPARQL 1.1 Query Results JSON Format's ASK form.
+  it.each([true, false])("carries an ASK answer of %s through", async (answer) => {
+    const { layer } = stubWdqs({ head: {}, boolean: answer });
+    const results = await run(
+      layer,
+      Sparql.query("ASK { wd:Q42 wdt:P31 wd:Q5 }", { allowUnbounded: true }),
+    );
+    expect(results).toEqual({ vars: [], bindings: [], boolean: answer });
+  });
+
+  it("reports no answer for a SELECT, or a boolean that is not one", async () => {
+    const { results } = await decodeFixture();
+    expect(results.boolean).toBeNull();
+    expect(Sparql.normaliseResults({ head: {}, boolean: "true" }).boolean).toBeNull();
+  });
 });
