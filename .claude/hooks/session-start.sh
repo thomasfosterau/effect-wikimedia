@@ -4,9 +4,9 @@
 #
 # The Claude Code SessionStart hook (see .claude/settings.json). Copied in
 # shape from `thomasfosterau/effect-drizzle-ext`, the shared library standard,
-# minus the tools this single-package repo does not carry (tsx). fallow is a
-# devDependency here, but it runs only as `vp run fallow`, and `vp run` puts
-# `node_modules/.bin` on PATH itself, so this script provisions nothing for it.
+# minus the tools this single-package repo does not carry (tsx). `fallow` is
+# linked because the PreToolUse fallow gate (`.claude/hooks/fallow-gate.sh`)
+# runs it bare before every agent `git commit` / `git push`, outside `vp run`.
 #
 # ## The problem it solves
 #
@@ -102,8 +102,22 @@ SHIM
     || { rm -f "$dest.tmp" 2>/dev/null; log "could not write vp shim"; }
 }
 
-# ── 1. `vp` for the non-interactive shell ────────────────────────────────────
+# Link a binary into ~/.local/bin, replacing a stale link but never a real file.
+link_tool() {
+  src="$1"
+  name="$(basename "$src")"
+  dest="$LOCAL_BIN/$name"
+  [ -x "$src" ] || return 0
+  # Leave a real (non-symlink) binary alone: something deliberately installed it.
+  if [ -e "$dest" ] && [ ! -L "$dest" ]; then
+    return 0
+  fi
+  ln -sfn "$src" "$dest" 2>/dev/null || log "could not link $name"
+}
+
+# ── 1. `vp` and `fallow` for the non-interactive shell ───────────────────────
 write_vp_shim
+link_tool "$PROJECT_DIR/node_modules/.bin/fallow"
 
 # Where the harness persists session environment (Claude Code on the web),
 # put the shim directory and the repo's own bins on PATH for every later tool
@@ -144,13 +158,16 @@ fi
 # exactly the tree CI will verify.
 if [ -f "$PROJECT_DIR/pnpm-lock.yaml" ]; then
   log "syncing dependencies against the lockfile…"
-  (cd "$PROJECT_DIR" && vp install --frozen-lockfile >/dev/null 2>&1) \
+  # pnpm through corepack where it exists, so the `packageManager` pin decides
+  # the pnpm version; a bare pnpm otherwise.
+  (command -v corepack >/dev/null 2>&1 && cd "$PROJECT_DIR" && corepack pnpm install --frozen-lockfile >/dev/null 2>&1) \
     || (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile >/dev/null 2>&1) \
-    || (cd "$PROJECT_DIR" && corepack pnpm install --frozen-lockfile >/dev/null 2>&1) \
     || log "dependency install failed; continuing"
-  # node_modules/vite-plus only exists after the install, so re-run the shim
-  # write in case the first pass found nothing to point at.
+  # node_modules/vite-plus and node_modules/.bin only exist after the install,
+  # so re-run the shim write and the link in case the first pass found nothing
+  # to point at.
   write_vp_shim
+  link_tool "$PROJECT_DIR/node_modules/.bin/fallow"
 fi
 
 exit 0

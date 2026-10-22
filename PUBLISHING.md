@@ -1,4 +1,4 @@
-# Releasing
+# Publishing
 
 Releases are automated with [Changesets](https://github.com/changesets/changesets) and the **Release** GitHub workflow (`.github/workflows/release.yml`), and published to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) — there is no `NPM_TOKEN`. One package is published from this repository: `@thomasfosterau/effect-wikimedia`. The pipeline is the shared library standard, copied from `thomasfosterau/effect-jsonapi`.
 
