@@ -34,11 +34,21 @@ import {
 } from "node:stream";
 import { createGunzip, gzipSync } from "node:zlib";
 import unbzip2 from "unbzip2-stream";
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from "vite-plus/test";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { Core, Dumps } from "../../src/index.ts";
@@ -54,6 +64,31 @@ const decodeUtf8 = (bytes: ReadonlyArray<Uint8Array>): string =>
   Buffer.concat(bytes.map((b) => Buffer.from(b))).toString("utf8");
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The failure a fake stage, source or fetch body raises; its `message` is what a test asserts on. */
+class FakeFailure extends Schema.TaggedError<FakeFailure>()("FakeFailure", {
+  message: Schema.String,
+}) {}
+
+/**
+ * Starts `effect` on a detached fiber and returns the fiber, for a test that
+ * interrupts it mid-run.
+ */
+const forkTest = <A, E>(effect: Effect.Effect<A, E>): Promise<Fiber.Fiber<A, E>> =>
+  runTest(Effect.forkDetach(effect));
+
+/**
+ * Collects what `process` emits as `event` until the test finishes, when the
+ * listener is removed. The listener makes the test fail on its own (Vitest
+ * would otherwise only fail the run, unattributed).
+ */
+const collectProcessEvents = (event: "uncaughtException" | "unhandledRejection"): unknown[] => {
+  const seen: unknown[] = [];
+  const listener = (reason: unknown) => seen.push(reason);
+  process.on(event, listener);
+  onTestFinished(() => void process.off(event, listener));
+  return seen;
+};
 
 /**
  * Settles as `promise` does, or with `"hung"` after 5 s, and clears the timer
@@ -74,16 +109,10 @@ const orHung = <A>(promise: Promise<A>): Promise<A | "hung"> => {
  * the run, unattributed).
  */
 const withoutUncaught = async (body: () => Promise<void>): Promise<void> => {
-  const uncaught: unknown[] = [];
-  const onUncaught = (error: unknown) => uncaught.push(error);
-  process.on("uncaughtException", onUncaught);
-  try {
-    await body();
-    await wait(20); // let any error event surface
-    expect(uncaught).toEqual([]);
-  } finally {
-    process.off("uncaughtException", onUncaught);
-  }
+  const uncaught = collectProcessEvents("uncaughtException");
+  await body();
+  await wait(20); // let any error event surface
+  expect(uncaught).toEqual([]);
 };
 
 // ── File source + decompression ──────────────────────────────────────────
@@ -237,7 +266,7 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
         Stream.runCollect(
           Stream.fromIterable(chunks).pipe(
             Dumps.decompressWith(() => stage),
-            Stream.tap(() => Effect.promise(() => wait(0))),
+            Stream.tap(() => Effect.tryPromise(() => wait(0))),
           ),
         ),
       ),
@@ -268,7 +297,7 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
    * (its types claim a `Transform`), so it is cast to the decompressor type.
    */
   const classicStream = (
-    write: (this: LegacyStream) => unknown,
+    write: (this: LegacyStream) => void,
   ): LegacyStream & { readable: boolean; writable: boolean } & Dumps.NodeDuplexLike => {
     const stream = Object.assign(new LegacyStream(), {
       readable: true,
@@ -287,7 +316,7 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
 
   it("fails with a SourceError when a classic stage's write() throws", async () => {
     const stage = classicStream(() => {
-      throw new Error("write exploded");
+      throw new FakeFailure({ message: "write exploded" });
     });
     const error = await failsPromptly(
       Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
@@ -372,9 +401,9 @@ const fakeDuplex = (): Dumps.NodeDuplexLike => ({
  * bound it; racing a timer turns a regression into a prompt failure instead
  * of a test timeout.
  */
-const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<E> => {
+const failsPromptly = async <A, E>(stream: Stream.Stream<A, E>): Promise<Dumps.SourceError> => {
   const outcome = await orHung(runTestExit(Stream.runDrain(stream)));
-  if (outcome === "hung") throw new Error("the stream hung instead of failing");
+  if (outcome === "hung") return expect.unreachable("the stream hung instead of failing");
   return expectFailureInstanceOf(outcome, Dumps.SourceError);
 };
 
@@ -419,17 +448,11 @@ describe("a decompressor that is not a Node stream", () => {
     // so cancelling it rejects; that rejection must not escape. The listener
     // makes this test fail on its own (Vitest would otherwise only fail the
     // run, unattributed).
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => unhandled.push(reason);
-    process.on("unhandledRejection", onUnhandled);
-    try {
-      const error = await failsPromptly(Stream.fail("boom").pipe(Dumps.decompressWith(fakeDuplex)));
-      expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
-      await wait(20); // let any rejection surface
-      expect(unhandled).toEqual([]);
-    } finally {
-      process.off("unhandledRejection", onUnhandled);
-    }
+    const unhandled = collectProcessEvents("unhandledRejection");
+    const error = await failsPromptly(Stream.fail("boom").pipe(Dumps.decompressWith(fakeDuplex)));
+    expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
+    await wait(20); // let any rejection surface
+    expect(unhandled).toEqual([]);
   });
 });
 
@@ -497,25 +520,22 @@ describe("a decompressor that returns a used stream", () => {
           (context): context is ReadStream =>
             context instanceof ReadStream && context.path === path,
         );
-      try {
-        await withoutUncaught(async () => {
-          const error = await failsPromptly(Dumps.fromFile(path, { decompressor: () => stage }));
-          await wait(0); // let any `_construct` tick run
-          const closed = opened().map((file) =>
-            file.closed
-              ? Promise.resolve("closed" as const)
-              : new Promise<"closed">((resolve) => file.once("close", () => resolve("closed"))),
-          );
-          expect(await orHung(Promise.all(closed))).not.toBe("hung");
-          // Rejected before the file is opened at all.
-          expect(opened()).toEqual([]);
-          expect(error).toMatchObject({
-            description: expect.stringContaining("fresh Node stream"),
-          });
+      onTestFinished(() => construct.mockRestore());
+      await withoutUncaught(async () => {
+        const error = await failsPromptly(Dumps.fromFile(path, { decompressor: () => stage }));
+        await wait(0); // let any `_construct` tick run
+        const closed = opened().map((file) =>
+          file.closed
+            ? Promise.resolve("closed" as const)
+            : new Promise<"closed">((resolve) => file.once("close", () => resolve("closed"))),
+        );
+        expect(await orHung(Promise.all(closed))).not.toBe("hung");
+        // Rejected before the file is opened at all.
+        expect(opened()).toEqual([]);
+        expect(error).toMatchObject({
+          description: expect.stringContaining("fresh Node stream"),
         });
-      } finally {
-        construct.mockRestore();
-      }
+      });
     },
   );
 });
@@ -545,7 +565,7 @@ describe("interruption teardown", () => {
         Stream.splitLines,
       ),
     );
-    const fiber = Effect.runFork(program);
+    const fiber = await forkTest(program);
     await wait(120);
     await runTest(Fiber.interrupt(fiber));
     await wait(60);
@@ -557,9 +577,13 @@ describe("interruption teardown", () => {
    * `read()`. Node's async iterator calls `read()` from inside `next()`, so
    * once `reading` settles a `next()` is pending that no data will settle.
    */
-  const stalledReadable = (
-    options: { readonly emitClose?: boolean } = {},
-  ): { readonly readable: Readable; readonly reading: Promise<void> } => {
+  interface StalledReadable {
+    /** The Readable, which never pushes. */
+    readonly readable: Readable;
+    /** Settles on the Readable's first `read()`. */
+    readonly reading: Promise<void>;
+  }
+  const stalledReadable = (options: { readonly emitClose?: boolean } = {}): StalledReadable => {
     let onRead = (): void => undefined;
     const reading = new Promise<void>((resolve) => (onRead = resolve));
     return { readable: new Readable({ ...options, read: () => onRead() }), reading };
@@ -569,11 +593,11 @@ describe("interruption teardown", () => {
   // `next()`, so a teardown that waits on `return()` before destroying hangs
   // (#83). Interrupting only once `reading` settles makes the test exercise
   // that pending `next()` rather than pass before the drain reaches it.
-  const interruptsPromptly = async (
-    stream: Stream.Stream<unknown, unknown>,
+  const interruptsPromptly = async <A, E>(
+    stream: Stream.Stream<A, E>,
     reading: Promise<void>,
   ): Promise<void> => {
-    const fiber = Effect.runFork(Stream.runDrain(stream));
+    const fiber = await forkTest(Stream.runDrain(stream));
     expect(await orHung(reading)).toBeUndefined();
     const outcome = await orHung(
       runTest(Fiber.interrupt(fiber)).then(() => "interrupted" as const),
@@ -627,13 +651,7 @@ describe("interruption teardown", () => {
         const context = read.mock.contexts[0];
         return context instanceof ReadStream ? context : undefined;
       };
-      try {
-        await interruptsPromptly(
-          Dumps.fromFile(fifo),
-          reading.then(() => undefined),
-        );
-        expect(stream()?.destroyed).toBe(true);
-      } finally {
+      onTestFinished(async () => {
         const source = stream();
         read.mockRestore();
         // With no writer left the read returns end-of-file and the stream
@@ -645,7 +663,12 @@ describe("interruption teardown", () => {
             : new Promise<"closed">((resolve) => source.once("close", () => resolve("closed")));
         closeSync(writer);
         expect(await orHung(closed)).toBe("closed");
-      }
+      });
+      await interruptsPromptly(
+        Dumps.fromFile(fifo),
+        reading.then(() => undefined),
+      );
+      expect(stream()?.destroyed).toBe(true);
     },
   );
 
@@ -669,39 +692,33 @@ describe("interruption teardown", () => {
     // A source whose `return()` outlives the bound and then rejects: the
     // interrupt has already completed, so the rejection has nowhere to go and
     // must not escape as an unhandled rejection.
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => unhandled.push(reason);
-    process.on("unhandledRejection", onUnhandled);
-    try {
-      let destroyed = false;
-      let rejectReturn: (error: Error) => void = () => undefined;
-      let onRead = (): void => undefined;
-      const reading = new Promise<void>((resolve) => (onRead = resolve));
-      const source: Dumps.NodeReadableLike = {
-        get destroyed() {
-          return destroyed;
+    const unhandled = collectProcessEvents("unhandledRejection");
+    let destroyed = false;
+    let rejectReturn: (error: Error) => void = () => undefined;
+    let onRead = (): void => undefined;
+    const reading = new Promise<void>((resolve) => (onRead = resolve));
+    const source: Dumps.NodeReadableLike = {
+      get destroyed() {
+        return destroyed;
+      },
+      destroy: () => (destroyed = true),
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          onRead();
+          return new Promise<IteratorResult<Uint8Array>>(() => undefined);
         },
-        destroy: () => (destroyed = true),
-        [Symbol.asyncIterator]: () => ({
-          next: () => {
-            onRead();
-            return new Promise<IteratorResult<Uint8Array>>(() => undefined);
-          },
-          return: () =>
-            new Promise<IteratorResult<Uint8Array>>((_, reject) => (rejectReturn = reject)),
-        }),
-      };
-      await interruptsPromptly(
-        Dumps.fromNodeReadable(() => source),
-        reading,
-      );
-      expect(destroyed).toBe(true);
-      rejectReturn(new Error("closed too late"));
-      await wait(20); // let any rejection surface
-      expect(unhandled).toEqual([]);
-    } finally {
-      process.off("unhandledRejection", onUnhandled);
-    }
+        return: () =>
+          new Promise<IteratorResult<Uint8Array>>((_, reject) => (rejectReturn = reject)),
+      }),
+    };
+    await interruptsPromptly(
+      Dumps.fromNodeReadable(() => source),
+      reading,
+    );
+    expect(destroyed).toBe(true);
+    rejectReturn(new FakeFailure({ message: "closed too late" }));
+    await wait(20); // let any rejection surface
+    expect(unhandled).toEqual([]);
   });
 
   it("destroys the Readable when interrupted before the iterator's return() is registered", async () => {
@@ -751,7 +768,7 @@ describe("interruption teardown", () => {
         return: (value?: unknown) => Promise.resolve({ done: true as const, value }),
       }),
     };
-    const fiber = Effect.runFork(Stream.runDrain(Dumps.fromNodeReadable(() => source)));
+    const fiber = await forkTest(Stream.runDrain(Dumps.fromNodeReadable(() => source)));
     expect(await orHung(thirdPull)).toBeUndefined();
     const exit = await orHung(
       runTest(Fiber.interrupt(fiber).pipe(Effect.andThen(Fiber.await(fiber)))),
@@ -934,7 +951,7 @@ describe("fromHttpRange", () => {
           pull(controller) {
             pulls += 1;
             if (pulls === 1) controller.enqueue(encoder.encode(ALPHABET.slice(0, 10)));
-            else controller.error(new Error("connection reset"));
+            else controller.error(new FakeFailure({ message: "connection reset" }));
           },
         });
         return new Response(body, { status: 206 });
@@ -987,7 +1004,7 @@ describe("fromHttpRange", () => {
           pull(controller) {
             pulls += 1;
             if (pulls === 1) controller.enqueue(encoder.encode(ALPHABET.slice(0, 10)));
-            else controller.error(new Error("connection reset"));
+            else controller.error(new FakeFailure({ message: "connection reset" }));
           },
         });
         return new Response(body, { status: 206 });
@@ -1004,6 +1021,12 @@ describe("fromHttpRange", () => {
     expect(userAgents).toEqual([userAgent, userAgent]);
   });
 
+  /** The `User-Agent` each of the two requests sent, once it has been sent. */
+  interface SentUserAgents {
+    client?: string | null;
+    dumps?: string | null;
+  }
+
   // One program that uses both the client and a dump download: where the
   // reference is provided decides which of the two sees it.
   const bothUserAgents = (
@@ -1011,7 +1034,7 @@ describe("fromHttpRange", () => {
       layer: typeof Core.wikimediaClientLayer,
     ) => Layer.Layer<Core.WikimediaClient, never, HttpClient.HttpClient>,
   ) => {
-    const userAgents: { client?: string | null; dumps?: string | null } = {};
+    const userAgents: SentUserAgents = {};
     const fetch: typeof globalThis.fetch = (input, init) => {
       const request = new Request(input, init);
       const ua = request.headers.get("user-agent");
@@ -1025,13 +1048,12 @@ describe("fromHttpRange", () => {
     const http = FetchHttpClient.layer.pipe(
       Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
     );
-    const program = Effect.gen(function* () {
-      const client = yield* Core.WikimediaClient;
-      yield* client.getText({ host: "en.wikipedia.org", path: "/w/api.php", params: {} });
-      yield* Stream.runCollect(Dumps.fromHttpRange("https://dumps.example.org/x.gz"));
-    });
     return runTest(
-      program.pipe(
+      Effect.gen(function* () {
+        const client = yield* Core.WikimediaClient;
+        yield* client.getText({ host: "en.wikipedia.org", path: "/w/api.php", params: {} });
+        yield* Stream.runCollect(Dumps.fromHttpRange("https://dumps.example.org/x.gz"));
+      }).pipe(
         Effect.provide(provideUserAgent(Core.wikimediaClientLayer).pipe(Layer.provideMerge(http))),
       ),
     ).then(() => userAgents);
@@ -1059,7 +1081,7 @@ describe("fromHttpRange", () => {
         new Response(
           new ReadableStream<Uint8Array>({
             pull(controller) {
-              controller.error(new Error("always fails"));
+              controller.error(new FakeFailure({ message: "always fails" }));
             },
           }),
           { status: 206 },

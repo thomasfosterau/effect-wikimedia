@@ -34,7 +34,12 @@
  * @module dumps/entities
  */
 
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Str from "effect/String";
 import { decodeEntity, parsePropertyId, type WikidataItem } from "../wikidata.ts";
 
 // ── Record model ─────────────────────────────────────────────────────────
@@ -111,10 +116,13 @@ const MAX_RAW_LENGTH = 500;
  */
 export function stripFraming(line: string): string | null {
   const trimmed = line.trim();
-  if (trimmed.length === 0 || trimmed === "[" || trimmed === "]") return null;
+  if (Str.isEmpty(trimmed) || trimmed === "[" || trimmed === "]") return null;
   const body = trimmed.endsWith(",") ? trimmed.slice(0, -1).trim() : trimmed;
-  return body.length === 0 ? null : body;
+  return Str.isEmpty(body) ? null : body;
 }
+
+/** Parses a line's JSON text; `None` when it is not JSON. */
+const parseJson = Schema.decodeOption(Schema.fromJsonString(Schema.Unknown));
 
 /** Bounds an offending line for inclusion on a {@link DumpLineError}. */
 function boundRaw(text: string): string {
@@ -134,16 +142,13 @@ function boundRaw(text: string): string {
 export function decodeEntityLine(line: string, lineNumber: number): EntityRecord | null {
   const body = stripFraming(line);
   if (body === null) return null;
-  // Only a throw means the body is not JSON. A `null` return for that case
-  // read a body of `null` as invalid JSON too (#116); branching on the throw
-  // here needs no sentinel and allocates nothing per line.
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
+  // Only a failed parse means the body is not JSON: a body of `null` parses
+  // to `Some(null)`, which the entity check below rejects (#116).
+  const parsed = parseJson(body);
+  if (Option.isNone(parsed)) {
     return { _tag: "error", line: lineNumber, reason: "dumps/invalid-json", raw: boundRaw(body) };
   }
-  const item = decodeEntity(parsed);
+  const item = decodeEntity(parsed.value);
   if (item === null) {
     return { _tag: "error", line: lineNumber, reason: "dumps/not-an-entity", raw: boundRaw(body) };
   }
@@ -176,7 +181,7 @@ export const entityRecords = <E, R>(
   );
 
 /** Refines an {@link EntityRecord} to a successful {@link EntityHit}. */
-const isHit = (record: EntityRecord): record is EntityHit => record._tag === "entity";
+const isHit = (record: EntityRecord): record is EntityHit => Predicate.isTagged(record, "entity");
 
 /**
  * Projects an {@link EntityRecord} stream down to just the successfully
@@ -204,7 +209,7 @@ export function hasClaim(item: WikidataItem, property: string): boolean {
   const validated = parsePropertyId(property);
   if (validated === null) return false;
   const statements = item.claims[validated];
-  return statements !== undefined && statements.length > 0;
+  return statements !== undefined && Arr.isReadonlyArrayNonEmpty(statements);
 }
 
 /** Whether an item has a sitelink to the given wiki (`"enwiki"`, `"commonswiki"`). */

@@ -29,9 +29,11 @@
 import * as Action from "../action.ts";
 import * as Core from "../core.ts";
 import * as Wikidata from "../wikidata.ts";
+import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
 import * as Schema from "effect/Schema";
 import {
   MAX_CANDIDATES,
@@ -136,18 +138,17 @@ export class WikidataLookup extends Context.Service<
  * input error.
  */
 function toLookupFailed(error: Core.WikimediaError): LookupFailed {
-  switch (error._tag) {
-    case "RequestFailed":
-      return new LookupFailed({ description: error.description });
-    case "RateLimited":
-      return new LookupFailed({
-        description: `wikidata rate-limited the request (retry after ${error.retryAfterSeconds}s)`,
-      });
-    case "InvalidRequest":
-      return new LookupFailed({
-        description: `unexpected invalid request building the wikidata query (${error.kind}: ${error.value})`,
-      });
-  }
+  return Match.valueTags(error, {
+    RequestFailed: ({ description }) => new LookupFailed({ description }),
+    RateLimited: ({ retryAfterSeconds }) =>
+      new LookupFailed({
+        description: `wikidata rate-limited the request (retry after ${retryAfterSeconds}s)`,
+      }),
+    InvalidRequest: ({ kind, value }) =>
+      new LookupFailed({
+        description: `unexpected invalid request building the wikidata query (${kind}: ${value})`,
+      }),
+  });
 }
 
 // ── Service implementation ────────────────────────────────────────────
@@ -212,7 +213,7 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
       }),
     );
     const qids = dedupedQids(hits);
-    if (qids.length === 0) return [] as readonly WikidataCandidate[];
+    if (Arr.isReadonlyArrayEmpty(qids)) return Arr.empty<WikidataCandidate>();
 
     // One batched enrichment call resolves label / description / P31 for
     // every matched QID. The ids are all validated `Q<digits>`.

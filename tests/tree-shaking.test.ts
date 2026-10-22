@@ -95,7 +95,7 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
   });
   const output = result.outputFiles?.[0]?.text;
-  if (output === undefined) throw new Error("esbuild produced no output");
+  if (output === undefined) return expect.unreachable("esbuild produced no output");
   return output;
 }
 
@@ -210,13 +210,13 @@ const SURFACES: readonly {
 ];
 
 describe("module-per-surface tree-shaking", () => {
-  for (const { namespace, own, foreign } of SURFACES) {
-    it(`importing ${namespace} pulls no other surface's code`, async () => {
+  it.each(SURFACES)(
+    "importing $namespace pulls no other surface's code",
+    async ({ namespace, own, foreign }) => {
       const bundle = await bundleImporting(namespace);
-      for (const marker of own) expect(bundle).toContain(marker);
-      for (const group of foreign) {
-        for (const marker of group) expect(bundle).not.toContain(marker);
-      }
-    });
-  }
+      // The markers each check misses, so a failure names them.
+      expect(own.filter((marker) => !bundle.includes(marker))).toEqual([]);
+      expect(foreign.flat().filter((marker) => bundle.includes(marker))).toEqual([]);
+    },
+  );
 });

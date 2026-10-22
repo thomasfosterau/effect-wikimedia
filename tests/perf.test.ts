@@ -30,6 +30,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import * as Arr from "effect/Array";
 import { describe, expect, it } from "vite-plus/test";
 import { parse, serialize } from "../src/wikitext/index.ts";
 
@@ -38,21 +39,26 @@ const ada = readFileSync(
   "utf8",
 );
 
+/** The best of `runs` timings of `run`, in ms, after `warmups` untimed runs (a JIT warm-up). */
+function bestTime<A>(run: () => A, warmups: number, runs: number): number {
+  Arr.makeBy(warmups, run);
+  return Math.min(
+    ...Arr.makeBy(runs, () => {
+      const t0 = performance.now();
+      run();
+      return performance.now() - t0;
+    }),
+  );
+}
+
 // A large, realistic article: the fixture repeated to a substantial size.
 const largeArticle = `${ada}\n`.repeat(60);
 
 describe("performance floor", () => {
   it(`parses a large article (${largeArticle.length} chars) fast`, () => {
     // Warm up the JIT so the measurement reflects steady state.
-    for (let i = 0; i < 5; i++) serialize(parse(largeArticle));
-
-    let best = Number.POSITIVE_INFINITY;
-    const runs = 30;
-    for (let i = 0; i < runs; i++) {
-      const t0 = performance.now();
-      parse(largeArticle);
-      best = Math.min(best, performance.now() - t0);
-    }
+    Arr.makeBy(5, () => serialize(parse(largeArticle)));
+    const best = bestTime(() => parse(largeArticle), 0, 30);
 
     // eslint-disable-next-line no-console
     console.log(`[perf] parse ${largeArticle.length} chars: best ${best.toFixed(2)} ms`);
@@ -71,14 +77,7 @@ describe("performance floor", () => {
 
 /** The best of `runs` timed parses of `src`, in ms, after a JIT warm-up. */
 function bestParseTime(src: string, runs = 20): number {
-  for (let i = 0; i < 3; i++) parse(src);
-  let best = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < runs; i++) {
-    const t0 = performance.now();
-    parse(src);
-    best = Math.min(best, performance.now() - t0);
-  }
-  return best;
+  return bestTime(() => parse(src), 3, runs);
 }
 
 // The table scans step over nested constructs (#132) using one linear
@@ -102,19 +101,17 @@ describe("performance floor: wikitables (#132)", () => {
   const linkRunTable = cell(`${"[[".repeat(20_000)}${"]]".repeat(20_000)}`);
   const mixedRunTable = cell(`${"[[{{".repeat(10_000)}${"}}".repeat(10_000)}`);
 
-  for (const [name, src] of [
+  it.each([
     ["a table of templates and citations", largeTable],
     ["a table with an unclosed {{ in every row", strayTable],
     ["a cell holding one long run of { then of }", braceRunTable],
     ["a cell holding one long run of [[ then of ]]", linkRunTable],
     ["a cell holding [[{{ runs closed only by }}", mixedRunTable],
-  ] as const) {
-    it(`parses ${name} (${src.length} chars) in linear time`, () => {
-      const best = bestParseTime(src);
-      // eslint-disable-next-line no-console
-      console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
-      expect(best).toBeLessThan(250);
-      expect(serialize(parse(src))).toBe(src);
-    });
-  }
+  ] as const)("parses %s in linear time", (name, src) => {
+    const best = bestParseTime(src);
+    // eslint-disable-next-line no-console
+    console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
+    expect(best).toBeLessThan(250);
+    expect(serialize(parse(src))).toBe(src);
+  });
 });

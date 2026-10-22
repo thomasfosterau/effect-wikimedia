@@ -19,7 +19,11 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { createGzip, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as Iterable from "effect/Iterable";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Dumps, Wikidata } from "../../src/index.ts";
 import { runTest } from "../helpers/effect.ts";
@@ -29,6 +33,15 @@ const fixtureNdjson = readFileSync(
 );
 
 const BIG_ITEM_COUNT = 300_000;
+
+/** JSON text for a test label or an inline fixture, through the Schema JSON codec. */
+const Json = Schema.fromJsonString(Schema.Unknown);
+const toJson = Schema.encodeSync(Json);
+const parseJson = Schema.decodeSync(Json);
+
+/** Refines an entity-dump record to its per-line error member. */
+const isLineError = (record: Dumps.EntityRecord | null): record is Dumps.DumpLineError =>
+  Predicate.isTagged(record, "error");
 
 let tmp: string;
 let slicePath: string;
@@ -67,11 +80,11 @@ describe("stripFraming", () => {
     ['{"id":"Q1"}', '{"id":"Q1"}'],
     ['  {"id":"Q1"} , ', '{"id":"Q1"}'],
   ];
-  for (const [input, expected] of cases) {
-    it(`${JSON.stringify(input)} → ${JSON.stringify(expected)}`, () => {
+  Arr.forEach(cases, ([input, expected]) => {
+    it(`${toJson(input)} → ${toJson(expected)}`, () => {
       expect(Dumps.stripFraming(input)).toBe(expected);
     });
-  }
+  });
 });
 
 // ── decodeEntityLine (table-driven) ──────────────────────────────────────
@@ -85,7 +98,7 @@ describe("decodeEntityLine", () => {
   it("a valid entity line decodes to an entity record with its line number", () => {
     const record = Dumps.decodeEntityLine('{"type":"item","id":"Q1"},', 5);
     expect(record?._tag).toBe("entity");
-    if (record?._tag !== "entity") throw new Error("expected entity");
+    if (record?._tag !== "entity") return expect.unreachable("expected entity");
     expect(record.line).toBe(5);
     expect(record.item.id).toBe("Q1");
   });
@@ -93,7 +106,7 @@ describe("decodeEntityLine", () => {
   it("invalid JSON degrades to an invalid-json error element", () => {
     const record = Dumps.decodeEntityLine("{ not json },", 3);
     expect(record?._tag).toBe("error");
-    if (record?._tag !== "error") throw new Error("expected error");
+    if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/invalid-json");
     expect(record.line).toBe(3);
   });
@@ -101,28 +114,28 @@ describe("decodeEntityLine", () => {
   it("valid JSON that is not an entity degrades to a not-an-entity error element", () => {
     const record = Dumps.decodeEntityLine('{"foo":"bar"},', 4);
     expect(record?._tag).toBe("error");
-    if (record?._tag !== "error") throw new Error("expected error");
+    if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
   });
 
   // `null` is valid JSON, so it is not an invalid-json line: it parses, and
   // what it parses to is not an entity, the same as `42` or `"x"` (#116).
-  for (const body of ["null", "42", '"x"', "[]"]) {
+  Arr.forEach(["null", "42", '"x"', "[]"], (body) => {
     it(`a JSON ${body} line degrades to a not-an-entity error element`, () => {
       const record = Dumps.decodeEntityLine(`${body},`, 3);
       expect(record?._tag).toBe("error");
-      if (record?._tag !== "error") throw new Error("expected error");
+      if (!isLineError(record)) return expect.unreachable("expected error");
       expect(record.reason).toBe("dumps/not-an-entity");
       expect(record.raw).toBe(body);
     });
-  }
+  });
 
   // Wikibase marks an entity that does not exist with `missing`; such an
   // object has a valid id but is still not an entity (#122).
   it("an object Wikibase flagged missing degrades to a not-an-entity error element", () => {
     const record = Dumps.decodeEntityLine('{"id":"Q42","missing":""},', 5);
     expect(record?._tag).toBe("error");
-    if (record?._tag !== "error") throw new Error("expected error");
+    if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
     expect(record.raw).toBe('{"id":"Q42","missing":""}');
   });
@@ -131,9 +144,9 @@ describe("decodeEntityLine", () => {
 // ── Pure predicates ──────────────────────────────────────────────────────
 
 const q42 = Wikidata.decodeEntity(
-  JSON.parse(
+  parseJson(
     '{"type":"item","id":"Q42","claims":{"P569":[{"mainsnak":{"snaktype":"value","property":"P569","datatype":"time","datavalue":{"type":"string","value":"x"}},"type":"statement","rank":"normal"}]},"sitelinks":{"enwiki":{"site":"enwiki","title":"Douglas Adams"}}}',
-  ) as unknown,
+  ),
 );
 
 describe("predicates", () => {
@@ -143,14 +156,14 @@ describe("predicates", () => {
   });
 
   it("hasClaim (valid + missing + malformed property)", () => {
-    if (q42 === null) throw new Error("fixture decode failed");
+    if (q42 === null) return expect.unreachable("fixture decode failed");
     expect(Dumps.hasClaim(q42, "P569")).toBe(true);
     expect(Dumps.hasClaim(q42, "P31")).toBe(false);
     expect(Dumps.hasClaim(q42, "not-a-property")).toBe(false);
   });
 
   it("hasSitelink", () => {
-    if (q42 === null) throw new Error("fixture decode failed");
+    if (q42 === null) return expect.unreachable("fixture decode failed");
     expect(Dumps.hasSitelink(q42, "enwiki")).toBe(true);
     expect(Dumps.hasSitelink(q42, "dewiki")).toBe(false);
   });
@@ -161,14 +174,11 @@ describe("predicates", () => {
 describe("entityRecords pipeline", () => {
   it("decodes the fixture: 5 entities + 2 error elements, in line order", async () => {
     const records = await collect(Dumps.entityRecords(Dumps.fromFile(slicePath)));
-    const entities = records.filter((r) => r._tag === "entity");
-    const errors = records.filter((r) => r._tag === "error");
+    const entities = records.filter(Predicate.isTagged("entity"));
+    const errors = records.filter(isLineError);
     expect(entities.length).toBe(5);
     expect(errors.length).toBe(2);
-    expect(errors.map((e) => (e._tag === "error" ? e.reason : ""))).toEqual([
-      "dumps/invalid-json",
-      "dumps/not-an-entity",
-    ]);
+    expect(errors.map((e) => e.reason)).toEqual(["dumps/invalid-json", "dumps/not-an-entity"]);
   });
 
   it("byType keeps only items (4)", async () => {
@@ -212,25 +222,28 @@ const BIG_ITEM_LINE =
  * uncompressed byte size.
  */
 async function writeBigDump(path: string, n: number): Promise<number> {
+  // Written in ~256 KB blocks (not per line) — keeps the fixture build fast
+  // and low-memory, ~200x faster than yielding 300k tiny strings. Every line
+  // but the last carries the array's trailing comma.
   const BLOCK_BYTES = 262_144;
+  const linesPerBlock = Math.ceil(BLOCK_BYTES / (BIG_ITEM_LINE.length + 2));
+  const blockCount = Math.ceil(n / linesPerBlock);
   let bytes = 0;
-  function* blocks(): Generator<string> {
-    let buffer = "[\n";
-    for (let i = 0; i < n; i++) {
-      buffer += BIG_ITEM_LINE + (i < n - 1 ? ",\n" : "\n");
-      // Yield in ~256 KB blocks (not per line) — keeps the fixture build fast
-      // and low-memory, ~200x faster than yielding 300k tiny strings.
-      if (buffer.length >= BLOCK_BYTES) {
-        bytes += Buffer.byteLength(buffer);
-        yield buffer;
-        buffer = "";
-      }
-    }
-    buffer += "]\n";
-    bytes += Buffer.byteLength(buffer);
-    yield buffer;
-  }
-  await pipeline(Readable.from(blocks()), createGzip(), createWriteStream(path));
+  const block = (index: number): string => {
+    const lines = Math.min(linesPerBlock, n - index * linesPerBlock);
+    const body =
+      index === blockCount - 1
+        ? `${BIG_ITEM_LINE},\n`.repeat(lines - 1) + `${BIG_ITEM_LINE}\n]\n`
+        : `${BIG_ITEM_LINE},\n`.repeat(lines);
+    const text = index === 0 ? `[\n${body}` : body;
+    bytes += Buffer.byteLength(text);
+    return text;
+  };
+  await pipeline(
+    Readable.from(Iterable.makeBy(block, { length: blockCount })),
+    createGzip(),
+    createWriteStream(path),
+  );
   return bytes;
 }
 
@@ -251,6 +264,12 @@ const collectGarbage = (() => {
   return gc;
 })();
 
+/** Retained heap and off-heap bytes, as {@link retained} reads them. */
+interface Retained {
+  readonly heap: number;
+  readonly offHeap: number;
+}
+
 /**
  * Heap and off-heap bytes still reachable after full collections. Two, because
  * some native memory is only released on the second: after one, `external`
@@ -259,7 +278,7 @@ const collectGarbage = (() => {
  * `arrayBuffers` (every `Buffer` and `Uint8Array`), so it alone is the
  * off-heap figure.
  */
-function retained(): { readonly heap: number; readonly offHeap: number } {
+function retained(): Retained {
   collectGarbage();
   collectGarbage();
   const m = process.memoryUsage();
@@ -285,7 +304,7 @@ describe("constant memory", () => {
     expect(bigUncompressedBytes).toBeGreaterThan(45_000_000);
 
     const base = retained();
-    const samples: Array<{ readonly heap: number; readonly offHeap: number }> = [];
+    const samples: Array<Retained> = [];
     let seen = 0;
 
     const n = await count(

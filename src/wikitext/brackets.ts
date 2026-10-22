@@ -17,11 +17,26 @@
  * @module wikitext/brackets
  */
 
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+
 const OPEN_BRACE = 0x7b; // {
 const CLOSE_BRACE = 0x7d; // }
 const OPEN_BRACKET = 0x5b; // [
 const CLOSE_BRACKET = 0x5d; // ]
 const LESS_THAN = 0x3c; // <
+
+/** A run of each bracket character, matched in place (sticky). */
+const OPEN_BRACE_RUN = /\{+/y;
+const CLOSE_BRACE_RUN = /\}+/y;
+const OPEN_BRACKET_RUN = /\[+/y;
+const CLOSE_BRACKET_RUN = /\]+/y;
+
+function runPattern(c: number): RegExp {
+  if (c === OPEN_BRACE) return OPEN_BRACE_RUN;
+  if (c === CLOSE_BRACE) return CLOSE_BRACE_RUN;
+  return c === OPEN_BRACKET ? OPEN_BRACKET_RUN : CLOSE_BRACKET_RUN;
+}
 
 /** An unmatched run of two or more `{` or `[`. */
 interface Piece {
@@ -34,7 +49,16 @@ interface Piece {
 }
 
 /**
- * Where each bracketed construct in `src` ends: a map from the index of its
+ * Where each construct's end sits in the table {@link matchBrackets} builds:
+ * indexed by the construct's first character, holding the index just past
+ * its last, or `0` where no construct opens (an end is always past its
+ * start, so `0` is never one). A typed array rather than a map: the table
+ * scans read it at every bracket they step over.
+ */
+export type BracketEnds = Int32Array;
+
+/**
+ * Where each bracketed construct in `src` ends: a table from the index of its
  * first character to the index just past its last. `extensionTagEnd(at)`
  * returns the end of the extension tag (body and close tag included) opening
  * at `at`, or `-1` when none does.
@@ -47,18 +71,18 @@ interface Piece {
  * (MediaWiki would run it to the end of the page), so a stray `<!--` in a
  * table hides nothing.
  */
-export function matchBrackets(
-  src: string,
-  extensionTagEnd: (at: number) => number,
-): ReadonlyMap<number, number> {
+export function matchBrackets(src: string, extensionTagEnd: (at: number) => number): BracketEnds {
   return new BracketMatcher(src, extensionTagEnd).run();
 }
 
 class BracketMatcher {
-  private readonly ends = new Map<number, number>();
+  private readonly ends: Int32Array;
   private readonly stack: Piece[] = [];
-  /** How many pieces of each kind are on `stack`, keyed by opening character. */
-  private readonly open: Record<number, number> = { [OPEN_BRACE]: 0, [OPEN_BRACKET]: 0 };
+  /**
+   * How many pieces of each kind are on `stack`, indexed by the char code of
+   * their opening character (`{` or `[`, both ASCII).
+   */
+  private readonly open = new Int32Array(0x80);
   /** False once a search for `-->` has failed: no later comment closes either. */
   private commentsClose = true;
 
@@ -68,9 +92,10 @@ class BracketMatcher {
   constructor(src: string, extensionTagEnd: (at: number) => number) {
     this.src = src;
     this.extensionTagEnd = extensionTagEnd;
+    this.ends = new Int32Array(src.length);
   }
 
-  run(): ReadonlyMap<number, number> {
+  run(): BracketEnds {
     let i = 0;
     while (i < this.src.length) i = this.step(i);
     return this.ends;
@@ -78,27 +103,19 @@ class BracketMatcher {
 
   /** Handles the character at `i`; returns where to continue. */
   private step(i: number): number {
-    switch (this.src.charCodeAt(i)) {
-      case OPEN_BRACE:
-      case OPEN_BRACKET:
-        return this.openRun(i);
-      case CLOSE_BRACE:
-        return this.closeRun(i, OPEN_BRACE);
-      case CLOSE_BRACKET:
-        return this.closeRun(i, OPEN_BRACKET);
-      case LESS_THAN:
-        return this.opaque(i);
-      default:
-        return i + 1;
-    }
+    const c = this.src.charCodeAt(i);
+    if (c === OPEN_BRACE || c === OPEN_BRACKET) return this.openRun(i);
+    if (c === CLOSE_BRACE) return this.closeRun(i, OPEN_BRACE);
+    if (c === CLOSE_BRACKET) return this.closeRun(i, OPEN_BRACKET);
+    return c === LESS_THAN ? this.opaque(i) : i + 1;
   }
 
-  /** End of the run of the character at `i`. */
+  /** End of the run of the bracket character at `i`. */
   private runEnd(i: number): number {
-    const c = this.src.charCodeAt(i);
-    let j = i + 1;
-    while (j < this.src.length && this.src.charCodeAt(j) === c) j++;
-    return j;
+    const run = runPattern(this.src.charCodeAt(i));
+    run.lastIndex = i;
+    run.test(this.src);
+    return run.lastIndex;
   }
 
   private openRun(i: number): number {
@@ -117,12 +134,11 @@ class BracketMatcher {
     const end = this.runEnd(i);
     let at = i;
     while (end - at >= 2 && this.open[openChar] > 0) {
-      // Runs of the other kind opened since the nearest run of this kind stay unclosed.
-      while (this.top().char !== openChar) this.pop();
+      this.dropAbove(openChar);
       const piece = this.top();
       const matched = Math.min(end - at, piece.count, openChar === OPEN_BRACE ? 3 : 2);
       piece.count -= matched;
-      this.ends.set(piece.pos + piece.count, at + matched);
+      this.ends[piece.pos + piece.count] = at + matched;
       if (piece.count < 2) this.pop();
       at += matched;
     }
@@ -133,7 +149,7 @@ class BracketMatcher {
   private opaque(i: number): number {
     const end = this.src.startsWith("<!--", i) ? this.commentEnd(i) : this.extensionTagEnd(i);
     if (end < 0) return i + 1;
-    this.ends.set(i, end);
+    this.ends[i] = end;
     return end;
   }
 
@@ -145,6 +161,17 @@ class BracketMatcher {
       return -1;
     }
     return close + 3;
+  }
+
+  /**
+   * Drops the runs of the other kind opened since the nearest open run of
+   * `openChar`: they stay unclosed. One is open (`open[openChar] > 0`).
+   */
+  private dropAbove(openChar: number): void {
+    if (this.top().char === openChar) return;
+    const nearest = Arr.findLastIndex(this.stack, (piece) => piece.char === openChar);
+    const dropped = this.stack.splice(Option.getOrElse(nearest, () => -1) + 1);
+    Arr.forEach(dropped, (piece) => this.open[piece.char]--);
   }
 
   private top(): Piece {

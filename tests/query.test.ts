@@ -8,6 +8,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import * as Arr from "effect/Array";
+import * as HashMap from "effect/HashMap";
+import * as Order from "effect/Order";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import {
   filter,
@@ -20,6 +25,9 @@ import {
   walk,
 } from "../src/wikitext/index.ts";
 import { NAMED_ENTITIES } from "../src/wikitext/entities.ts";
+
+/** `JSON.stringify` through the `Schema` JSON boundary (encoding `Unknown` is the identity). */
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const ada = readFileSync(
   fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),
@@ -78,7 +86,7 @@ describe("normaliseTemplateName", () => {
 describe("filter / walk", () => {
   it("collects every wikilink at any depth", () => {
     const doc = parse(ada);
-    const links = filter(doc, (n) => n._tag === "Wikilink");
+    const links = filter(doc, Predicate.isTagged("Wikilink"));
     expect(links.length).toBeGreaterThan(3);
   });
 
@@ -87,7 +95,7 @@ describe("filter / walk", () => {
     const seen: string[] = [];
     walk(doc, (n) => {
       seen.push(n._tag);
-      if (n._tag === "Template") return false; // don't descend
+      if (Predicate.isTagged(n, "Template")) return false; // don't descend
     });
     expect(seen).toContain("Template");
     expect(seen).not.toContain("Wikilink");
@@ -245,20 +253,23 @@ describe("strip to plain text: entities (#107)", () => {
     // fails even though the round-trip test below reads its expectations from
     // the table itself. The same digest comes from `character-entities` 2.0.2
     // and from remex-html's `;`-terminated entries (#123's review).
-    const entries = [...NAMED_ENTITIES].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
+    const entries = Arr.sort(
+      NAMED_ENTITIES,
+      Order.mapInput(Order.String, ([name]: readonly [string, string]) => name),
+    );
+    expect(createHash("sha256").update(encodeJson(entries)).digest("hex")).toBe(
       "083dc02ec806d6d630ad69cdcd3ebf4b3f04509f8ad00ad8772f8905d285beb4",
     );
   });
 
   it("decodes every name in the HTML5 table", () => {
     // HTML5's 2,231 names less its 106 legacy forms without the `;`.
-    expect(NAMED_ENTITIES.size).toBe(2125);
-    for (const [name, text] of NAMED_ENTITIES) {
+    expect(HashMap.size(NAMED_ENTITIES)).toBe(2125);
+    Arr.forEach(Arr.fromIterable(NAMED_ENTITIES), ([name, text]) => {
       expect(name).toMatch(/^[A-Za-z0-9]+$/);
       expect(text).toMatch(/^.{1,2}$/su); // one or two code points
       expect(stripEntities(`&${name};`)).toBe(text);
-    }
+    });
   });
 
   // Each is a well-formed entity to the parser. Names are case-sensitive, so
@@ -286,7 +297,7 @@ describe("strip to plain text: entities (#107)", () => {
     "leaves %s, without the semicolon, as literal text",
     (src) => {
       const doc = parse(src);
-      expect(doc.children.some((n) => n._tag === "HtmlEntity")).toBe(false);
+      expect(doc.children.some(Predicate.isTagged("HtmlEntity"))).toBe(false);
       expect(stripToText(doc)).toBe(src);
     },
   );
@@ -313,15 +324,15 @@ describe("strip to plain text: entities (#107)", () => {
 describe("tables and autolinks reachable via walk/filter (issue #1287)", () => {
   it("finds an AutoLink node at any depth", () => {
     const doc = parse("'''bold''' http://example.org more");
-    expect(filter(doc, (n) => n._tag === "AutoLink")).toHaveLength(1);
+    expect(filter(doc, Predicate.isTagged("AutoLink"))).toHaveLength(1);
   });
 
   it("descends into table captions and cell content", () => {
     const doc = parse(
       "{|\n|+ has a [[Caption Link]]\n| has [[Cell Link]] and http://example.org\n|}",
     );
-    const links = filter(doc, (n) => n._tag === "Wikilink");
+    const links = filter(doc, Predicate.isTagged("Wikilink"));
     expect(links).toHaveLength(2);
-    expect(filter(doc, (n) => n._tag === "AutoLink")).toHaveLength(1);
+    expect(filter(doc, Predicate.isTagged("AutoLink"))).toHaveLength(1);
   });
 });

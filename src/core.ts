@@ -35,11 +35,15 @@
  * @module
  */
 
+import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
 import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } from "effect/http";
 
 // ── Identity & etiquette constants ──────────────────────────────────────
@@ -192,7 +196,7 @@ export type WikimediaError = InvalidRequest | RequestFailed | RateLimited;
 // ── Per-wiki addressing (host is a parameter, not a constant) ───────────
 
 /** Hosts allowed verbatim, in addition to the suffix-matched families below. */
-const ALLOWED_HOSTS: ReadonlySet<string> = new Set(["wikidata.org", "www.wikidata.org"]);
+const ALLOWED_HOSTS: HashSet.HashSet<string> = HashSet.make("wikidata.org", "www.wikidata.org");
 
 /**
  * Host suffixes accepted for the per-wiki families: any language edition of
@@ -219,17 +223,19 @@ const MAX_HOST_LENGTH = 100;
  * to an arbitrary host. Returns `null` for anything else.
  */
 export function normaliseWikimediaHost(raw: string): string | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const cleaned = raw.trim().toLowerCase();
-  if (cleaned.length === 0 || cleaned.length > MAX_HOST_LENGTH) return null;
+  if (Str.isEmpty(cleaned) || cleaned.length > MAX_HOST_LENGTH) return null;
   // Hostnames only: letters, digits, dot, hyphen. Rejects anything that
   // could smuggle a path, port, or credentials into the host position.
   if (!/^[a-z0-9.-]+$/.test(cleaned)) return null;
-  if (ALLOWED_HOSTS.has(cleaned)) return cleaned;
-  for (const suffix of ALLOWED_HOST_SUFFIXES) {
-    if (cleaned.endsWith(suffix) && cleaned.length > suffix.length) return cleaned;
-  }
-  return null;
+  if (HashSet.has(ALLOWED_HOSTS, cleaned)) return cleaned;
+  return Arr.some(
+    ALLOWED_HOST_SUFFIXES,
+    (suffix) => cleaned.endsWith(suffix) && cleaned.length > suffix.length,
+  )
+    ? cleaned
+    : null;
 }
 
 /** Upper bound on a MediaWiki title / filename before validation. */
@@ -256,6 +262,28 @@ function isRelativePathTitle(title: string): boolean {
   );
 }
 
+const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff;
+
+/**
+ * Whether `title` from code unit `index` on holds no control character and
+ * no surrogate that isn't half of a high-low pair (a lone surrogate makes
+ * `encodeURIComponent` throw). One pass over UTF-16 code units rather than
+ * `isWellFormed` (ES2024) or a lookbehind regex (a parse-time SyntaxError
+ * before Safari 16.4), so the module loads on any runtime the package
+ * supports. Recursion depth is bounded by `MAX_TITLE_LENGTH`, which callers
+ * check first.
+ */
+function hasSafeCodeUnits(title: string, index: number): boolean {
+  if (index >= title.length) return true;
+  const code = title.charCodeAt(index);
+  if (code < 0x20 || code === 0x7f || isLowSurrogate(code)) return false;
+  if (!isHighSurrogate(code)) return hasSafeCodeUnits(title, index + 1);
+  // `charCodeAt` is NaN past the end, which is no low surrogate; a valid
+  // pair skips its low half.
+  return isLowSurrogate(title.charCodeAt(index + 1)) && hasSafeCodeUnits(title, index + 2);
+}
+
 /**
  * Validates and canonicalises an untrusted MediaWiki title (a page title or
  * a `File:`-namespaced filename): trims, collapses internal whitespace to a
@@ -278,25 +306,10 @@ function isRelativePathTitle(title: string): boolean {
  * contain dots (`Mr._Smith`, `A.B`, `...`) stay valid.
  */
 export function normaliseTitle(raw: string): string | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const collapsed = raw.trim().replace(/\s+/g, "_");
-  if (collapsed.length === 0 || collapsed.length > MAX_TITLE_LENGTH) return null;
-  // One pass over UTF-16 code units: control characters, and any surrogate
-  // that isn't half of a high-low pair (it would make `encodeURIComponent`
-  // throw). A loop rather than `isWellFormed` (ES2024) or a lookbehind regex
-  // (a parse-time SyntaxError before Safari 16.4), so the module loads on any
-  // runtime the package supports.
-  for (let i = 0; i < collapsed.length; i++) {
-    const code = collapsed.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return null;
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = collapsed.charCodeAt(i + 1); // NaN past the end
-      if (!(next >= 0xdc00 && next <= 0xdfff)) return null;
-      i++; // skip the low half of a valid pair
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      return null;
-    }
-  }
+  if (Str.isEmpty(collapsed) || collapsed.length > MAX_TITLE_LENGTH) return null;
+  if (!hasSafeCodeUnits(collapsed, 0)) return null;
   if (/[|#]/.test(collapsed)) return null;
   if (isRelativePathTitle(collapsed)) return null;
   return collapsed;
@@ -338,14 +351,14 @@ export const MAX_TEXT_FIELD_LENGTH = 4000;
 
 /** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
 export function sanitiseText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+  if (!Predicate.isString(value)) return null;
   const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
+  return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
 }
 
 /** A non-negative integer within a sane bound, or `null` for anything else. */
 export function toNonNegativeInt(value: unknown, max = Number.MAX_SAFE_INTEGER): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (!Predicate.isNumber(value) || !Number.isFinite(value)) return null;
   const int = Math.trunc(value);
   return int >= 0 && int <= max ? int : null;
 }
@@ -359,7 +372,7 @@ export function toNonNegativeInt(value: unknown, max = Number.MAX_SAFE_INTEGER):
  * header.
  */
 export function parseRetryAfterHeader(value: string | undefined | null): number | null {
-  if (typeof value !== "string") return null;
+  if (!Predicate.isString(value)) return null;
   const trimmed = value.trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
   const seconds = Number(trimmed);
@@ -380,11 +393,10 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * HTTP date.
  */
 export function detectMaxlagSignal(body: unknown): number | null {
-  if (typeof body !== "object" || body === null) return null;
-  const error = (body as { error?: unknown }).error;
-  if (typeof error !== "object" || error === null) return null;
-  const code = (error as { code?: unknown }).code;
-  return code === "maxlag" ? DEFAULT_MAXLAG_SECONDS : null;
+  if (!Predicate.isObjectOrArray(body) || !Predicate.hasProperty(body, "error")) return null;
+  const error = body.error;
+  if (!Predicate.isObjectOrArray(error) || !Predicate.hasProperty(error, "code")) return null;
+  return error.code === "maxlag" ? DEFAULT_MAXLAG_SECONDS : null;
 }
 
 /** Bounds how many extra attempts / how long a single wait can be for {@link withMaxlagRetry}. */

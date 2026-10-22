@@ -8,6 +8,13 @@
  * @module wikitext/query
  */
 
+import * as Arr from "effect/Array";
+import * as HashMap from "effect/HashMap";
+import * as HashSet from "effect/HashSet";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Str from "effect/String";
 import type { Document, Node, Param, Template } from "./ast.ts";
 import { NAMED_ENTITIES } from "./entities.ts";
 import { serializeNodes } from "./serialize.ts";
@@ -15,31 +22,41 @@ import { serializeNodes } from "./serialize.ts";
 /** A fragment or a whole document — the common input to the query helpers. */
 export type Fragment = Document | readonly Node[];
 
+const isNodeArray = (input: Fragment | Node): input is readonly Node[] => Array.isArray(input);
+
 function nodesOf(input: Fragment): readonly Node[] {
-  return Array.isArray(input) ? input : (input as Document).children;
+  return isNodeArray(input) ? input : input.children;
 }
 
 /** The child fragments of a node (the places recursion descends into). */
-function childFragments(node: Node): readonly (readonly Node[])[] {
-  switch (node._tag) {
-    case "Heading":
-      return [node.title];
-    case "Template":
-      return [node.name, ...node.params.flatMap((p) => (p.name ? [p.name, p.value] : [p.value]))];
-    case "Argument":
-      return node.default === undefined ? [node.name] : [node.name, node.default];
-    case "Wikilink":
-      return [node.target, ...node.segments];
-    case "ExternalLink":
-      return node.label === undefined ? [] : [node.label];
-    case "Table":
-      return [
-        ...node.captions.map((c) => c.content),
-        ...node.rows.flatMap((r) => r.cells.map((c) => c.content)),
-      ];
-    default:
-      return [];
-  }
+const childFragments: (node: Node) => readonly (readonly Node[])[] = Match.type<Node>().pipe(
+  Match.tags({
+    Heading: (node) => [node.title],
+    Template: (node) => [
+      node.name,
+      ...node.params.flatMap((p) => (p.name ? [p.name, p.value] : [p.value])),
+    ],
+    Argument: (node) => (node.default === undefined ? [node.name] : [node.name, node.default]),
+    Wikilink: (node) => [node.target, ...node.segments],
+    ExternalLink: (node) => (node.label === undefined ? [] : [node.label]),
+    Table: (node) => [
+      ...node.captions.map((c) => c.content),
+      ...node.rows.flatMap((r) => r.cells.map((c) => c.content)),
+    ],
+  }),
+  Match.orElse((): readonly (readonly Node[])[] => []),
+);
+
+/**
+ * Visits one fragment the way `walk` always has: every node of the
+ * fragment, last to first, then the child fragments those visits opened,
+ * most recently opened first.
+ */
+function walkFragment(frag: readonly Node[], visitor: (node: Node) => boolean | void): void {
+  const opened = Arr.flatMap(Arr.reverse(frag), (node) =>
+    visitor(node) === false ? [] : Arr.reverse(childFragments(node)),
+  );
+  Arr.forEach(Arr.reverse(opened), (kid) => walkFragment(kid, visitor));
 }
 
 /**
@@ -47,34 +64,17 @@ function childFragments(node: Node): readonly (readonly Node[])[] {
  * `visitor` to skip descending into a node's children.
  */
 export function walk(input: Fragment, visitor: (node: Node) => boolean | void): void {
-  const stack: (readonly Node[])[] = [nodesOf(input)];
-  while (stack.length > 0) {
-    const frag = stack.pop();
-    if (!frag) continue;
-    // Push children in reverse so the walk stays left-to-right pre-order.
-    for (let i = frag.length - 1; i >= 0; i--) {
-      const node = frag[i];
-      const descend = visitor(node);
-      if (descend !== false) {
-        const kids = childFragments(node);
-        for (let k = kids.length - 1; k >= 0; k--) stack.push(kids[k]);
-      }
-    }
-  }
+  walkFragment(nodesOf(input), visitor);
 }
 
 /** Collects every node (at any depth) matching `predicate`, in document order. */
 export function filter(input: Fragment, predicate: (node: Node) => boolean): Node[] {
-  const out: Node[] = [];
-  // A queue-based pre-order walk keeps document order without reversing.
-  const walkFrag = (frag: readonly Node[]): void => {
-    for (const node of frag) {
-      if (predicate(node)) out.push(node);
-      for (const kid of childFragments(node)) walkFrag(kid);
-    }
-  };
-  walkFrag(nodesOf(input));
-  return out;
+  const collect = (frag: readonly Node[]): Node[] =>
+    Arr.flatMap(frag, (node) => {
+      const self = predicate(node) ? [node] : [];
+      return [...self, ...Arr.flatMap(childFragments(node), collect)];
+    });
+  return collect(nodesOf(input));
 }
 
 // ── templates ─────────────────────────────────────────────────────────
@@ -85,8 +85,7 @@ export function filter(input: Fragment, predicate: (node: Node) => boolean): Nod
  * upper-cases the first character (titles are first-letter-insensitive).
  */
 export function normaliseTemplateName(raw: string): string {
-  const collapsed = raw.replace(/_/g, " ").trim().replace(/\s+/g, " ");
-  return collapsed.length === 0 ? collapsed : collapsed[0].toUpperCase() + collapsed.slice(1);
+  return Str.capitalize(raw.replace(/_/g, " ").trim().replace(/\s+/g, " "));
 }
 
 /** The template's invocation name as plain text (raw, un-normalised, trimmed). */
@@ -104,7 +103,7 @@ export function findTemplates(input: Fragment, name?: string): Template[] {
   const out: Template[] = [];
   walk(input, (node) => {
     if (
-      node._tag === "Template" &&
+      Predicate.isTagged(node, "Template") &&
       (want === undefined || normaliseTemplateName(templateName(node)) === want)
     ) {
       out.push(node);
@@ -130,14 +129,13 @@ export function paramValue(param: Param): string {
  * an explicit `1=` overrides the first positional value.
  */
 export function templateParams(template: Template): Map<string, string> {
-  const out = new Map<string, string>();
-  let positional = 0;
-  for (const p of template.params) {
+  const [, entries] = Arr.mapAccum(template.params, 0, (positional, p) => {
     const name = paramName(p);
-    const key = name === null ? String(++positional) : name;
-    out.set(key, paramValue(p));
-  }
-  return out;
+    return name === null
+      ? [positional + 1, [String(positional + 1), paramValue(p)] as const]
+      : [positional, [name, paramValue(p)] as const];
+  });
+  return new Map(entries);
 }
 
 /**
@@ -151,21 +149,15 @@ export function getParam(template: Template, key: string | number): string | und
 // ── strip to plain text ───────────────────────────────────────────────
 
 /** Extension tags whose raw body is kept as literal prose when stripping. */
-const STRIP_KEEP_RAW: ReadonlySet<string> = new Set([
-  "nowiki",
-  "pre",
-  "poem",
-  "syntaxhighlight",
-  "source",
-]);
+const STRIP_KEEP_RAW = HashSet.make("nowiki", "pre", "poem", "syntaxhighlight", "source");
 
 // MediaWiki's `Sanitizer::MW_ENTITY_ALIASES`: two names outside HTML5 that it
 // reads as `&rlm;` (U+200F RIGHT-TO-LEFT MARK), spelt in Hebrew letters
 // (resh, lamed, mem) and in Arabic letters (reh, lam, meem).
-const MW_ENTITY_ALIASES: ReadonlyMap<string, string> = new Map([
+const MW_ENTITY_ALIASES = HashMap.make(
   ["\u05e8\u05dc\u05de", "rlm"],
   ["\u0631\u0644\u0645", "rlm"],
-]);
+);
 
 const NUMERIC_ENTITY_RE = /^#(?:[xX]([0-9A-Fa-f]+)|([0-9]+))$/;
 
@@ -193,7 +185,10 @@ function isRenderableCodePoint(code: number): boolean {
 function decodeEntity(raw: string): string {
   const body = raw.slice(1, -1); // strip & and ;
   const numeric = NUMERIC_ENTITY_RE.exec(body);
-  if (numeric === null) return NAMED_ENTITIES.get(MW_ENTITY_ALIASES.get(body) ?? body) ?? raw;
+  if (numeric === null) {
+    const name = Option.getOrElse(HashMap.get(MW_ENTITY_ALIASES, body), () => body);
+    return Option.getOrElse(HashMap.get(NAMED_ENTITIES, name), () => raw);
+  }
   const [, hex, dec] = numeric;
   const code = hex === undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex, 16);
   return isRenderableCodePoint(code) ? String.fromCodePoint(code) : raw;
@@ -220,51 +215,45 @@ const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
  * as-is for the caller to normalise.
  */
 export function stripToText(input: Fragment | Node): string {
-  if (Array.isArray(input)) return stripNodes(input);
-  const single = input as Document | Node;
-  if (single._tag === "Document") return stripNodes(single.children);
-  return stripNode(single);
+  if (isNodeArray(input)) return stripNodes(input);
+  return Predicate.isTagged(input, "Document") ? stripNodes(input.children) : stripNode(input);
 }
 
 function stripNodes(nodes: readonly Node[]): string {
-  let out = "";
-  for (const n of nodes) out += stripNode(n);
-  return out;
+  return nodes.map(stripNode).join("");
 }
 
-function stripNode(node: Node): string {
-  switch (node._tag) {
-    case "Text":
-      return node.text;
-    case "HtmlEntity":
-      return decodeEntity(node.raw);
-    case "Heading":
-      return stripNodes(node.title);
-    case "Formatting":
-    case "Comment":
-    case "Template":
-    case "Argument":
-      return "";
-    case "Wikilink": {
+const stripNode: (node: Node) => string = Match.type<Node>().pipe(
+  Match.tagsExhaustive({
+    Text: (node) => node.text,
+    HtmlEntity: (node) => decodeEntity(node.raw),
+    Heading: (node) => stripNodes(node.title),
+    Formatting: () => "",
+    Comment: () => "",
+    Template: () => "",
+    Argument: () => "",
+    Wikilink: (node) => {
       if (NAMESPACE_LINK_RE.test(serializeNodes(node.target))) return "";
-      if (node.segments.length > 0) return node.segments.map(stripNodes).join("|");
-      return stripNodes(node.target);
-    }
-    case "ExternalLink":
-      return node.label === undefined ? "" : stripNodes(node.label).trim();
-    case "AutoLink":
-      return node.url;
-    case "Tag": {
+      return Arr.match(node.segments, {
+        onEmpty: () => stripNodes(node.target),
+        onNonEmpty: (segments) => segments.map(stripNodes).join("|"),
+      });
+    },
+    ExternalLink: (node) => (node.label === undefined ? "" : stripNodes(node.label).trim()),
+    AutoLink: (node) => node.url,
+    Tag: (node) => {
       if (node.name === "br") return "\n";
-      if (node.rawContent !== undefined && STRIP_KEEP_RAW.has(node.name)) return node.rawContent;
+      if (node.rawContent !== undefined && HashSet.has(STRIP_KEEP_RAW, node.name)) {
+        return node.rawContent;
+      }
       return "";
-    }
-    case "Table": {
+    },
+    Table: (node) => {
       const caption = node.captions.map((c) => stripNodes(c.content)).join(" ");
       const body = node.rows
         .map((r) => r.cells.map((c) => stripNodes(c.content)).join(" "))
         .join("\n");
-      return caption.length > 0 ? `${caption}\n${body}` : body;
-    }
-  }
-}
+      return Str.isNonEmpty(caption) ? `${caption}\n${body}` : body;
+    },
+  }),
+);

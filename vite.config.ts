@@ -1,3 +1,5 @@
+import { recommended } from "@effect/tsgo/oxlint-presets";
+import effect from "@mpsuesser/oxlint-plugin-effect";
 import { defineConfig } from "vite-plus";
 
 /**
@@ -8,6 +10,11 @@ import { defineConfig } from "vite-plus";
  * `test:unit`, `build`) match the other library repos (#20).
  */
 export default defineConfig({
+  // Staged-file checks run by `vp staged` (the pre-commit hook in
+  // `.vite-hooks/`, installed by `vp config` in `prepare`).
+  staged: {
+    "*.{js,mjs,ts,json,md}": "vp check --fix",
+  },
   run: {
     cache: true,
     tasks: {
@@ -33,7 +40,15 @@ export default defineConfig({
       // the Test step always reruns the suite, and `fallow:health` then hits.
       "test:unit": {
         command: "vp test run --coverage",
-        input: [{ auto: true }, "!coverage/**"],
+        cache: { input: [{ auto: true }, "!coverage/**"] },
+      },
+      // The family's name for the coverage run that `fallow audit` (the
+      // PreToolUse fallow gate) reads for its CRAP scores: here it is
+      // `test:unit` itself, which already writes coverage/coverage-final.json.
+      "test:coverage": {
+        command: "echo 'test:coverage: coverage/coverage-final.json written by test:unit'",
+        dependsOn: ["test:unit"],
+        cache: false,
       },
       // The dist-consumer declaration check (#20): type-check
       // `tests/dist-consumer/` against the emitted `dist/*.d.ts`, so broken
@@ -115,7 +130,142 @@ export default defineConfig({
     // `tests/dist-consumer/` resolves the package through the built `dist/`,
     // which doesn't exist yet when `vp check` runs; `check:dist` type-checks it
     // after the build instead.
-    ignorePatterns: ["**/dist/**", "api-docs/**", "tests/dist-consumer/**"],
+    ignorePatterns: ["**/dist/**", "api-docs/**", "coverage/**", "tests/dist-consumer/**"],
+    extends: [recommended, effect.configs.recommended],
+    categories: {
+      correctness: "error",
+    },
+    rules: {
+      // `casting-awareness` is an awareness prompt, not a defect rule: it
+      // fires on every `as`, including the narrowings the Fetch types
+      // structurally require. Stays visible as a warning.
+      "effect/casting-awareness": "warn",
+      // Hard-codes abbreviations (`Arr`, `P`, `R`, …) with no options, so it is
+      // unsatisfiable under the full-name convention (`import * as Option from
+      // "effect/Option"`) this family shares with its consumers.
+      "effect/prefer-namespace-imports": "off",
+      // ---- Effect preset: rules this package's conventions cut across ------
+      // `prefer-option-over-null` also fires on `?: T | undefined`, which is
+      // the ONLY spelling of an optional member `exactOptionalPropertyTypes`
+      // lets a caller forward an optional of its own into (AGENTS.md), and on
+      // the `null` the Wikimedia APIs' JSON carries (decoded schemas mirror
+      // the wire). A bare `null` / `undefined` in a return type is still a
+      // finding to read; the options-object members are not.
+      "effect/prefer-option-over-null": "warn",
+      // `unknown` is the honest type at the boundaries this package sits on:
+      // a caught failure turned into an error's `description`, and the raw
+      // JSON a Wikimedia API returns before its schema decodes it.
+      "effect/no-unknown-parameters": "warn",
+      "effect/no-unsafe-dictionary-type": "warn",
+      "effect/no-runtime-typeof": "warn",
+      "vite-plus/prefer-vite-plus-imports": "error",
+    },
+    overrides: [
+      // Build configs and the TypeDoc plugin are evaluated by Vite, Vitest and
+      // TypeDoc in bare Node, before any Effect runtime exists: there is no
+      // `FileSystem` service to call, so `node:*` and native loops are the
+      // idiom there.
+      {
+        files: ["vite.config.ts", "scripts/**"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+          "effect/avoid-sync-fs": "off",
+          "effect/avoid-process-env": "off",
+          "effect/imperative-loops": "off",
+          "effect/no-length-comparison": "off",
+          "effect/prefer-arr-match": "off",
+          "effect/avoid-native-object-helpers": "off",
+          "effect/use-console-service": "off",
+          "effect/use-filesystem-service": "off",
+          "effect/use-path-service": "off",
+        },
+      },
+      // The one Node-only module (AGENTS.md: "Node imports stay in
+      // `src/dumps/sources.ts`"). Its contract is Node interop: it adapts
+      // `node:fs` read streams and `node:zlib` / caller-supplied Node
+      // decompressors into a `Stream<Uint8Array>`. An Effect `FileSystem`
+      // service would need a platform layer this package does not depend on
+      // and its callers would have to provide.
+      {
+        files: ["src/dumps/sources.ts"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+          "effect/use-filesystem-service": "off",
+          // `attempt` (used by `adaptClassicDuplex`) runs inside a Node
+          // Duplex's write callback, outside any Effect: a classic stream's
+          // `write()` can throw synchronously (unbzip2-stream does on corrupt
+          // input), and the throw must reach the write callback rather than
+          // escape the stream. `Effect.try` there would need an
+          // `Effect.runSync` (effect-run-in-body).
+          "effect/avoid-try-catch": "off",
+        },
+      },
+      // The wikitext parser's cursor scanners: each advances a mutable index
+      // through the source and exits early, which `Arr` combinators can't
+      // express and recursion would overflow on dump-scale articles. 6 sites
+      // (issue #174); delete this block when they reach zero.
+      {
+        files: ["src/wikitext/parse.ts", "src/wikitext/brackets.ts"],
+        rules: {
+          "effect/imperative-loops": "warn",
+        },
+      },
+      // Two public types (`EXTENSION_TAGS: ReadonlySet`, `templateParams()`'s
+      // `Map`): moving them to HashSet / HashMap is a breaking API change
+      // (issue #174). 2 sites; delete this block when they reach zero.
+      {
+        files: ["src/wikitext/ast.ts", "src/wikitext/query.ts"],
+        rules: {
+          "effect/avoid-native-object-helpers": "warn",
+        },
+      },
+      // The perf test logs its measured timings to the CI log; it is
+      // synchronous and runs no Effect, so there is no Console service to log
+      // through.
+      {
+        files: ["tests/perf.test.ts"],
+        rules: {
+          "effect/use-console-service": "off",
+        },
+      },
+      // Tests run in bare Node with no Effect platform layer: the package
+      // depends on no `@effect/platform-node`, so there is no `FileSystem`,
+      // `Path` or `ChildProcessSpawner` implementation to provide. Tests read
+      // their recorded fixtures, write temporary dumps, drive esbuild
+      // (`tree-shaking.test.ts`) and run the system `bzip2` with Node's own
+      // modules, and feed real Node streams to the Node-only `Dumps` sources.
+      {
+        files: ["tests/**"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+          "effect/avoid-sync-fs": "off",
+          "effect/use-filesystem-service": "off",
+          "effect/use-path-service": "off",
+          "effect/use-temp-file-scoped": "off",
+          "effect/use-command-executor-service": "off",
+          // Test fixtures are the seams under test, not domain code: a
+          // recorded payload narrowed to the shape a test asserts against.
+          // Stays visible as a warning, because a fixture cannot be written
+          // another way.
+          "effect/require-safety-comment-for-type-assertion": "warn",
+        },
+      },
+      // The unit suite's runtime boundary: `@effect/vitest`'s `it.effect`
+      // cannot load under the Vite+ vitest (see the module comment), so these
+      // helpers are where every test runs its Effect.
+      {
+        files: ["tests/helpers/effect.ts"],
+        rules: {
+          "effect/effect-run-in-body": "off",
+        },
+      },
+    ],
+    jsPlugins: [
+      {
+        name: "vite-plus",
+        specifier: "vite-plus/oxlint-plugin",
+      },
+    ],
     options: {
       typeAware: true,
       typeCheck: true,

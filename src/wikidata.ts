@@ -33,8 +33,13 @@
  * @module
  */
 
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
+import * as Predicate from "effect/Predicate";
+import * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import {
   DEFAULT_RETRY_OPTIONS,
   InvalidRequest,
@@ -67,22 +72,25 @@ export type EntityId = ItemId | PropertyId | LexemeId;
  * `Q` plus digits — never a slash, dot, or path-escaping byte.
  */
 export function parseItemId(raw: unknown): ItemId | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
+  // SAFETY: the pattern admits exactly the `Q` + digits form the brand names.
   return /^Q[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as ItemId) : null;
 }
 
 /** Validates a Wikidata **property** id (`P` + digits); returns the branded id or `null`. */
 export function parsePropertyId(raw: unknown): PropertyId | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
+  // SAFETY: the pattern admits exactly the `P` + digits form the brand names.
   return /^P[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as PropertyId) : null;
 }
 
 /** Validates a Wikidata **lexeme** id (`L` + digits); returns the branded id or `null`. */
 export function parseLexemeId(raw: unknown): LexemeId | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
+  // SAFETY: the pattern admits exactly the `L` + digits form the brand names.
   return /^L[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as LexemeId) : null;
 }
 
@@ -93,7 +101,7 @@ export function parseLexemeId(raw: unknown): LexemeId | null {
  * of scope and degrade to `null`).
  */
 export function parseEntityId(raw: unknown): EntityId | null {
-  if (typeof raw !== "string") return null;
+  if (!Predicate.isString(raw)) return null;
   const head = raw.trim().charAt(0).toUpperCase();
   if (head === "Q") return parseItemId(raw);
   if (head === "P") return parsePropertyId(raw);
@@ -129,21 +137,21 @@ export const MAX_IDS_PER_REQUEST = 50;
 
 /** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
 function sanitiseText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+  if (!Predicate.isString(value)) return null;
   const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
+  return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
 }
 
 /** A finite number passed through untouched, or `null`. */
 function toFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return Predicate.isNumber(value) && Number.isFinite(value) ? value : null;
 }
 
 /** A short raw string (calendar / globe / unit IRI, amount), trimmed and bounded, or `null`. */
 function toBoundedString(value: unknown, max = 2000): string | null {
-  if (typeof value !== "string") return null;
+  if (!Predicate.isString(value)) return null;
   const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed.slice(0, max);
+  return Str.isEmpty(trimmed) ? null : trimmed.slice(0, max);
 }
 
 // ── The datavalue union ──────────────────────────────────────────────────
@@ -668,12 +676,80 @@ export type WbGetEntitiesResponse = typeof WbGetEntitiesResponse.Type;
 
 // ── Normalisers: lenient wire shape → honest typed model ─────────────────
 
-/** Reads a `{ [x]: unknown }` field defensively. */
-function field(value: unknown, key: string): unknown {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)[key]
-    : undefined;
+/** The fields of a datavalue payload that is not an object: none. */
+const NO_FIELDS: Readonly<Record<string, unknown>> = {};
+
+/** Reads a datavalue payload's fields defensively: none unless it is an object. */
+function fieldsOf(value: unknown): Readonly<Record<string, unknown>> {
+  return Predicate.isObject(value) ? value : NO_FIELDS;
 }
+
+/** What {@link normaliseDataValue} dispatches on: the datavalue's own `type`, plus its payload. */
+interface DataValueInput {
+  readonly type: string | null;
+  readonly value: unknown;
+  readonly fields: Readonly<Record<string, unknown>>;
+  readonly datatype: string | null;
+  readonly unknown: UnknownValue;
+}
+
+/**
+ * The per-`type` normalisers behind {@link normaliseDataValue}, built once at
+ * module load: the dump pipeline calls it for every datavalue it reads.
+ */
+const matchDataValue = Match.type<DataValueInput>().pipe(
+  Match.when({ type: "wikibase-entityid" }, ({ fields, unknown }): DataValue => {
+    const id = parseEntityId(fields["id"]);
+    if (id === null) return unknown;
+    const entityType = sanitiseText(fields["entity-type"]);
+    return { _tag: "wikibase-entityid", id, entityType };
+  }),
+  Match.when({ type: "time" }, ({ fields, unknown }): DataValue => {
+    const time = toBoundedString(fields["time"], 64);
+    if (time === null) return unknown;
+    return {
+      _tag: "time",
+      time,
+      precision: toFiniteNumber(fields["precision"]),
+      calendarModel: toBoundedString(fields["calendarmodel"]),
+      timezone: toFiniteNumber(fields["timezone"]),
+      before: toFiniteNumber(fields["before"]),
+      after: toFiniteNumber(fields["after"]),
+    };
+  }),
+  Match.when({ type: "globecoordinate" }, ({ fields }): DataValue => ({
+    _tag: "globecoordinate",
+    latitude: toFiniteNumber(fields["latitude"]),
+    longitude: toFiniteNumber(fields["longitude"]),
+    altitude: toFiniteNumber(fields["altitude"]),
+    precision: toFiniteNumber(fields["precision"]),
+    globe: toBoundedString(fields["globe"]),
+  })),
+  Match.when({ type: "quantity" }, ({ fields, unknown }): DataValue => {
+    const amount = toBoundedString(fields["amount"], 64);
+    if (amount === null) return unknown;
+    return {
+      _tag: "quantity",
+      amount,
+      unit: toBoundedString(fields["unit"]),
+      upperBound: toBoundedString(fields["upperBound"], 64),
+      lowerBound: toBoundedString(fields["lowerBound"], 64),
+    };
+  }),
+  Match.when({ type: "monolingualtext" }, ({ fields, unknown }): DataValue => {
+    const text = sanitiseText(fields["text"]);
+    if (text === null) return unknown;
+    return { _tag: "monolingualtext", text, language: sanitiseText(fields["language"]) };
+  }),
+  Match.when({ type: "string" }, ({ value, datatype, unknown }): DataValue => {
+    const str = sanitiseText(value);
+    if (str === null) return unknown;
+    return datatype === "external-id"
+      ? { _tag: "external-id", value: str }
+      : { _tag: "string", value: str };
+  }),
+  Match.orElse(({ unknown }): DataValue => unknown),
+);
 
 /**
  * Normalises a raw datavalue into the typed {@link DataValue} union.
@@ -684,65 +760,15 @@ function field(value: unknown, key: string): unknown {
  * {@link UnknownValue}; this function never returns `null` and never throws.
  */
 export function normaliseDataValue(raw: RawDataValue, datatype: string | null): DataValue {
-  const type = typeof raw.type === "string" ? raw.type : null;
+  const type = Predicate.isString(raw.type) ? raw.type : null;
   const value = raw.value;
-  const unknown: UnknownValue = { _tag: "unknown", type, value };
-  switch (type) {
-    case "wikibase-entityid": {
-      const id = parseEntityId(field(value, "id"));
-      if (id === null) return unknown;
-      const entityType = sanitiseText(field(value, "entity-type"));
-      return { _tag: "wikibase-entityid", id, entityType };
-    }
-    case "time": {
-      const time = toBoundedString(field(value, "time"), 64);
-      if (time === null) return unknown;
-      return {
-        _tag: "time",
-        time,
-        precision: toFiniteNumber(field(value, "precision")),
-        calendarModel: toBoundedString(field(value, "calendarmodel")),
-        timezone: toFiniteNumber(field(value, "timezone")),
-        before: toFiniteNumber(field(value, "before")),
-        after: toFiniteNumber(field(value, "after")),
-      };
-    }
-    case "globecoordinate": {
-      return {
-        _tag: "globecoordinate",
-        latitude: toFiniteNumber(field(value, "latitude")),
-        longitude: toFiniteNumber(field(value, "longitude")),
-        altitude: toFiniteNumber(field(value, "altitude")),
-        precision: toFiniteNumber(field(value, "precision")),
-        globe: toBoundedString(field(value, "globe")),
-      };
-    }
-    case "quantity": {
-      const amount = toBoundedString(field(value, "amount"), 64);
-      if (amount === null) return unknown;
-      return {
-        _tag: "quantity",
-        amount,
-        unit: toBoundedString(field(value, "unit")),
-        upperBound: toBoundedString(field(value, "upperBound"), 64),
-        lowerBound: toBoundedString(field(value, "lowerBound"), 64),
-      };
-    }
-    case "monolingualtext": {
-      const text = sanitiseText(field(value, "text"));
-      if (text === null) return unknown;
-      return { _tag: "monolingualtext", text, language: sanitiseText(field(value, "language")) };
-    }
-    case "string": {
-      const str = sanitiseText(value);
-      if (str === null) return unknown;
-      return datatype === "external-id"
-        ? { _tag: "external-id", value: str }
-        : { _tag: "string", value: str };
-    }
-    default:
-      return unknown;
-  }
+  return matchDataValue({
+    type,
+    value,
+    fields: fieldsOf(value),
+    datatype,
+    unknown: { _tag: "unknown", type, value },
+  });
 }
 
 /** Normalises one raw snak into the typed {@link Snak}; `null` when it carries no valid property. */
@@ -760,23 +786,53 @@ export function normaliseSnak(raw: RawSnak): Snak | null {
   return { _tag: "value", property, datatype, value: normaliseDataValue(raw.datavalue, datatype) };
 }
 
+/**
+ * Keeps, in order, the first `max` items that `f` maps to a non-`null`
+ * value. `f` is not called once `max` are kept, so a hostile list costs one
+ * comparison per surplus entry.
+ */
+function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => B | null): B[] {
+  return Arr.reduce(items, Arr.empty<B>(), (kept, item) => {
+    if (kept.length < max) {
+      const usable = f(item);
+      if (usable !== null) kept.push(usable);
+    }
+    return kept;
+  });
+}
+
+/**
+ * Builds a record from the entries of `raw` that `f` maps to a non-`null`
+ * `[key, value]`, keeping at most `max` of them, in order. Keys are written
+ * by plain assignment.
+ */
+function keepUsableEntries<A, B>(
+  raw: Readonly<Record<string, A>> | undefined,
+  max: number,
+  f: (key: string, value: A) => readonly [string, B] | null,
+): Record<string, B> {
+  const out: Record<string, B> = {};
+  let kept = 0;
+  Arr.forEach(Record.toEntries(raw ?? {}), ([key, value]) => {
+    if (kept >= max) return;
+    const entry = f(key, value);
+    if (entry === null) return;
+    out[entry[0]] = entry[1];
+    kept++;
+  });
+  return out;
+}
+
 /** Normalises a `{ property: snak[] }` block (qualifiers / reference snaks), dropping unusable snaks. */
 function normaliseSnakList(
   raw: Readonly<Record<string, readonly RawSnak[]>> | undefined,
 ): Record<string, readonly Snak[]> {
-  const out: Record<string, readonly Snak[]> = {};
-  for (const [property, snaks] of Object.entries(raw ?? {})) {
+  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, snaks) => {
     const validProperty = parsePropertyId(property);
-    if (validProperty === null) continue;
-    const list: Snak[] = [];
-    for (const snak of snaks) {
-      if (list.length >= MAX_LIST_ENTRIES) break;
-      const normalised = normaliseSnak(snak);
-      if (normalised !== null) list.push(normalised);
-    }
-    if (list.length > 0) out[validProperty] = list;
-  }
-  return out;
+    if (validProperty === null) return null;
+    const list = keepUsable(snaks, MAX_LIST_ENTRIES, normaliseSnak);
+    return Arr.isReadonlyArrayNonEmpty(list) ? [validProperty, list] : null;
+  });
 }
 
 function normaliseRank(raw: unknown): StatementRank {
@@ -788,14 +844,10 @@ export function normaliseStatement(raw: RawStatement): Statement | null {
   if (raw.mainsnak === undefined) return null;
   const mainsnak = normaliseSnak(raw.mainsnak);
   if (mainsnak === null) return null;
-  const references: Reference[] = [];
-  for (const reference of raw.references ?? []) {
-    if (references.length >= MAX_LIST_ENTRIES) break;
-    references.push({
-      hash: sanitiseText(reference.hash),
-      snaks: normaliseSnakList(reference.snaks),
-    });
-  }
+  const references = keepUsable(raw.references ?? [], MAX_LIST_ENTRIES, (reference): Reference => ({
+    hash: sanitiseText(reference.hash),
+    snaks: normaliseSnakList(reference.snaks),
+  }));
   return {
     id: sanitiseText(raw.id),
     rank: normaliseRank(raw.rank),
@@ -809,59 +861,40 @@ export function normaliseStatement(raw: RawStatement): Statement | null {
 function normaliseTermMap(
   raw: Readonly<Record<string, { readonly value?: unknown }>> | undefined,
 ): LanguageMap {
-  const out: Record<string, string> = {};
-  for (const [language, term] of Object.entries(raw ?? {})) {
+  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, term) => {
     const value = sanitiseText(term?.value);
-    if (value !== null) out[language] = value;
-  }
-  return out;
+    return value === null ? null : [language, value];
+  });
 }
 
 function normaliseAliases(
   raw: Readonly<Record<string, readonly { readonly value?: unknown }[]>> | undefined,
 ): Record<string, readonly string[]> {
-  const out: Record<string, readonly string[]> = {};
-  for (const [language, terms] of Object.entries(raw ?? {})) {
-    const values: string[] = [];
-    for (const term of terms) {
-      if (values.length >= MAX_LIST_ENTRIES) break;
-      const value = sanitiseText(term?.value);
-      if (value !== null) values.push(value);
-    }
-    if (values.length > 0) out[language] = values;
-  }
-  return out;
+  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, terms) => {
+    const values = keepUsable(terms, MAX_LIST_ENTRIES, (term) => sanitiseText(term?.value));
+    return Arr.isReadonlyArrayNonEmpty(values) ? [language, values] : null;
+  });
 }
 
 /** Keeps the first {@link MAX_LIST_ENTRIES} badges that are valid item ids. */
 function normaliseBadges(raw: readonly unknown[] | undefined): ItemId[] {
-  const badges: ItemId[] = [];
-  for (const badge of raw ?? []) {
-    if (badges.length >= MAX_LIST_ENTRIES) break;
-    const id = parseItemId(badge);
-    if (id !== null) badges.push(id);
-  }
-  return badges;
+  return keepUsable(raw ?? [], MAX_LIST_ENTRIES, parseItemId);
 }
 
 /** Keeps the first {@link MAX_SITELINKS} sitelinks that carry a title. */
 function normaliseSitelinks(
   raw: Readonly<Record<string, RawSitelink>> | undefined,
 ): Record<string, Sitelink> {
-  const out: Record<string, Sitelink> = {};
-  let kept = 0;
-  for (const [site, link] of Object.entries(raw ?? {})) {
-    if (kept >= MAX_SITELINKS) break;
+  return keepUsableEntries(raw, MAX_SITELINKS, (site, link) => {
     const title = sanitiseText(link.title);
-    if (title === null) continue;
-    out[site] = {
+    if (title === null) return null;
+    const sitelink: Sitelink = {
       site: sanitiseText(link.site) ?? site,
       title,
       badges: normaliseBadges(link.badges),
     };
-    kept++;
-  }
-  return out;
+    return [site, sitelink];
+  });
 }
 
 /**
@@ -873,18 +906,11 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
   if (raw.missing !== undefined) return null;
   const id = parseEntityId(raw.id);
   if (id === null) return null;
-  const claims: Record<string, readonly Statement[]> = {};
-  for (const [property, statements] of Object.entries(raw.claims ?? {})) {
+  const claims = keepUsableEntries(raw.claims, Number.POSITIVE_INFINITY, (property, statements) => {
     const validProperty = parsePropertyId(property);
-    if (validProperty === null) continue;
-    const list: Statement[] = [];
-    for (const statement of statements) {
-      if (list.length >= MAX_LIST_ENTRIES) break;
-      const normalised = normaliseStatement(statement);
-      if (normalised !== null) list.push(normalised);
-    }
-    claims[validProperty] = list;
-  }
+    if (validProperty === null) return null;
+    return [validProperty, keepUsable(statements, MAX_LIST_ENTRIES, normaliseStatement)];
+  });
   return {
     id,
     type: sanitiseText(raw.type),
@@ -906,7 +932,10 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
  * {@link Dumps} entity-dump pipeline runs each dump line through.
  */
 export function decodeEntity(raw: unknown): WikidataItem | null {
-  if (typeof raw !== "object" || raw === null) return null;
+  if (!Predicate.isObjectOrArray(raw)) return null;
+  // SAFETY: every `RawEntity` field is optional and read defensively by
+  // `normaliseItem`, so any non-null object (an array included) is a valid
+  // input; a field of the wrong shape degrades rather than throws.
   return normaliseItem(raw as RawEntity);
 }
 
@@ -917,22 +946,13 @@ export function decodeEntity(raw: unknown): WikidataItem | null {
  * hostile or unexpected payload yields fewer items, never a throw.
  */
 export function normaliseEntities(response: WbGetEntitiesResponse): Record<string, WikidataItem> {
-  const out: Record<string, WikidataItem> = {};
-  for (const raw of Object.values(response.entities ?? {})) {
+  return keepUsableEntries(response.entities, Number.POSITIVE_INFINITY, (_, raw) => {
     const item = normaliseItem(raw);
-    if (item !== null) out[item.id] = item;
-  }
-  return out;
+    return item === null ? null : [item.id, item];
+  });
 }
 
 // ── wbgetentities (batched, 50-id chunking) ──────────────────────────────
-
-/** Splits `ids` into chunks of at most {@link MAX_IDS_PER_REQUEST}. */
-function chunk<A>(ids: readonly A[], size: number): readonly (readonly A[])[] {
-  const out: A[][] = [];
-  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
-  return out;
-}
 
 /** Options for {@link getEntities}. */
 export interface GetEntitiesOptions {
@@ -964,33 +984,45 @@ export const getEntities = Effect.fn("Wikidata.getEntities")(function* (
   options?: GetEntitiesOptions,
   retry?: RetryOptions,
 ) {
-  const validated: EntityId[] = [];
-  for (const id of ids) {
-    const parsed = parseEntityId(id);
-    if (parsed === null) return yield* new InvalidRequest({ kind: "entityId", value: String(id) });
-    validated.push(parsed);
-  }
+  const validated = yield* Effect.forEach(
+    ids,
+    (id) => {
+      const parsed = parseEntityId(id);
+      return parsed === null
+        ? Effect.fail(new InvalidRequest({ kind: "entityId", value: String(id) }))
+        : Effect.succeed(parsed);
+    },
+    { concurrency: 1 },
+  );
   const client = yield* WikimediaClient;
   const props = (options?.props ?? DEFAULT_PROPS).join("|");
-  const merged: Record<string, WikidataItem> = {};
-  for (const group of chunk(validated, MAX_IDS_PER_REQUEST)) {
-    const params: Record<string, string> = {
-      action: "wbgetentities",
-      ids: group.join("|"),
-      props,
-      format: "json",
-    };
-    if (options?.languages !== undefined && options.languages.length > 0) {
-      params.languages = options.languages.join("|");
-    }
-    const response = yield* client.getJson(
-      { host, path: "/w/api.php", params },
-      WbGetEntitiesResponse,
-      retry ?? DEFAULT_RETRY_OPTIONS,
-    );
-    Object.assign(merged, normaliseEntities(response));
-  }
-  return merged;
+  const languages =
+    options?.languages !== undefined && Arr.isReadonlyArrayNonEmpty(options.languages)
+      ? { languages: options.languages.join("|") }
+      : undefined;
+  const responses = yield* Effect.forEach(
+    Arr.chunksOf(validated, MAX_IDS_PER_REQUEST),
+    (group) =>
+      client.getJson(
+        {
+          host,
+          path: "/w/api.php",
+          params: {
+            action: "wbgetentities",
+            ids: group.join("|"),
+            props,
+            format: "json",
+            ...languages,
+          },
+        },
+        WbGetEntitiesResponse,
+        retry ?? DEFAULT_RETRY_OPTIONS,
+      ),
+    { concurrency: 1 },
+  );
+  return Arr.reduce(responses, Record.empty<string, WikidataItem>(), (merged, response) =>
+    Object.assign(merged, normaliseEntities(response)),
+  );
 });
 
 // ── wbsearchentities (label search) ──────────────────────────────────────
@@ -1066,20 +1098,17 @@ export interface SearchHit {
  * valid entity id and keeping at most {@link MAX_SEARCH_RESULTS}.
  */
 export function normaliseSearch(response: WbSearchResponse): readonly SearchHit[] {
-  const out: SearchHit[] = [];
-  for (const hit of response.search ?? []) {
-    if (out.length >= MAX_SEARCH_RESULTS) break;
+  return keepUsable(response.search ?? [], MAX_SEARCH_RESULTS, (hit): SearchHit | null => {
     const id = parseEntityId(hit.id);
-    if (id === null) continue;
-    out.push({
+    if (id === null) return null;
+    return {
       id,
       label: sanitiseText(hit.label),
       description: sanitiseText(hit.description),
       matchType: sanitiseText(hit.match?.type),
       matchText: sanitiseText(hit.match?.text),
-    });
-  }
-  return out;
+    };
+  });
 }
 
 /** Options for {@link searchEntities}. */

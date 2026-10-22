@@ -11,6 +11,7 @@
  * @module tests/reconciliation/normalise
  */
 
+import * as Predicate from "effect/Predicate";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type * as Wikidata from "../../src/wikidata.ts";
 import { normaliseCommonsImage } from "../../src/reconciliation/candidate.ts";
@@ -55,7 +56,7 @@ const item: Wikidata.WikidataItem = {
 
 describe("normaliseFacts Image facts", () => {
   it("copies only filename and iri from normaliseCommonsImage's result", () => {
-    const images = normaliseFacts(item, "Q42").facts.filter((fact) => fact._tag === "Image");
+    const images = normaliseFacts(item, "Q42").facts.filter(Predicate.isTagged("Image"));
     expect(images).toStrictEqual([
       {
         _tag: "Image",

@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/http";
@@ -43,22 +44,23 @@ const sentUrls = async <A, E>(
 /** Asserts `urls` holds `count` Action API URLs, each carrying exactly one `origin=*`. */
 const expectAnonymousCors = (urls: readonly URL[], count: number) => {
   expect(urls).toHaveLength(count);
-  for (const url of urls) {
-    expect(url.pathname).toBe("/w/api.php");
-    expect(url.searchParams.getAll("origin")).toEqual(["*"]);
-  }
+  expect(urls.map((url) => url.pathname)).toEqual(Arr.replicate("/w/api.php", count));
+  expect(urls.map((url) => url.searchParams.getAll("origin"))).toEqual(Arr.replicate(["*"], count));
 };
 
 describe("Action API requests (/w/api.php)", () => {
   it("send origin=* from Action", async () => {
     expectAnonymousCors(
       await sentUrls(
-        Effect.all([
-          Action.getWikitext("en.wikipedia.org", "Douglas Adams"),
-          Action.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
-          Action.search("en.wikipedia.org", "Douglas Adams"),
-          Action.parsePage("en.wikipedia.org", "Douglas Adams"),
-        ]),
+        Effect.all(
+          [
+            Action.getWikitext("en.wikipedia.org", "Douglas Adams"),
+            Action.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
+            Action.search("en.wikipedia.org", "Douglas Adams"),
+            Action.parsePage("en.wikipedia.org", "Douglas Adams"),
+          ],
+          { concurrency: 1 },
+        ),
       ),
       4,
     );
@@ -74,10 +76,13 @@ describe("Action API requests (/w/api.php)", () => {
   it("send origin=* from Wikidata", async () => {
     expectAnonymousCors(
       await sentUrls(
-        Effect.all([
-          Wikidata.getEntities("www.wikidata.org", ["Q42"]),
-          Wikidata.searchEntities("www.wikidata.org", "Douglas Adams"),
-        ]),
+        Effect.all(
+          [
+            Wikidata.getEntities("www.wikidata.org", ["Q42"]),
+            Wikidata.searchEntities("www.wikidata.org", "Douglas Adams"),
+          ],
+          { concurrency: 1 },
+        ),
       ),
       2,
     );
@@ -143,13 +148,16 @@ describe("Action API requests (/w/api.php)", () => {
 describe("REST and WDQS requests", () => {
   it("carry no origin parameter", async () => {
     const urls = await sentUrls(
-      Effect.all([
-        Rest.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
-        Rest.getRevisionMetadata("en.wikipedia.org", 1),
-        Rest.getParsedHtml("en.wikipedia.org", "Douglas Adams"),
-        Rest.getRevisionHtml("en.wikipedia.org", 1),
-        Sparql.query("SELECT ?item WHERE { ?item ?p ?o } LIMIT 1"),
-      ]),
+      Effect.all(
+        [
+          Rest.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
+          Rest.getRevisionMetadata("en.wikipedia.org", 1),
+          Rest.getParsedHtml("en.wikipedia.org", "Douglas Adams"),
+          Rest.getRevisionHtml("en.wikipedia.org", 1),
+          Sparql.query("SELECT ?item WHERE { ?item ?p ?o } LIMIT 1"),
+        ],
+        { concurrency: 1 },
+      ),
     );
     expect(urls.map((url) => url.pathname)).toEqual([
       "/w/rest.php/v1/page/Douglas_Adams",
@@ -158,6 +166,6 @@ describe("REST and WDQS requests", () => {
       "/w/rest.php/v1/revision/1/html",
       Sparql.WDQS_PATH,
     ]);
-    for (const url of urls) expect(url.searchParams.has("origin")).toBe(false);
+    expect(urls.filter((url) => url.searchParams.has("origin"))).toEqual([]);
   });
 });

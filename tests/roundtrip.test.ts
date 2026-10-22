@@ -15,8 +15,17 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import { type Node, parse, serialize, serializeNode, walk } from "../src/wikitext/index.ts";
+
+/** `JSON.stringify` through the `Schema` JSON boundary (encoding `Unknown` is the identity). */
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+/** `f(0)`, …, `f(n - 1)` in order; empty when `n <= 0` (`Arr.makeBy` never is). */
+const times = <A>(n: number, f: (i: number) => A): ReadonlyArray<A> =>
+  n <= 0 ? [] : Arr.makeBy(n, f);
 
 const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
 const fixtures = readdirSync(fixturesDir)
@@ -36,7 +45,7 @@ describe("corpus round-trip", () => {
     expect(fixtures.length).toBeGreaterThan(0);
   });
 
-  for (const { name, text } of fixtures) {
+  Arr.forEach(fixtures, ({ name, text }) => {
     it(`round-trips ${name} byte-identically`, () => {
       const doc = parse(text);
       expect(serialize(doc)).toBe(text);
@@ -49,14 +58,13 @@ describe("corpus round-trip", () => {
 
     it(`tiles ${name} contiguously with no gaps`, () => {
       const doc = parse(text);
-      let cursor = 0;
-      for (const node of doc.children) {
-        expect(node.span.start).toBe(cursor);
-        cursor = node.span.end;
-      }
+      const cursor = Arr.reduce(doc.children, 0, (start, node) => {
+        expect(node.span.start).toBe(start);
+        return node.span.end;
+      });
       expect(cursor).toBe(text.length);
     });
-  }
+  });
 });
 
 // ── property-based fuzz ────────────────────────────────────────────────
@@ -78,28 +86,27 @@ const FUZZ_ALPHABET = "{}[]<>|='\"&#;-!/*abcde 12\nö".split("");
 
 function randomWikitext(rand: () => number, maxLen: number): string {
   const len = Math.floor(rand() * maxLen);
-  let out = "";
-  for (let i = 0; i < len; i++) {
-    out += FUZZ_ALPHABET[Math.floor(rand() * FUZZ_ALPHABET.length)];
-  }
-  return out;
+  return times(len, () => FUZZ_ALPHABET[Math.floor(rand() * FUZZ_ALPHABET.length)]).join("");
 }
 
 describe("fuzz: never throws, always round-trips", () => {
   it("survives 5000 random structural strings", () => {
     const rand = prng(0x9e3779b9);
-    for (let i = 0; i < 5000; i++) {
-      const input = randomWikitext(rand, 200);
-      let out: string;
-      expect(
-        () => {
-          out = serialize(parse(input));
-        },
-        `input #${i}: ${JSON.stringify(input)}`,
-      ).not.toThrow();
-      out = serialize(parse(input));
-      expect(out, `round-trip #${i}: ${JSON.stringify(input)}`).toBe(input);
-    }
+    Arr.forEach(
+      times(5000, (i) => i),
+      (i) => {
+        const input = randomWikitext(rand, 200);
+        let out: string;
+        expect(
+          () => {
+            out = serialize(parse(input));
+          },
+          `input #${i}: ${encodeJson(input)}`,
+        ).not.toThrow();
+        out = serialize(parse(input));
+        expect(out, `round-trip #${i}: ${encodeJson(input)}`).toBe(input);
+      },
+    );
   });
 
   it("survives adversarial delimiter storms", () => {
@@ -116,7 +123,7 @@ describe("fuzz: never throws, always round-trips", () => {
       "&#".repeat(200),
       "|=".repeat(300),
     ];
-    for (const input of cases) {
+    Arr.forEach(cases, (input) => {
       let out = "";
       expect(
         () => {
@@ -125,7 +132,7 @@ describe("fuzz: never throws, always round-trips", () => {
         `input: ${input.slice(0, 20)}…`,
       ).not.toThrow();
       expect(out).toBe(input);
-    }
+    });
   });
 
   it("round-trips deeply nested input past the recursion bound without throwing", () => {
@@ -177,20 +184,24 @@ const TABLE_ATOMS = [
 ];
 
 function randomTable(rand: () => number): string {
-  let out = rand() < 0.3 ? "{|\n|+" : "{|\n";
+  const open = rand() < 0.3 ? "{|\n|+" : "{|\n";
   const len = Math.floor(rand() * 60);
-  for (let i = 0; i < len; i++) out += TABLE_ATOMS[Math.floor(rand() * TABLE_ATOMS.length)];
+  const out =
+    open + times(len, () => TABLE_ATOMS[Math.floor(rand() * TABLE_ATOMS.length)]).join("");
   return rand() < 0.8 ? `${out}\n|}` : out;
 }
 
 describe("fuzz: tables with nested constructs (#132)", () => {
   it("round-trips 3000 random tables with every span its own source slice", () => {
     const rand = prng(0x13213213);
-    for (let i = 0; i < 3000; i++) {
-      const input = randomTable(rand);
-      const doc = parse(input);
-      expect(serialize(doc), `round-trip #${i}: ${JSON.stringify(input)}`).toBe(input);
-      assertSpanFidelity(input, doc);
-    }
+    Arr.forEach(
+      times(3000, (i) => i),
+      (i) => {
+        const input = randomTable(rand);
+        const doc = parse(input);
+        expect(serialize(doc), `round-trip #${i}: ${encodeJson(input)}`).toBe(input);
+        assertSpanFidelity(input, doc);
+      },
+    );
   });
 });

@@ -39,7 +39,37 @@
       "exports": ["MAX_SEARCH_RESULTS", "normaliseSearch"]
     }
   ],
+  // Module-per-surface (AGENTS.md), as fallow import boundaries: each surface
+  // imports only `Core`, except `Dumps` (decodes through `Wikidata`'s model)
+  // and `Reconciliation` (drives `Action` and `Wikidata`); `Wikitext` imports
+  // no other surface. The barrel, src/index.ts, sits in no zone.
+  // tests/tree-shaking.test.ts pins the same property on the bundled output.
+  "boundaries": {
+    "zones": [
+      { "name": "core", "patterns": ["src/core.ts"] },
+      { "name": "action", "patterns": ["src/action.ts"] },
+      { "name": "rest", "patterns": ["src/rest.ts"] },
+      { "name": "commons", "patterns": ["src/commons.ts"] },
+      { "name": "wikidata", "patterns": ["src/wikidata.ts"] },
+      { "name": "sparql", "patterns": ["src/sparql.ts"] },
+      { "name": "wikitext", "patterns": ["src/wikitext/**"] },
+      { "name": "dumps", "patterns": ["src/dumps/**"] },
+      { "name": "reconciliation", "patterns": ["src/reconciliation/**"] }
+    ],
+    "rules": [
+      { "from": "core", "allow": [] },
+      { "from": "action", "allow": ["core"] },
+      { "from": "rest", "allow": ["core"] },
+      { "from": "commons", "allow": ["core"] },
+      { "from": "wikidata", "allow": ["core"] },
+      { "from": "sparql", "allow": ["core"] },
+      { "from": "wikitext", "allow": [] },
+      { "from": "dumps", "allow": ["core", "wikidata"] },
+      { "from": "reconciliation", "allow": ["core", "action", "wikidata"] }
+    ]
+  },
   "rules": {
+    "boundary-violation": "error",
     // fallow defaults both to `warn`, which prints without failing. Every
     // dependency here is a devDependency (`effect` is also the one peer), and
     // every version lives in the strict catalog, so at `warn` the gate would
@@ -55,25 +85,12 @@
   // coverage `vp run test:unit` writes; without that file fallow exits 2
   // rather than fall back to its estimate, which disagrees with these limits.
   "health": {
-    "coverage": "coverage/coverage-final.json",
-    // One entry per function, keyed by file and name, raising only the limit
-    // it breaches: its other limits stay at the defaults. After a refactor
-    // brings a function down, lower its limit to the new value, or delete the
-    // entry once the function is within the defaults (AGENTS.md). CRAP fails
-    // at or above its ceiling, so a CRAP ceiling is today's score plus 0.1;
-    // cyclomatic and cognitive fail only above theirs.
-    "thresholdOverrides": [
-      {
-        "files": ["src/core.ts"],
-        "functions": ["normaliseTitle"],
-        "maxCognitive": 18
-      },
-      {
-        "files": ["src/wikitext/quotes.ts"],
-        "functions": ["resolveLine"],
-        "maxCognitive": 35
-      }
-    ]
+    "coverage": "coverage/coverage-final.json"
+    // No function is pinned any more: `normaliseTitle` (src/core.ts) and
+    // `resolveLine` (src/wikitext/quotes.ts), the two over a limit when the
+    // gate landed, came within the defaults in the effect lint sweep, so
+    // their `thresholdOverrides` entries are gone and every function is held
+    // to the defaults.
   },
   // The duplication ratchet (also `vp run fallow`, #102): `fallow dupes
   // --fail-on-issues` fails on any clone group (5+ lines, 50+ tokens) not
@@ -83,8 +100,6 @@
   // delete its entry (AGENTS.md).
   "duplicates": {
     "ignoredClones": [
-      // src/reconciliation/candidate.ts:145-158 and :430-441 (14 lines).
-      "dup:2bff87a3:2",
       // src/action.ts:112-122 and :200-208 (11 lines).
       "dup:f34feed5:2"
     ]

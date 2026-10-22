@@ -13,6 +13,10 @@
  * @module reconciliation/normalise
  */
 
+import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
+import * as Record from "effect/Record";
+import * as Result from "effect/Result";
 import type * as Action from "../action.ts";
 import type * as Wikidata from "../wikidata.ts";
 import {
@@ -69,30 +73,27 @@ export function hitToCandidate(hit: Wikidata.SearchHit): readonly WikidataCandid
  * and capped at {@link MAX_CANDIDATES}.
  */
 export function dedupedQids(hits: readonly Action.SearchResult[]): readonly string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const hit of hits) {
-    if (out.length >= MAX_CANDIDATES) break;
-    const qid = normaliseQid(hit.title);
-    if (qid === null || seen.has(qid)) continue;
-    seen.add(qid);
-    out.push(qid);
-  }
-  return out;
+  return Arr.take(
+    Arr.dedupe(Arr.filterMap(hits, (hit) => present(normaliseQid(hit.title)))),
+    MAX_CANDIDATES,
+  );
+}
+
+/** `Result.succeed` for a validated value, `Result.failVoid` for a rejected (`null`) one. */
+function present<A>(value: A | null): Result.Result<A, void> {
+  return value === null ? Result.failVoid : Result.succeed(value);
 }
 
 /** The validated `wikibase-entityid` targets of a P31 (`instance of`) statement list, capped. */
 function instanceOfQids(item: Wikidata.WikidataItem): readonly string[] {
-  const out: string[] = [];
-  for (const statement of item.claims.P31 ?? []) {
-    if (out.length >= MAX_INSTANCE_OF) break;
-    if (statement.mainsnak._tag !== "value") continue;
-    const value = statement.mainsnak.value;
-    if (value._tag !== "wikibase-entityid") continue;
-    const qid = normaliseQid(value.id);
-    if (qid !== null) out.push(qid);
-  }
-  return out;
+  return Arr.take(
+    Arr.filterMap(statementValues(item, "P31"), (value) =>
+      Predicate.isTagged(value, "wikibase-entityid")
+        ? present(normaliseQid(value.id))
+        : Result.failVoid,
+    ),
+    MAX_INSTANCE_OF,
+  );
 }
 
 /**
@@ -125,11 +126,9 @@ function statementValues(
   item: Wikidata.WikidataItem,
   property: string,
 ): readonly Wikidata.DataValue[] {
-  const out: Wikidata.DataValue[] = [];
-  for (const statement of item.claims[property] ?? []) {
-    if (statement.mainsnak._tag === "value") out.push(statement.mainsnak.value);
-  }
-  return out;
+  return Arr.filterMap(item.claims[property] ?? [], ({ mainsnak }) =>
+    Predicate.isTagged(mainsnak, "value") ? Result.succeed(mainsnak.value) : Result.failVoid,
+  );
 }
 
 /**
@@ -142,25 +141,23 @@ function statementValues(
  * the format yields no fact.
  */
 function identifierFacts(item: Wikidata.WikidataItem): IdentifierFact[] {
-  const out: IdentifierFact[] = [];
-  for (const [property, scheme] of Object.entries(EXTERNAL_ID_AUTHORITIES)) {
-    for (const value of statementValues(item, property)) {
-      if (out.length >= MAX_SAME_AS) return out;
-      if (value._tag !== "external-id") continue;
+  const facts = Arr.flatMap(Record.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) =>
+    Arr.filterMap(statementValues(item, property), (value): Result.Result<IdentifierFact, void> => {
+      if (!Predicate.isTagged(value, "external-id")) return Result.failVoid;
       const validated = normaliseExternalIdValue(value.value);
-      if (validated === null) continue;
-      const iri = scheme.iri(validated);
-      if (iri === null) continue;
-      out.push({
-        _tag: "Identifier",
-        property,
-        authority: scheme.authority,
-        value: validated,
-        iri,
-      });
-    }
-  }
-  return out;
+      const iri = validated === null ? null : scheme.iri(validated);
+      return validated === null || iri === null
+        ? Result.failVoid
+        : Result.succeed({
+            _tag: "Identifier",
+            property,
+            authority: scheme.authority,
+            value: validated,
+            iri,
+          });
+    }),
+  );
+  return Arr.take(facts, MAX_SAME_AS);
 }
 
 /** Wikibase's precision code when it is an integer in its 0–14 range, else `null`. */
@@ -191,24 +188,23 @@ function timeCalendar(calendarModel: string | null): DateFact["calendar"] {
  * its calendar model mapped to a calendar, and the property's English label.
  */
 function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
-  const out: DateFact[] = [];
-  for (const [property, label] of Object.entries(DATE_PROPERTIES)) {
-    for (const value of statementValues(item, property)) {
-      if (out.length >= MAX_DATES) return out;
-      if (value._tag !== "time") continue;
+  const facts = Arr.flatMap(Record.toEntries(DATE_PROPERTIES), ([property, label]) =>
+    Arr.filterMap(statementValues(item, property), (value): Result.Result<DateFact, void> => {
+      if (!Predicate.isTagged(value, "time")) return Result.failVoid;
       const time = normaliseTimeValue(value.time);
-      if (time === null) continue;
-      out.push({
-        _tag: "Date",
-        property,
-        label,
-        time,
-        precision: timePrecision(value.precision),
-        calendar: timeCalendar(value.calendarModel),
-      });
-    }
-  }
-  return out;
+      return time === null
+        ? Result.failVoid
+        : Result.succeed({
+            _tag: "Date",
+            property,
+            label,
+            time,
+            precision: timePrecision(value.precision),
+            calendar: timeCalendar(value.calendarModel),
+          });
+    }),
+  );
+  return Arr.take(facts, MAX_DATES);
 }
 
 /**
@@ -220,19 +216,18 @@ function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
  * a consumer has already stored.
  */
 function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
-  const out: ImageFact[] = [];
-  for (const property of IMAGE_PROPERTIES) {
-    for (const value of statementValues(item, property)) {
-      if (out.length >= MAX_IMAGES) return out;
-      if (value._tag !== "string") continue;
+  const facts = Arr.flatMap(IMAGE_PROPERTIES, (property) =>
+    Arr.filterMap(statementValues(item, property), (value): Result.Result<ImageFact, void> => {
+      if (!Predicate.isTagged(value, "string")) return Result.failVoid;
       const image = normaliseCommonsImage(value.value);
-      if (image === null) continue;
       // Fields spelled out, not spread: a field the helper gains must not
       // reach `ImageFact` at runtime, where no type check would see it.
-      out.push({ _tag: "Image", property, filename: image.filename, iri: image.iri });
-    }
-  }
-  return out;
+      return image === null
+        ? Result.failVoid
+        : Result.succeed({ _tag: "Image", property, filename: image.filename, iri: image.iri });
+    }),
+  );
+  return Arr.take(facts, MAX_IMAGES);
 }
 
 /**

@@ -9,7 +9,7 @@ Every surface is a namespace on the package's single `.` entry point (`import { 
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-wikimedia effect@rc
+pnpm add @thomasfosterau/effect-wikimedia effect
 ```
 
 `effect` is a required peer dependency (`>=4.0.0`) — two copies break `Context` / `Layer` / `Schema` identity at runtime.
@@ -98,7 +98,7 @@ Questions, bug reports, and reports from Wikimedia operators about this client's
 
 ## Development
 
-Commands and conventions: `AGENTS.md`; releases: `docs/RELEASING.md` (both in the source repository, not the npm package).
+Commands and conventions: `AGENTS.md`; releases: `PUBLISHING.md`; contributing: `CONTRIBUTING.md`; security: `SECURITY.md` (all in the source repository, not the npm package).
 
 ## License
 
