@@ -1,28 +1,34 @@
-# Dependabot version-update configuration (a subset of the
-# `thomasfosterau/effect-drizzle-ext` one, the shared library standard).
+# Dependabot version updates (the shape the @thomasfosterau family shares).
 #
-# `groups` collect dependencies that MUST move together: the Effect 4 release
-# line is a lockstep-versioned singleton set; the vitest toolchain is pinned to
-# vite-plus's exact versions (see the catalog in pnpm-workspace.yaml).
+# The `npm` ecosystem at `/` reads pnpm-workspace.yaml's catalogs and
+# pnpm-lock.yaml. `groups` hold the sets that MUST move together, so a
+# lockstep set arrives as one PR (every update type, majors included) and can
+# never drift one package at a time. Dependabot puts a dependency in the FIRST
+# group that matches, so the groups run specific → general, with
+# `exclude-patterns` keeping a package out of a broader group:
 #
-# `vite` is an npm alias of `@voidzero-dev/vite-plus-core`, `vitest` must
-# match vite-plus's exact pin, and `@vitest/coverage-istanbul` peers on that
-# exact `vitest`, so their *version* updates are ignored (bump the four
-# together by editing the catalog) while SECURITY updates stay enabled: each
-# ignore is scoped to the `version-update:semver-*` update types; a bare
-# `dependency-name` ignore would block security updates too.
+# - `toolchain`: `effect-tsgo patch` (the `prepare` script) matches the
+#   installed `tsc`, `oxlint` and `oxlint-tsgolint` by gitHead and hard-errors
+#   (UnsupportedTargetPackageVersionError) on any pairing it has no build for,
+#   failing `pnpm install` itself; `vite-plus` pins the oxlint, oxfmt,
+#   tsgolint and vitest it carries, `vite` is its core under an alias,
+#   `vitest` must equal its pin, and `@vitest/coverage-istanbul` peers on that
+#   exact `vitest`. The effect lint plugin loads inside that oxlint. Before
+#   merging a toolchain PR, check the `components` table in
+#   node_modules/@effect/tsgo/dist/effect-tsgo.cjs (see the catalog comments).
+# - `effect`: the Effect release line is a lockstep, singleton set.
+# - `typedoc`, `fallow`, `changesets`: each tool's own packages.
+# - `minor-and-patch`: everything else, minor and patch only, so PR volume
+#   stays low; a major outside the sets above stays its own PR.
 #
-# `@effect/tsgo`, `typescript` (the TS6 alias) and `@typescript/native` (TS7)
-# are one set: `effect-tsgo patch` matches the installed TypeScript by gitHead
-# and hard-errors (UnsupportedTargetPackageVersionError) on any pairing it has
-# no artifact for, so a PR that moves one of them alone goes red. Their
-# *version* updates are ignored the same way (security updates stay enabled);
-# bump the three by hand as a set, together with `vite-plus` (whose tsgolint
-# is built against a TypeScript version), after checking the `components`
-# table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs. `@effect/tsgo` is
-# excluded from the `effect` group, whose `@effect/*` pattern would match it.
+# Catalog entries Dependabot may not bump on its own (npm aliases: `vite` →
+# `@voidzero-dev/vite-plus-core`, `typescript` → `@typescript/typescript6`,
+# `@typescript/native` → `typescript`) are by-hand steps with their group;
+# AGENTS.md lists them. The `overrides` in pnpm-workspace.yaml are all
+# `catalog:`, so they follow the catalog and need no bump of their own.
 #
-# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge`, so Dependabot
+# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
+# `@thomasfosterau/*` exempt as `minimumReleaseAgeExclude` is, so Dependabot
 # never proposes a version pnpm's own supply-chain gate would reject.
 version: 2
 updates:
@@ -32,85 +38,70 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
     commit-message:
       prefix: "chore"
-      prefix-development: "chore"
     cooldown:
       default-days: 1
       exclude:
         - "@thomasfosterau/*"
     groups:
+      toolchain:
+        applies-to: version-updates
+        patterns:
+          - "vite-plus"
+          - "vite"
+          - "@voidzero-dev/*"
+          - "vitest"
+          - "@vitest/*"
+          - "oxlint"
+          - "oxfmt"
+          - "oxlint-tsgolint"
+          - "@effect/tsgo"
+          - "@typescript/native"
+          - "typescript"
+          - "@typescript/typescript6"
+          - "@mpsuesser/oxlint-plugin-effect"
+        update-types: ["major", "minor", "patch"]
       effect:
+        applies-to: version-updates
         patterns:
           - "effect"
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
-      vitest-toolchain:
+        update-types: ["major", "minor", "patch"]
+      typedoc:
+        applies-to: version-updates
         patterns:
-          - "vitest"
-          - "@vitest/coverage-istanbul"
-          - "vite-plus"
-    ignore:
-      - dependency-name: "@effect/tsgo"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "typescript"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "@typescript/native"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vite"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vitest"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "@vitest/coverage-istanbul"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vite-plus"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
+          - "typedoc"
+          - "typedoc-plugin-*"
+          - "@microsoft/tsdoc*"
+        update-types: ["major", "minor", "patch"]
+      fallow:
+        applies-to: version-updates
+        patterns:
+          - "fallow"
+          - "@fallow-cli/*"
+        update-types: ["major", "minor", "patch"]
+      changesets:
+        applies-to: version-updates
+        patterns:
+          - "@changesets/*"
+        update-types: ["major", "minor", "patch"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
     commit-message:
-      prefix: "ci"
-      include: "scope"
+      prefix: "chore"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

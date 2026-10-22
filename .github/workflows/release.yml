@@ -4,7 +4,7 @@ name: Release
 # release-pipeline standard): on every push to `trunk`, changesets/action
 # either opens/updates the "Version Packages" PR (while unreleased changesets
 # exist) or, once that PR has merged and no changesets remain, publishes to
-# npm and tags the release. See docs/RELEASING.md.
+# npm and tags the release. See PUBLISHING.md.
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Requires manual approval via a protected GitHub Environment named
-    # "release". See docs/RELEASING.md for the one-time setup.
+    # "release". See PUBLISHING.md for the one-time setup.
     environment: release
     permissions:
       contents: write # push the version branch, the release tag and the GitHub release
