@@ -510,7 +510,7 @@ export interface Table {
  * `attrs` / `content` follow the single-pipe rule shared with
  * {@link TableCell}: the first `|` on the caption's opening line, outside any
  * template, argument, wikilink, comment or extension tag, splits attributes
- * from content, *unless* a `[[` outside those comes before it — see
+ * from content, *unless* a `[[` or `-{` outside those comes before it — see
  * {@link TableCell.attrs}. `content` extends across any following lines that
  * aren't themselves a table marker, so a caption's text can span paragraphs.
  */
@@ -539,8 +539,8 @@ export interface TableCaption {
   /**
    * The text between `|+` (or `||`) and the first `|` on its line outside a template,
    * argument, wikilink, comment or extension tag, verbatim and untrimmed;
-   * `undefined` when there is no such `|` or a `[[` outside those comes
-   * before it. In `|+ {{flag|France}} results` there is none, so the
+   * `undefined` when there is no such `|` or a `[[` or `-{` outside those
+   * comes before it. In `|+ {{flag|France}} results` there is none, so the
    * template is content.
    */
   readonly attrs: string | undefined;
@@ -597,10 +597,12 @@ export interface TableRow {
  * splits the cell's opening-line text at the first `|` into attributes and
  * content. A `|` inside a template, argument, wikilink, comment or extension
  * tag doesn't count (see {@link Table}), so `| {{flag|France}}` is all
- * content. Nor is there a split when a `[[` outside those comes before the
- * `|`: the whole thing is content and `attrs` is `undefined` (MediaWiki's
- * guard against reading the text around a wikilink as attributes, which it
- * also applies to `-{`; this parser does not).
+ * content. Nor is there a split when a `[[` or a `-{` (LanguageConverter
+ * markup, `-{ … }-`) outside those comes before the `|`: the whole thing is
+ * content and `attrs` is `undefined` (MediaWiki's guard, `/\[\[|-\{/`,
+ * against reading the text around a wikilink or a conversion rule as
+ * attributes). `-{ … }-` is not otherwise special: as in MediaWiki, a `|`,
+ * `||` or line break inside it still counts.
  * `content` extends across any following lines that aren't themselves a
  * table marker (multi-line cell content).
  */
@@ -627,7 +629,7 @@ export interface TableCell {
    * The text between the marker and the first `|` in the cell's part of its
    * opening line outside a template, argument, wikilink, comment or
    * extension tag, verbatim and untrimmed; `undefined` when there is no such
-   * `|` or a `[[` outside those comes before it. For
+   * `|` or a `[[` or `-{` outside those comes before it. For
    * `| style="x" | {{flag|France}}` it is `' style="x" '`; for
    * `| {{flag|France}}` it is `undefined`.
    */

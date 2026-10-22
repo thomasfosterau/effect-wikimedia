@@ -513,9 +513,9 @@ const trailingNewline = Parser.optional(literal("\n"));
 /**
  * MediaWiki's single-pipe cell/caption attribute rule (`Parser::doTableStuff`):
  * the first `|` in `[from, to)` outside a nested construct (see
- * `findTopLevel`) splits attributes from content, *unless* a `[[`
- * comes before it (MediaWiki's guard against reading a wikilink's
- * surroundings as attributes).
+ * `findTopLevel`) splits attributes from content, *unless* a `[[` or a
+ * `-{` comes before it (MediaWiki's guard, `/\[\[|-\{/`, against reading a
+ * wikilink's or a LanguageConverter rule's surroundings as attributes; #158).
  */
 interface CellSplit {
   /** The attribute text, or `undefined` when no attribute `|` splits the cell. */
@@ -528,7 +528,8 @@ function splitCellAttrs(state: State, from: number, to: number): CellSplit {
   const src = state.input;
   const at = findTopLevel(state, from, to, (i) => {
     const c = src.charCodeAt(i);
-    return c === PIPE || (c === 0x5b && src.charCodeAt(i + 1) === 0x5b); // | or [[
+    const next = src.charCodeAt(i + 1);
+    return c === PIPE || (c === 0x5b && next === 0x5b) || (c === 0x2d && next === 0x7b); // |, [[ or -{
   });
   if (at >= to || src.charCodeAt(at) !== PIPE) return { attrs: undefined, contentStart: from };
   return { attrs: src.slice(from, at), contentStart: at + 1 };

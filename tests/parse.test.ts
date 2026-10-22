@@ -761,6 +761,46 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
   });
 });
 
+describe("wikitables: the -{ attribute guard (#158)", () => {
+  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
+  function table(src: string): Table {
+    const doc = parse(src);
+    expect(serialize(doc)).toBe(src);
+    walk(doc, (n) => {
+      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+        src.slice(n.span.start, n.span.end),
+      );
+    });
+    return only(src, "Table") as Table;
+  }
+
+  it("reads a cell with -{ before its first | as all content (the issue's example)", () => {
+    const cells = table("{|\n| -{ a|b }- || c\n|}").rows[0].cells;
+    expect(cells.map((c) => [c.attrs, text(c.content)])).toEqual([
+      [undefined, " -{ a|b }- "],
+      [undefined, " c\n"],
+    ]);
+  });
+
+  it("applies the guard to a caption", () => {
+    const [caption] = table("{|\n|+ -{zh-hans:简;zh-hant:繁}- | x\n|}").captions;
+    expect(caption.attrs).toBeUndefined();
+    expect(text(caption.content)).toBe(" -{zh-hans:简;zh-hant:繁}- | x\n");
+  });
+
+  it("keeps attributes when -{ comes only after the first |, or inside a template", () => {
+    expect(table('{|\n| style="x" | -{ a }-\n|}').rows[0].cells[0].attrs).toBe(' style="x" ');
+    expect(table('{|\n| {{t|-{}} style="x" | a\n|}').rows[0].cells[0].attrs).toBe(
+      ' {{t|-{}} style="x" ',
+    );
+  });
+
+  it("doesn't step over -{ … }- when splitting cells, as MediaWiki doesn't", () => {
+    const cells = table("{|\n| -{ a || b }-\n|}").rows[0].cells;
+    expect(cells.map((c) => text(c.content))).toEqual([" -{ a ", " b }-\n"]);
+  });
+});
+
 describe("regression: existing vocabulary is unaffected by tables/autolink (issue #1287)", () => {
   const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
   const ada = readFileSync(`${fixturesDir}ada-lovelace.txt`, "utf8");
