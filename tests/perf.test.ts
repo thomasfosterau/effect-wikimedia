@@ -115,3 +115,30 @@ describe("performance floor: wikitables (#132)", () => {
     expect(serialize(parse(src))).toBe(src);
   });
 });
+
+// An unclosed opener whose close is searched for past the region it sits in
+// (#152), or a construct that rescans the rest of the input before failing
+// (#159), costs time quadratic in the number of openers. Each close search is
+// now remembered, and a table, template, argument or wikilink that cannot
+// close fails at once. On `trunk` before the fix these took 0.4 s to 14 s
+// each; with it, a few tens of ms at most, under the same 250 ms ceiling as
+// above.
+describe("performance floor: unclosed openers (#152, #159)", () => {
+  const cellRows = (cell: string, rows: number): string =>
+    `{|\n${`|-\n| ${cell} || b\n| c\n`.repeat(rows)}|}\n`;
+
+  it.each([
+    ["a table with an unclosed <!-- in every row", cellRows("<!-- x", 8000)],
+    ["a table with an unclosed <ref> in every row", cellRows("<ref>x", 12_000)],
+    ["a page of unclosed <ref> lines", "<ref>x\n".repeat(20_000)],
+    ["a page of unclosed {| lines", "{|\n".repeat(13_334)],
+    ["a page of unclosed {| and {{ lines", "{|\n| {{\n".repeat(5000)],
+    ["a page of unclosed [[ lines", "[[\n".repeat(13_334)],
+  ] as const)("parses %s in linear time", (name, src) => {
+    const best = bestParseTime(src);
+    // eslint-disable-next-line no-console
+    console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
+    expect(best).toBeLessThan(250);
+    expect(serialize(parse(src))).toBe(src);
+  });
+});
