@@ -595,6 +595,7 @@ const RawReference = Schema.Struct({
   /** The reference's snaks keyed by property id. */
   snaks: Schema.optional(RawSnakList),
 });
+type RawReference = typeof RawReference.Type;
 
 const RawStatement = Schema.Struct({
   /** The statement GUID (`"Q42$…"`). */
@@ -682,6 +683,29 @@ const NO_FIELDS: Readonly<Record<string, unknown>> = {};
 /** Reads a datavalue payload's fields defensively: none unless it is an object. */
 function fieldsOf(value: unknown): Readonly<Record<string, unknown>> {
   return Predicate.isObject(value) ? value : NO_FIELDS;
+}
+
+/**
+ * The objects in a list, each read as `A`; none when `raw` is not an array.
+ * {@link decodeEntity} runs on unvalidated JSON, where a statement list can
+ * be a number and an entry `null` (#147).
+ */
+function objectsIn<A>(raw: unknown): readonly A[] {
+  if (!Array.isArray(raw)) return [];
+  // Only objects pass, read as `A`: every raw wire type is a struct of
+  // optional fields its normaliser reads defensively.
+  return Arr.filter(raw, (entry: unknown): entry is A => Predicate.isObject(entry));
+}
+
+/**
+ * The own entries of a keyed map; none when `raw` is not an object (#147). A
+ * `__proto__` key is dropped: assigning it to the plain object a normaliser
+ * builds would replace that object's prototype rather than add an entry, and
+ * no language code, site id, property id or entity id is spelled so (#164).
+ */
+function entriesOf(raw: unknown): ReadonlyArray<readonly [string, unknown]> {
+  if (!Predicate.isObject(raw)) return [];
+  return Arr.filter(Record.toEntries(raw), ([key]) => key !== "__proto__");
 }
 
 /** What {@link normaliseDataValue} dispatches on: the datavalue's own `type`, plus its payload. */
@@ -780,9 +804,10 @@ export function normaliseSnak(raw: RawSnak): Snak | null {
   if (snaktype === "novalue") return { _tag: "novalue", property, datatype };
   if (snaktype === "somevalue") return { _tag: "somevalue", property, datatype };
   // Otherwise it is a value snak. Wikibase always sends snaktype "value"
-  // explicitly, but if a datavalue is somehow absent we fall back to
-  // "somevalue" rather than inventing an empty value.
-  if (raw.datavalue === undefined) return { _tag: "somevalue", property, datatype };
+  // explicitly, but if a datavalue is somehow absent (or, in an unvalidated
+  // dump line, not an object) we fall back to "somevalue" rather than
+  // inventing an empty value.
+  if (!Predicate.isObject(raw.datavalue)) return { _tag: "somevalue", property, datatype };
   return { _tag: "value", property, datatype, value: normaliseDataValue(raw.datavalue, datatype) };
 }
 
@@ -802,18 +827,19 @@ function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => B | n
 }
 
 /**
- * Builds a record from the entries of `raw` that `f` maps to a non-`null`
+ * Builds a record from the entries of `raw` (see `entriesOf`: none unless it
+ * is an object, and never a `__proto__` key) that `f` maps to a non-`null`
  * `[key, value]`, keeping at most `max` of them, in order. Keys are written
  * by plain assignment.
  */
-function keepUsableEntries<A, B>(
-  raw: Readonly<Record<string, A>> | undefined,
+function keepUsableEntries<B>(
+  raw: unknown,
   max: number,
-  f: (key: string, value: A) => readonly [string, B] | null,
+  f: (key: string, value: unknown) => readonly [string, B] | null,
 ): Record<string, B> {
   const out: Record<string, B> = {};
   let kept = 0;
-  Arr.forEach(Record.toEntries(raw ?? {}), ([key, value]) => {
+  Arr.forEach(entriesOf(raw), ([key, value]) => {
     if (kept >= max) return;
     const entry = f(key, value);
     if (entry === null) return;
@@ -824,13 +850,11 @@ function keepUsableEntries<A, B>(
 }
 
 /** Normalises a `{ property: snak[] }` block (qualifiers / reference snaks), dropping unusable snaks. */
-function normaliseSnakList(
-  raw: Readonly<Record<string, readonly RawSnak[]>> | undefined,
-): Record<string, readonly Snak[]> {
+function normaliseSnakList(raw: unknown): Record<string, readonly Snak[]> {
   return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, snaks) => {
     const validProperty = parsePropertyId(property);
     if (validProperty === null) return null;
-    const list = keepUsable(snaks, MAX_LIST_ENTRIES, normaliseSnak);
+    const list = keepUsable(objectsIn<RawSnak>(snaks), MAX_LIST_ENTRIES, normaliseSnak);
     return Arr.isReadonlyArrayNonEmpty(list) ? [validProperty, list] : null;
   });
 }
@@ -841,13 +865,17 @@ function normaliseRank(raw: unknown): StatementRank {
 
 /** Normalises one raw statement; `null` when its main snak carries no valid property. */
 export function normaliseStatement(raw: RawStatement): Statement | null {
-  if (raw.mainsnak === undefined) return null;
+  if (!Predicate.isObject(raw.mainsnak)) return null;
   const mainsnak = normaliseSnak(raw.mainsnak);
   if (mainsnak === null) return null;
-  const references = keepUsable(raw.references ?? [], MAX_LIST_ENTRIES, (reference): Reference => ({
-    hash: sanitiseText(reference.hash),
-    snaks: normaliseSnakList(reference.snaks),
-  }));
+  const references = keepUsable(
+    objectsIn<RawReference>(raw.references),
+    MAX_LIST_ENTRIES,
+    (reference): Reference => ({
+      hash: sanitiseText(reference.hash),
+      snaks: normaliseSnakList(reference.snaks),
+    }),
+  );
   return {
     id: sanitiseText(raw.id),
     rank: normaliseRank(raw.rank),
@@ -858,40 +886,39 @@ export function normaliseStatement(raw: RawStatement): Statement | null {
 }
 
 /** Normalises a `{ lang: { value } }` term map into a flat `lang → value` map. */
-function normaliseTermMap(
-  raw: Readonly<Record<string, { readonly value?: unknown }>> | undefined,
-): LanguageMap {
+function normaliseTermMap(raw: unknown): LanguageMap {
   return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, term) => {
-    const value = sanitiseText(term?.value);
+    const value = sanitiseText(fieldsOf(term)["value"]);
     return value === null ? null : [language, value];
   });
 }
 
-function normaliseAliases(
-  raw: Readonly<Record<string, readonly { readonly value?: unknown }[]>> | undefined,
-): Record<string, readonly string[]> {
+function normaliseAliases(raw: unknown): Record<string, readonly string[]> {
   return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, terms) => {
-    const values = keepUsable(terms, MAX_LIST_ENTRIES, (term) => sanitiseText(term?.value));
+    const values = keepUsable(
+      objectsIn<{ readonly value?: unknown }>(terms),
+      MAX_LIST_ENTRIES,
+      (term) => sanitiseText(term.value),
+    );
     return Arr.isReadonlyArrayNonEmpty(values) ? [language, values] : null;
   });
 }
 
 /** Keeps the first {@link MAX_LIST_ENTRIES} badges that are valid item ids. */
-function normaliseBadges(raw: readonly unknown[] | undefined): ItemId[] {
-  return keepUsable(raw ?? [], MAX_LIST_ENTRIES, parseItemId);
+function normaliseBadges(raw: unknown): ItemId[] {
+  return keepUsable(Array.isArray(raw) ? raw : [], MAX_LIST_ENTRIES, parseItemId);
 }
 
 /** Keeps the first {@link MAX_SITELINKS} sitelinks that carry a title. */
-function normaliseSitelinks(
-  raw: Readonly<Record<string, RawSitelink>> | undefined,
-): Record<string, Sitelink> {
+function normaliseSitelinks(raw: unknown): Record<string, Sitelink> {
   return keepUsableEntries(raw, MAX_SITELINKS, (site, link) => {
-    const title = sanitiseText(link.title);
+    const fields = fieldsOf(link);
+    const title = sanitiseText(fields["title"]);
     if (title === null) return null;
     const sitelink: Sitelink = {
-      site: sanitiseText(link.site) ?? site,
+      site: sanitiseText(fields["site"]) ?? site,
       title,
-      badges: normaliseBadges(link.badges),
+      badges: normaliseBadges(fields["badges"]),
     };
     return [site, sitelink];
   });
@@ -909,7 +936,10 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
   const claims = keepUsableEntries(raw.claims, Number.POSITIVE_INFINITY, (property, statements) => {
     const validProperty = parsePropertyId(property);
     if (validProperty === null) return null;
-    return [validProperty, keepUsable(statements, MAX_LIST_ENTRIES, normaliseStatement)];
+    return [
+      validProperty,
+      keepUsable(objectsIn<RawStatement>(statements), MAX_LIST_ENTRIES, normaliseStatement),
+    ];
   });
   return {
     id,
@@ -927,9 +957,14 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
  * entity, or a single line from a Wikidata JSON **dump** — into the typed
  * {@link WikidataItem} model. Returns `null` when the value is not an object,
  * carries no valid id, or Wikibase flagged it `missing`. Pure, total, and
- * lenient: a partial / malformed / future-shaped object yields `null` (or a
- * best-effort item), never a throw. This is the entry point the
- * {@link Dumps} entity-dump pipeline runs each dump line through.
+ * lenient: it never throws on any `JSON.parse` output. A partial or
+ * future-shaped object yields a best-effort item, and so does one whose
+ * nested containers are the wrong kind: a map or list that is not an object
+ * or array reads as empty, a statement, snak, reference, term or sitelink
+ * that is not an object is dropped, and a `datavalue` that is not an object
+ * makes its snak `somevalue`. A `__proto__` key in any keyed map is dropped.
+ * This is the entry point the {@link Dumps} entity-dump pipeline runs each
+ * dump line through.
  */
 export function decodeEntity(raw: unknown): WikidataItem | null {
   if (!Predicate.isObjectOrArray(raw)) return null;
@@ -943,11 +978,13 @@ export function decodeEntity(raw: unknown): WikidataItem | null {
  * Normalises a whole `wbgetentities` response into typed items keyed by
  * their id. Entities Wikibase flagged `missing`, or that carry no valid id,
  * are omitted — a caller reads "present" as "key exists". Pure and total: a
- * hostile or unexpected payload yields fewer items, never a throw.
+ * hostile or unexpected payload yields fewer items or fewer entries in an
+ * item, never a throw; each entity is normalised as {@link decodeEntity}
+ * does, `__proto__` keys dropped included.
  */
 export function normaliseEntities(response: WbGetEntitiesResponse): Record<string, WikidataItem> {
   return keepUsableEntries(response.entities, Number.POSITIVE_INFINITY, (_, raw) => {
-    const item = normaliseItem(raw);
+    const item = decodeEntity(raw);
     return item === null ? null : [item.id, item];
   });
 }
