@@ -20,9 +20,10 @@
  *   another origin can read the response; MediaWiki then answers as an
  *   anonymous user (see {@link WikimediaRequest});
  * - `Retry-After` / `maxlag`-error backoff — a lagged or rate-limited
- *   response is retried with the server-requested delay, capped, up to a
- *   bounded number of attempts, rather than either hammering the API or
- *   failing on the first transient signal.
+ *   response is retried after the server-requested delay, up to a bounded
+ *   number of attempts, rather than either hammering the API or failing on
+ *   the first transient signal; a delay longer than the caller's cap fails
+ *   at once instead of retrying early.
  *
  * Untrusted-response discipline: every host and
  * path segment a caller supplies is validated before it reaches a URL
@@ -172,7 +173,8 @@ export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestF
  * rate-limited (HTTP `429` or `503`, with or without `Retry-After`). Carries
  * the number of seconds to wait before retrying. {@link withMaxlagRetry}
  * handles this automatically; it only escapes to the caller once retries
- * are exhausted.
+ * are exhausted, or straight away when the server asks for a longer wait
+ * than {@link RetryOptions.maxDelaySeconds} allows.
  */
 export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
   /**
@@ -182,10 +184,10 @@ export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited"
    * ({@link parseRetryAfterHeader}), and {@link DEFAULT_MAXLAG_SECONDS} when
    * the header is absent or an HTTP date. (MediaWiki answers a `maxlag` error
    * with `Retry-After` set to the larger of the request's `maxlag` parameter
-   * and 5 seconds.) It is the server's figure, uncapped:
-   * {@link RetryOptions.maxDelaySeconds} caps only how long
-   * {@link withMaxlagRetry} sleeps. Once retries are exhausted, the error that
-   * escapes carries the last attempt's value.
+   * and 5 seconds.) It is the server's figure, uncapped: when it exceeds
+   * {@link RetryOptions.maxDelaySeconds}, {@link withMaxlagRetry} does not
+   * retry and this error escapes as is. Once retries are exhausted, the error
+   * that escapes carries the last attempt's value.
    */
   retryAfterSeconds: Schema.Finite,
 }) {}
@@ -388,9 +390,9 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * carries no maxlag signal. It reads only the body: MediaWiki also sends a
  * `Retry-After` header with this error (the larger of the request's `maxlag`
  * parameter and 5 seconds), and {@link WikimediaClient} waits for that header's
- * value (capped by {@link RetryOptions.maxDelaySeconds}) when it is a number of
- * seconds, using this function's figure only when the header is absent or an
- * HTTP date.
+ * value when it is a number of seconds (failing instead of retrying when it
+ * exceeds {@link RetryOptions.maxDelaySeconds}), using this function's figure
+ * only when the header is absent or an HTTP date.
  */
 export function detectMaxlagSignal(body: unknown): number | null {
   if (!Predicate.isObjectOrArray(body) || !Predicate.hasProperty(body, "error")) return null;
@@ -408,12 +410,13 @@ export interface RetryOptions {
    */
   readonly maxRetries: number;
   /**
-   * Upper bound, in seconds, on any single wait, regardless of what the
-   * server asked for: each wait is the smaller of this and
-   * {@link RateLimited.retryAfterSeconds}, so the waits for one request total
-   * at most `maxRetries × maxDelaySeconds` (a function that splits its work
-   * into several requests gives each its own retries). {@link DEFAULT_RETRY_OPTIONS}
-   * sets 30.
+   * Upper bound, in seconds, on any single wait. A {@link RateLimited} whose
+   * {@link RateLimited.retryAfterSeconds} is at most this is waited out in
+   * full and retried; one asking for longer fails at once, with no wait and
+   * no retry, so no request goes out before the server allows it. The waits
+   * for one request therefore total at most `maxRetries × maxDelaySeconds`
+   * (a function that splits its work into several requests gives each its
+   * own retries). {@link DEFAULT_RETRY_OPTIONS} sets 30.
    */
   readonly maxDelaySeconds: number;
 }
@@ -423,9 +426,10 @@ export const DEFAULT_RETRY_OPTIONS: RetryOptions = { maxRetries: 3, maxDelaySeco
 
 /**
  * Retries `attempt` on {@link RateLimited}, sleeping the server-requested
- * delay (capped at `options.maxDelaySeconds`) between attempts, up to
- * `options.maxRetries` extra attempts. Once retries are exhausted, the last
- * {@link RateLimited} error propagates to the caller. Any other failure
+ * delay between attempts, up to `options.maxRetries` extra attempts. Once
+ * retries are exhausted, the last {@link RateLimited} error propagates to the
+ * caller; so does one asking for a longer wait than `options.maxDelaySeconds`,
+ * straight away, rather than retrying sooner than the server allows. Any other failure
  * (`InvalidRequest`, `RequestFailed`) is never retried — those are not
  * transient.
  */
@@ -436,9 +440,10 @@ export function withMaxlagRetry<A, R>(
   const loop = (remaining: number): Effect.Effect<A, WikimediaError, R> =>
     attempt.pipe(
       Effect.catchTag("RateLimited", (error) => {
-        if (remaining <= 0) return Effect.fail(error);
-        const delaySeconds = Math.min(error.retryAfterSeconds, options.maxDelaySeconds);
-        return Effect.sleep(Duration.seconds(delaySeconds)).pipe(
+        if (remaining <= 0 || error.retryAfterSeconds > options.maxDelaySeconds) {
+          return Effect.fail(error);
+        }
+        return Effect.sleep(Duration.seconds(error.retryAfterSeconds)).pipe(
           Effect.andThen(loop(remaining - 1)),
         );
       }),
