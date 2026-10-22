@@ -39,8 +39,15 @@
  * hostile / corrupt dump could present an unbounded `<text>`. The tokenizer
  * carry is bounded (trailing text is emitted, not carried — see
  * {@link tokenizeXml}) and the assembler caps captured text at
- * {@link MAX_TEXT_LENGTH} (16 MB), degrading the revision on breach — so the
- * pipeline stays constant-memory rather than OOMing.
+ * {@link MAX_TEXT_LENGTH} (16,777,216 UTF-16 code units of the still-escaped
+ * text), degrading the revision on breach — so the pipeline stays
+ * constant-memory rather than OOMing.
+ *
+ * **Only the main slot is read.** Export schema 0.11 writes a revision's
+ * main slot (`<model>`, `<format>`, `<text>`) directly under `<revision>`
+ * and each other slot (Commons' `mediainfo`, …) in its own `<content>`
+ * element; everything inside a `<content>` is skipped, its text not even
+ * buffered.
  *
  * Runtime-agnostic: imports only `effect`. The byte source / decompression
  * stages (`fromFile`, `fromHttpRange`, `decompressWith`) live in the
@@ -135,14 +142,14 @@ export interface Revision {
   /**
    * The content model id, from `<model>` (`wikitext`, `css`, `json`, …),
    * entity-decoded, trimmed and cut to 4,096 UTF-16 code units; `null` when
-   * absent or blank. It should be the main slot's, but a revision with extra
-   * slots reports its last slot's instead (#154; see {@link Revision.text}).
+   * absent or blank. It is the main slot's: a slot other than the main one
+   * (export schema 0.11 puts each in a `<content>` element) is skipped.
    */
   readonly model: string | null;
   /**
    * The serialization format, from `<format>` (`text/x-wiki`, …),
    * entity-decoded, trimmed and cut like `model`; `null` when absent or blank.
-   * Taken from the last slot of a multi-slot revision, as `model` is (#154).
+   * The main slot's, as for `model`.
    */
   readonly format: string | null;
   /**
@@ -153,11 +160,11 @@ export interface Revision {
    * (`<text bytes="…" sha1="…" deleted="deleted" />`).
    *
    * A revision whose `<text>` (or any other captured field) runs past
-   * 16,777,216 UTF-16 code units, counted before entity decoding, becomes a
-   * {@link PageRevisionError} instead (#155). Export schema 0.11 puts each
-   * slot other than the main one in a `<content>` element; the reader
-   * doesn't know that element, so a multi-slot revision's `text`, `model` and
-   * `format` come from its last slot, not the main one (#154).
+   * 16,777,216 UTF-16 code units, counted before entity decoding (not
+   * bytes: UTF-8 takes up to 3 bytes per code unit), becomes a
+   * {@link PageRevisionError} instead. It is the main slot's text: export
+   * schema 0.11 puts each other slot in a `<content>` element, which is
+   * skipped, so its text neither replaces this nor counts towards the cap.
    */
   readonly text: string | null;
   /**
@@ -209,8 +216,8 @@ export interface PageRevisionError {
    * `"revision missing id"`, `"revision not closed before next revision"`,
    * `"revision not closed before end of page"`,
    * `"truncated revision at end of stream"` and
-   * `"revision field exceeds the 16777216-byte cap"`; that cap counts UTF-16
-   * code units of the still-escaped text, not bytes (#155).
+   * `"revision field exceeds the 16777216-code-unit cap"`, which counts
+   * UTF-16 code units of the still-escaped text (see {@link Revision.text}).
    * `"revision missing id"` also covers a `</revision>` with no revision
    * open.
    */
@@ -376,9 +383,13 @@ export function decodeXmlEntities(text: string): string {
 const MAX_FIELD_LENGTH = 4096;
 
 /**
- * Upper bound on a captured element's text (the `<text>` wikitext, primarily).
- * A real dump revision is bounded by MediaWiki's `$wgMaxArticleSize` (≈2 MB by
- * default), so 16 MB is generous headroom; a field that breaches it is a
+ * Upper bound on a captured element's text (the `<text>` wikitext, primarily),
+ * in UTF-16 code units of the still-escaped text (`textBuf.length`, before
+ * {@link decodeXmlEntities}), not bytes. A real dump revision is bounded by
+ * MediaWiki's `$wgMaxArticleSize` (2 MiB of UTF-8 by default, so at most about
+ * 2 million code units before escaping, and an escape such as `&amp;` adds at
+ * most 5 code units per character), so this is generous headroom; a field
+ * that breaches it is a
  * hostile / corrupt dump and degrades the revision to a
  * `dumps/malformed-revision` element rather than being buffered without limit
  * (the "degrade, not crash" posture). Bounding the assembler buffer here plus
@@ -503,6 +514,8 @@ export class XmlPageReader {
   private page = freshPage();
   private rev: MutableRevision | null = null;
   private inContributor = false;
+  /** Inside a `<content>` (a non-main slot), whose fields are skipped. */
+  private inContent = false;
   private capturing: string | null = null;
   private textBuf = "";
   /** Set when a captured field breaches {@link MAX_TEXT_LENGTH}; degrades the revision. */
@@ -572,11 +585,15 @@ export class XmlPageReader {
       }
       return;
     }
+    if (name === "content") {
+      if (this.rev !== null) this.inContent = true;
+      return;
+    }
     if (name === "minor") {
       if (this.rev !== null) this.rev.minor = true;
       return;
     }
-    if (isCaptured(name)) {
+    if (isCaptured(name) && !this.inContent) {
       this.capturing = name;
       this.textBuf = "";
     }
@@ -591,6 +608,10 @@ export class XmlPageReader {
     }
     if (name === "contributor") {
       this.inContributor = false;
+      return;
+    }
+    if (name === "content") {
+      this.inContent = false;
       return;
     }
     if (name === "revision") {
@@ -619,6 +640,7 @@ export class XmlPageReader {
     });
     this.rev = null;
     this.inContributor = false;
+    this.inContent = false;
     this.capturing = null;
     this.textBuf = "";
     this.textOverLimit = false;
@@ -641,6 +663,7 @@ export class XmlPageReader {
     this.page = freshPage();
     this.rev = null;
     this.inContributor = false;
+    this.inContent = false;
     this.capturing = null;
     this.textBuf = "";
     this.textOverLimit = false;
@@ -649,6 +672,7 @@ export class XmlPageReader {
   private startRevision(): void {
     this.rev = freshRevision();
     this.inContributor = false;
+    this.inContent = false;
     this.capturing = null;
     this.textBuf = "";
     this.textOverLimit = false;
@@ -674,7 +698,7 @@ export class XmlPageReader {
         _tag: "error",
         reason: "dumps/malformed-revision",
         page,
-        detail: `revision field exceeds the ${MAX_TEXT_LENGTH}-byte cap`,
+        detail: `revision field exceeds the ${MAX_TEXT_LENGTH}-code-unit cap`,
       };
     }
     return { _tag: "revision", page, revision: toRevision(rev) };
