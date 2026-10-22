@@ -264,6 +264,12 @@ const adaptClassicDuplex = (classic: Duplex): Duplex => {
  */
 const composeOrDestroy = (head: Readable, stage: Duplex): Effect.Effect<Duplex, SourceError> =>
   tryNode(() => compose(head, stage)).pipe(
+    Effect.tap((composed) =>
+      Effect.sync(() => {
+        ignoreLateErrors(stage);
+        ignoreLateErrors(composed);
+      }),
+    ),
     Effect.tapError(() =>
       Effect.sync(() => {
         destroyReadable(head);
@@ -271,6 +277,19 @@ const composeOrDestroy = (head: Readable, stage: Duplex): Effect.Effect<Duplex, 
       }),
     ),
   );
+
+/**
+ * Gives `stream` an `error` listener that drops the error, so one emitted
+ * once nothing else listens cannot crash the process as an uncaught
+ * exception. A stage can emit `error` after its output has ended, when
+ * `compose` has removed its listeners and the stream has already completed
+ * (#139). It costs no error the stream should report: while the stream is
+ * read, `compose` and the async iterator (which also reads the errored state
+ * a stream keeps) still see every error.
+ */
+const ignoreLateErrors = (stream: Duplex): void => {
+  stream.on("error", () => undefined);
+};
 
 // ── Node Readable → Stream<Uint8Array> ───────────────────────────────────
 
