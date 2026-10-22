@@ -17,9 +17,8 @@
   // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
   // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
   "skipErrorChecking": true,
-  // TypeDoc's default list minus `Property`: every export (and every method)
-  // needs a doc comment, but the fields of the schemas and interfaces aren't
-  // all documented yet (#79).
+  // TypeDoc's default list: every export, method and property needs a doc
+  // comment, the fields of the schemas and interfaces included (#79).
   "requiredToBeDocumented": [
     "Enum",
     "EnumMember",
@@ -27,6 +26,7 @@
     "Function",
     "Class",
     "Interface",
+    "Property",
     "Method",
     "Accessor",
     "TypeAlias"

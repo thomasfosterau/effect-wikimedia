@@ -49,6 +49,14 @@ import { UserAgent } from "../core.ts";
 
 /** A failure reading or decompressing a dump source. */
 export class SourceError extends Schema.TaggedError<SourceError>()("SourceError", {
+  /**
+   * A short account of the failure, for logs rather than parsing: a reason
+   * code, a colon, then the underlying error's message (or, for a value that
+   * isn't an `Error`, its string form). The code is
+   * `dumps/source-read-failed` for a file read, a decompression stage
+   * (including one the stage check rejects) or any other Node stream, and
+   * `dumps/http-range-failed` for a {@link fromHttpRange} download.
+   */
   description: Schema.String,
 }) {}
 
