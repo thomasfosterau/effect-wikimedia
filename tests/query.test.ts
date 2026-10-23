@@ -10,11 +10,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
+import * as HashSet from "effect/HashSet";
 import * as Order from "effect/Order";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  EXTENSION_TAGS,
   filter,
   findTemplates,
   getParam,
@@ -23,6 +25,7 @@ import {
   parse,
   stripToText,
   templateName,
+  templateParams,
   walk,
 } from "../src/wikitext/index.ts";
 import { NAMED_ENTITIES } from "../src/wikitext/entities.ts";
@@ -73,6 +76,24 @@ describe("template extraction against a real infobox", () => {
   it("lets an explicit numbered param override the positional slot", () => {
     const t = parse("{{t|first|1=override}}");
     expect(getParam(findTemplates(t, "t")[0], 1)).toBe("override");
+  });
+
+  it("returns the effective parameters as a HashMap, later duplicates winning", () => {
+    const params = templateParams(findTemplates(parse("{{t| a |x=1|b|x= 2 }}"), "t")[0]);
+    expect(HashMap.isHashMap(params)).toBe(true);
+    expect(Arr.sort(HashMap.toEntries(params), Order.Tuple([Order.String, Order.String]))).toEqual([
+      ["1", "a"],
+      ["2", "b"],
+      ["x", "2"],
+    ]);
+  });
+});
+
+describe("EXTENSION_TAGS", () => {
+  it("is a HashSet of the opaque-bodied tag names", () => {
+    expect(HashSet.isHashSet(EXTENSION_TAGS)).toBe(true);
+    expect(HashSet.has(EXTENSION_TAGS, "nowiki")).toBe(true);
+    expect(HashSet.has(EXTENSION_TAGS, "div")).toBe(false);
   });
 });
 

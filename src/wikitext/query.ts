@@ -126,19 +126,19 @@ export function paramValue(param: Param): string {
 }
 
 /**
- * Builds the effective `name → trimmed value` map for a template, assigning
+ * Builds the effective `name → trimmed value` `HashMap` for a template, assigning
  * 1-based indices to positional parameters and letting later duplicates win
  * (both MediaWiki behaviours). Named and positional keys share the space, so
  * an explicit `1=` overrides the first positional value.
  */
-export function templateParams(template: Template): Map<string, string> {
+export function templateParams(template: Template): HashMap.HashMap<string, string> {
   const [, entries] = Arr.mapAccum(template.params, 0, (positional, p) => {
     const name = paramName(p);
     return name === null
       ? [positional + 1, [String(positional + 1), paramValue(p)] as const]
       : [positional, [name, paramValue(p)] as const];
   });
-  return new Map(entries);
+  return HashMap.fromIterable(entries);
 }
 
 /**
@@ -146,7 +146,7 @@ export function templateParams(template: Template): Map<string, string> {
  * Returns `undefined` when absent.
  */
 export function getParam(template: Template, key: string | number): string | undefined {
-  return templateParams(template).get(String(key));
+  return Option.getOrUndefined(HashMap.get(templateParams(template), String(key)));
 }
 
 // ── strip to plain text ───────────────────────────────────────────────

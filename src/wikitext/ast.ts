@@ -25,6 +25,8 @@
  * @module wikitext/ast
  */
 
+import * as HashSet from "effect/HashSet";
+
 /** A half-open source range in UTF-16 code-unit offsets: `[start, end)`. */
 export interface Span {
   /**
@@ -649,7 +651,7 @@ export interface TableCell {
  * plus the widely-deployed extensions; unknown tags fall through to the
  * presentational (flat-marker) path.
  */
-export const EXTENSION_TAGS: ReadonlySet<string> = new Set([
+export const EXTENSION_TAGS: HashSet.HashSet<string> = HashSet.make(
   "nowiki",
   "pre",
   "ref",
@@ -674,4 +676,4 @@ export const EXTENSION_TAGS: ReadonlySet<string> = new Set([
   "inputbox",
   "indicator",
   "section",
-]);
+);

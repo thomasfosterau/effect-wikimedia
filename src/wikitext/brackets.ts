@@ -19,12 +19,19 @@
 
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import { seek } from "./cursor.ts";
 
 const OPEN_BRACE = 0x7b; // {
 const CLOSE_BRACE = 0x7d; // }
 const OPEN_BRACKET = 0x5b; // [
 const CLOSE_BRACKET = 0x5d; // ]
 const LESS_THAN = 0x3c; // <
+
+/**
+ * The characters the matcher acts on (`{`, `}`, `[`, `]`, `<`): it jumps from
+ * one to the next rather than stepping over every character between.
+ */
+const SPECIAL = /[{}[\]<]/g;
 
 /** A run of each bracket character, matched in place (sticky). */
 const OPEN_BRACE_RUN = /\{+/y;
@@ -75,6 +82,17 @@ export function matchBrackets(src: string, extensionTagEnd: (at: number) => numb
   return new BracketMatcher(src, extensionTagEnd).run();
 }
 
+/** The scan in {@link BracketMatcher.run} stops at no character; it runs to the end. */
+const never = (): boolean => false;
+
+/** Handles the character at `i` and moves on to the next one the matcher acts on. */
+const nextConstruct = (matcher: BracketMatcher, i: number): number =>
+  matcher.nextSpecial(matcher.step(i));
+
+const noneOpen = (matcher: BracketMatcher): boolean => matcher.noneOpen();
+
+const matchOnce = (matcher: BracketMatcher, at: number): number => matcher.matchOnce(at);
+
 class BracketMatcher {
   private readonly ends: Int32Array;
   private readonly stack: Piece[] = [];
@@ -85,6 +103,8 @@ class BracketMatcher {
   private readonly open = new Int32Array(0x80);
   /** False once a search for `-->` has failed: no later comment closes either. */
   private commentsClose = true;
+  /** The closing run {@link closeRun} is matching: its open character's code, and where it ends. */
+  private closing = { char: OPEN_BRACE, end: 0 };
 
   private readonly src: string;
   private readonly extensionTagEnd: (at: number) => number;
@@ -96,13 +116,18 @@ class BracketMatcher {
   }
 
   run(): BracketEnds {
-    let i = 0;
-    while (i < this.src.length) i = this.step(i);
+    seek(this, this.nextSpecial(0), this.src.length, never, nextConstruct);
     return this.ends;
   }
 
+  /** The first index at or after `i` holding a character {@link step} acts on, or the end of `src`. */
+  nextSpecial(i: number): number {
+    SPECIAL.lastIndex = i;
+    return SPECIAL.test(this.src) ? SPECIAL.lastIndex - 1 : this.src.length;
+  }
+
   /** Handles the character at `i`; returns where to continue. */
-  private step(i: number): number {
+  step(i: number): number {
     const c = this.src.charCodeAt(i);
     if (c === OPEN_BRACE || c === OPEN_BRACKET) return this.openRun(i);
     if (c === CLOSE_BRACE) return this.closeRun(i, OPEN_BRACE);
@@ -132,17 +157,31 @@ class BracketMatcher {
    */
   private closeRun(i: number, openChar: number): number {
     const end = this.runEnd(i);
-    let at = i;
-    while (end - at >= 2 && this.open[openChar] > 0) {
-      this.dropAbove(openChar);
-      const piece = this.top();
-      const matched = Math.min(end - at, piece.count, openChar === OPEN_BRACE ? 3 : 2);
-      piece.count -= matched;
-      this.ends[piece.pos + piece.count] = at + matched;
-      if (piece.count < 2) this.pop();
-      at += matched;
-    }
+    this.closing = { char: openChar, end };
+    // A match takes two closers or three, so none starts at `end - 1`.
+    seek(this, i, end - 1, noneOpen, matchOnce);
     return end;
+  }
+
+  /**
+   * Matches the closers of the run {@link closeRun} is matching from `at`
+   * against the nearest open run of their kind, which is open, and returns
+   * where the closers left start.
+   */
+  matchOnce(at: number): number {
+    const { char, end } = this.closing;
+    this.dropAbove(char);
+    const piece = this.top();
+    const matched = Math.min(end - at, piece.count, char === OPEN_BRACE ? 3 : 2);
+    piece.count -= matched;
+    this.ends[piece.pos + piece.count] = at + matched;
+    if (piece.count < 2) this.pop();
+    return at + matched;
+  }
+
+  /** Whether no run of the kind {@link closeRun} is matching is open. */
+  noneOpen(): boolean {
+    return this.open[this.closing.char] <= 0;
   }
 
   /** Steps over a closed comment or an extension tag at `i`, recording its end. */
