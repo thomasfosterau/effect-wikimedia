@@ -264,14 +264,14 @@ function segmentsThenClose<A>(
   close: string,
 ): WikiParser<A[]> {
   const closing = literal(close);
+  const next = Parser.preceded(pipe, segment);
   return Parser.make((state) => {
     const s = session(state);
     const deep = s.depth >= MAX_DEPTH - 1;
     const passed: number[] = [];
     const segments: A[] = [];
-    for (;;) {
-      if (hasFailed(state, s, state.pos, kind)) break;
-      const known = deep ? knownTail<A>(state, s, kind) : Option.none<A[]>();
+    while (!hasFailed(state, s, state.pos, kind)) {
+      const known = knownTail<A>(state, s, kind, deep);
       if (Option.isSome(known)) {
         return rememberTail(state, s, kind, passed, [...segments, ...known.value]);
       }
@@ -280,12 +280,12 @@ function segmentsThenClose<A>(
         return deep ? rememberTail(state, s, kind, passed, segments) : segments;
       }
       const at = state.pos;
-      const next = pipe.step(state) === Input.Fail ? Input.Fail : segment.step(state);
-      if (next === Input.Fail) {
+      const a = next.step(state);
+      if (a === Input.Fail) {
         state.pos = at;
         break;
       }
-      segments.push(next);
+      segments.push(a);
     }
     Arr.forEach(passed, (pos) => addFailed(state, s, pos, kind));
     return state.backtrack("Fail");
@@ -301,9 +301,16 @@ interface TailFrom {
 /**
  * The segments of the remembered tail of `kind` that passed the cursor (see
  * `segmentsThenClose`), from the cursor on, with the cursor moved to where
- * it ended; `None` when none did.
+ * it ended; `None` when none did, or when not `deep` (one level short of
+ * {@link MAX_DEPTH}), where tails are not remembered.
  */
-function knownTail<A>(state: State, s: SessionState, kind: OpenKind): Option.Option<A[]> {
+function knownTail<A>(
+  state: State,
+  s: SessionState,
+  kind: OpenKind,
+  deep: boolean,
+): Option.Option<A[]> {
+  if (!deep) return Option.none();
   return Option.map(MutableHashMap.get(s.deepest, memoKey(state, state.pos, kind)), (known) => {
     state.pos = known.end;
     // SAFETY: `kind` is one tail's, whose parser stored `TailFrom`s of its own `A` segments.
@@ -458,6 +465,12 @@ const text = (src: string, start: number, end: number): Text => ({
 interface Stop {
   /** Tells stops apart: an index into {@link SessionState.doomed}. */
   readonly id: number;
+  /**
+   * Whether running to the region end without meeting the stop dooms the
+   * construct the fragment sits in (see `markDoomed`): every stop but
+   * {@link NO_STOP}.
+   */
+  readonly dooms: boolean;
   readonly delimiters: readonly string[];
   readonly first: Uint8Array;
   readonly parser: WikiParser<unknown>;
@@ -467,10 +480,13 @@ let stops = 0;
 
 const stopAt = (...delimiters: readonly string[]): Stop => ({
   id: stops++,
+  dooms: true,
   delimiters,
   first: asciiTable(delimiters.map((d) => d[0])),
   parser: Parser.alt(...delimiters.map((d) => literal(d))),
 });
+/** No stop: the fragment runs to the region end (a document, a heading title, a table cell). */
+const NO_STOP: Stop = { ...stopAt(), dooms: false };
 
 /** Whether a {@link Stop} delimiter starts at the cursor (consuming nothing). */
 function atStop(state: State, stop: Stop): boolean {
@@ -496,8 +512,8 @@ function firstStop(state: State, stop: Stop): number {
 }
 
 /**
- * Records that a fragment with `stop` ran from `from` to the region end
- * without meeting it, so a later one with the same stop and region end
+ * Records that a fragment with `stop` that started at `from` ran to the
+ * region end (where the cursor is) without meeting it, if it did, so a later one with the same stop and region end
  * that reaches `from` jumps to that end (see `fragment`; #179).
  *
  * A fragment's walk from an offset depends only on that offset, its stop
@@ -514,10 +530,31 @@ function firstStop(state: State, stop: Stop): number {
  * walk only once {@link MAX_DEPTH} cuts it short.
  */
 function markDoomed(state: State, stop: Stop, from: number): void {
+  if (!stop.dooms || state.pos < state.end) return;
   const doomed = session(state).doomed;
   const marks = doomed[stop.id] ?? new Int32Array(state.input.length + 1);
   doomed[stop.id] = marks;
   marks[from] = state.end + 1;
+}
+
+/** Whether a fragment with `stop` already ran from `pos` to the region end (see `markDoomed`). */
+function isDoomed(state: State, stop: Stop, pos: number): boolean {
+  return stop.dooms && session(state).doomed[stop.id]?.[pos] === state.end + 1;
+}
+
+/**
+ * The fragment at the cursor when it is too deep to open a construct (see
+ * {@link MAX_DEPTH}): one text run up to its stop, found by search rather
+ * than by walking it, since every opener tried one level up walks it again:
+ * a page of openers closed only at its end would cost time quadratic in its
+ * length (#179).
+ */
+function textToStop(state: State, stop: Stop): Node[] {
+  const from = state.pos;
+  state.pos = firstStop(state, stop);
+  const nodes: Node[] = [];
+  pushText(nodes, state.input, from, state.pos);
+  return nodes;
 }
 
 /**
@@ -527,33 +564,23 @@ function markDoomed(state: State, stop: Stop, from: number): void {
  * {@link Text} node, and the run's apostrophe markers are resolved by
  * `resolveQuotes`.
  */
-function fragment(stop: Stop | undefined, block: boolean): WikiParser<Node[]> {
+function fragment(stop: Stop, block: boolean): WikiParser<Node[]> {
   return Parser.make((state) => {
     const { construct, opens } = block ? blockConstructs : inlineConstructs;
     const src = state.input;
     // Constant for this run: every construct restores the region end
     // before it returns.
     const end = state.end;
+    if (session(state).depth >= MAX_DEPTH) return textToStop(state, stop);
     const nodes: Node[] = [];
     const from = state.pos;
     let textStart = from;
-    if (session(state).depth >= MAX_DEPTH) {
-      // Too deep to open a construct: the fragment is one text run up to its
-      // stop. Found by search rather than by walking it, since every opener
-      // tried one level up walks it again: a page of openers closed only at
-      // its end would cost time quadratic in its length (#179).
-      state.pos = stop === undefined ? end : firstStop(state, stop);
-      pushText(nodes, src, textStart, state.pos);
-      return nodes;
-    }
-    const doomed = session(state).doomed;
     // Whether an apostrophe run (a `Formatting` marker, the only construct
     // opening at `'`) was taken, so `resolveQuotes` has anything to do.
     let quotes = false;
     while (state.pos < end) {
       const start = state.pos;
-      if (stop !== undefined && doomed[stop.id]?.[start] === end + 1) {
-        // A fragment with this stop already ran from here to the region end.
+      if (isDoomed(state, stop, start)) {
         state.pos = end;
         break;
       }
@@ -562,7 +589,7 @@ function fragment(stop: Stop | undefined, block: boolean): WikiParser<Node[]> {
         PLAIN_TEXT.step(state);
         continue;
       }
-      if (stop !== undefined && atStop(state, stop)) break;
+      if (atStop(state, stop)) break;
       const node = opens[c] !== 1 ? Input.Fail : construct.step(state);
       if (node === Input.Fail) {
         // Not the start of a construct (or one that failed to close): the
@@ -575,7 +602,7 @@ function fragment(stop: Stop | undefined, block: boolean): WikiParser<Node[]> {
       textStart = state.pos;
       quotes ||= c === APOSTROPHE;
     }
-    if (stop !== undefined && state.pos >= end) markDoomed(state, stop, from);
+    markDoomed(state, stop, from);
     pushText(nodes, src, textStart, state.pos);
     return quotes ? resolveQuotes(nodes, src) : nodes;
   });
@@ -587,8 +614,7 @@ function pushText(nodes: Node[], src: string, from: number, to: number): void {
 }
 
 /** A fragment nested in a construct, one level deeper. */
-const inner = (stop: Stop | undefined, block = false): WikiParser<Node[]> =>
-  nested(fragment(stop, block));
+const inner = (stop: Stop, block = false): WikiParser<Node[]> => nested(fragment(stop, block));
 
 const argumentName = inner(stopAt("}}}", "|"));
 const argumentDefault = inner(stopAt("}}}"));
@@ -596,8 +622,8 @@ const templatePart = inner(stopAt("}}", "|"));
 const paramName = inner(stopAt("}}", "|", "="));
 const linkPart = inner(stopAt("]]", "|"));
 const externalLabel = inner(stopAt("]"));
-const headingTitle = inner(undefined);
-const cellContent = inner(undefined, true);
+const headingTitle = inner(NO_STOP);
+const cellContent = inner(NO_STOP, true);
 
 // ── braces: templates and arguments ───────────────────────────────────
 
@@ -735,31 +761,42 @@ const tableFiller: WikiParser<void> = Parser.make((state) => {
  * line once rather than once per enclosing `{|` (#179).
  */
 function nestedTableEnd(state: State, at: number): number {
-  const s = session(state);
-  const key = (pos: number): number => pos * (state.input.length + 1) + state.end;
-  const src = state.input;
+  const ends = session(state).tableEnds;
   // The `{|` lines open since `at`, innermost last.
   const open: number[] = [];
   let pos = at;
   do {
-    const line = pos;
-    const end = src.startsWith("{|", line)
-      ? MutableHashMap.get(s.tableEnds, key(line))
-      : Option.none<number>();
-    if (Option.isSome(end)) {
-      pos = end.value;
-    } else {
-      if (src.startsWith("{|", line)) open.push(line);
-      state.pos = line;
-      logicalLine.step(state);
-      pos = state.pos;
-      const closed = src.startsWith("|}", line) ? open.pop() : undefined;
-      if (closed !== undefined) MutableHashMap.set(s.tableEnds, key(closed), pos);
-    }
+    pos = Option.getOrElse(knownTableEnd(state, pos), () => tableLineStep(state, pos, open));
   } while (pos < state.end && Arr.isReadonlyArrayNonEmpty(open));
   // The `{|` lines still open close only at the region end.
-  Arr.forEach(open, (line) => MutableHashMap.set(s.tableEnds, key(line), state.end));
-  return Option.getOrElse(MutableHashMap.get(s.tableEnds, key(at)), () => state.end);
+  Arr.forEach(open, (line) => MutableHashMap.set(ends, tableKey(state, line), state.end));
+  return Option.getOrElse(MutableHashMap.get(ends, tableKey(state, at)), () => state.end);
+}
+
+/** The key of the `{|` line at `pos` in {@link SessionState.tableEnds}, under the current region end. */
+const tableKey = (state: State, pos: number): number => pos * (state.input.length + 1) + state.end;
+
+/** Where the nested table opening at `line` ends, when it is a `{|` line already matched. */
+const knownTableEnd = (state: State, line: number): Option.Option<number> =>
+  state.input.startsWith("{|", line)
+    ? MutableHashMap.get(session(state).tableEnds, tableKey(state, line))
+    : Option.none();
+
+/**
+ * Steps over the logical line at `line` for `nestedTableEnd`, opening a
+ * table at a `{|` line and closing the innermost `open` one at a `|}` line,
+ * and returns where the next line starts.
+ */
+function tableLineStep(state: State, line: number, open: number[]): number {
+  const src = state.input;
+  if (src.startsWith("{|", line)) open.push(line);
+  state.pos = line;
+  logicalLine.step(state);
+  const closed = src.startsWith("|}", line) ? open.pop() : undefined;
+  if (closed !== undefined) {
+    MutableHashMap.set(session(state).tableEnds, tableKey(state, closed), state.pos);
+  }
+  return state.pos;
 }
 
 /** A marker's attribute text: the rest of its logical line, then any filler. */
@@ -1434,7 +1471,7 @@ const blockConstructs = constructs({
   "=": heading,
 });
 
-const document = fragment(undefined, true);
+const document = fragment(NO_STOP, true);
 
 /** Parses wikitext into a {@link Document}. Total and fail-soft. */
 export function parse(source: string): Document {
