@@ -801,6 +801,37 @@ describe("wikitables: the -{ attribute guard (#158)", () => {
   });
 });
 
+describe("openers closed only at the page end (#179)", () => {
+  /** The one construct `src` parses to, as `[tag, start, end]`, after checking it round-trips. */
+  function sole(src: string): readonly [string, number, number] {
+    const doc = parse(src);
+    expect(serialize(doc)).toBe(src);
+    const structural = doc.children.filter(Predicate.not(Predicate.isTagged("Text")));
+    expect(structural.length).toBe(1);
+    return [structural[0]._tag, structural[0].span.start, structural[0].span.end];
+  }
+
+  // Past the nesting limit (100), so the memos that make these linear are
+  // all exercised; only the last opener closes, as before they were added.
+  it.each([
+    ["{{", `${"{{\n".repeat(150)}}}`, "Template", 447],
+    ["{{{", `${"{{{\n".repeat(150)}}}}`, "Argument", 596],
+    ["[[", `${"[[\n".repeat(150)}]]`, "Wikilink", 447],
+    ["{|", `${"{|\n".repeat(150)}|}\n`, "Table", 447],
+  ] as const)("closes only the last of a page of %s lines", (_, src, tag, start) => {
+    expect(sole(src)).toEqual([tag, start, src.length - (tag === "Table" ? 1 : 0)]);
+  });
+
+  it("closes only the last {{ of a page of {| and {{ lines, in a template not a table", () => {
+    const src = `${"{|\n| {{\n".repeat(150)}|}\n}}`;
+    expect(sole(src)).toEqual(["Template", src.length - 8, src.length]);
+  });
+
+  it("keeps a template that closes inside one whose parameters never do", () => {
+    expect(sole("{{a|{{b|c}}")).toEqual(["Template", 4, 11]);
+  });
+});
+
 describe("regression: existing vocabulary is unaffected by tables/autolink (issue #1287)", () => {
   const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
   const ada = readFileSync(`${fixturesDir}ada-lovelace.txt`, "utf8");

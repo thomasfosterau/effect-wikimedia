@@ -142,3 +142,25 @@ describe("performance floor: unclosed openers (#152, #159)", () => {
     expect(serialize(parse(src))).toBe(src);
   });
 });
+
+// Openers that do close, but only at the very end of the page (#179): each
+// opener nests the next, up to the parser's depth limit, and once the
+// innermost has failed every enclosing one walked the rest of the page again,
+// so the openers failed in time quadratic in their number. Before the fix
+// these took 0.5 s to 8 s each on a developer machine (the last over a
+// minute on a loaded one); with it, a few ms each.
+describe("performance floor: openers closed only at the page end (#179)", () => {
+  it.each([
+    ["a page of {| lines closed by one |}", `${"{|\n".repeat(8000)}|}\n`],
+    ["a page of {{ lines closed by one }}", `${"{{\n".repeat(4000)}}}`],
+    ["a page of {{{ lines closed by one }}}", `${"{{{\n".repeat(4000)}}}}`],
+    ["a page of [[ lines closed by one ]]", `${"[[\n".repeat(4000)}]]`],
+    ["a page of {| and {{ lines closed at its end", `${"{|\n| {{\n".repeat(2000)}|}\n}}`],
+  ] as const)("parses %s in linear time", (name, src) => {
+    const best = bestParseTime(src);
+    // eslint-disable-next-line no-console
+    console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
+    expect(best).toBeLessThan(250);
+    expect(serialize(parse(src))).toBe(src);
+  });
+});
