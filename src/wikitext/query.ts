@@ -48,20 +48,23 @@ const childFragments: (node: Node) => readonly (readonly Node[])[] = Match.type<
 );
 
 /**
- * Visits one fragment the way `walk` always has: every node of the
- * fragment, last to first, then the child fragments those visits opened,
- * most recently opened first.
+ * Visits one fragment in source order: each node, then (unless the visitor
+ * returned `false`) its child fragments, before the node's next sibling.
+ * Recursion is one level per nesting depth, never one per sibling.
  */
 function walkFragment(frag: readonly Node[], visitor: (node: Node) => boolean | void): void {
-  const opened = Arr.flatMap(Arr.reverse(frag), (node) =>
-    visitor(node) === false ? [] : Arr.reverse(childFragments(node)),
-  );
-  Arr.forEach(Arr.reverse(opened), (kid) => walkFragment(kid, visitor));
+  Arr.forEach(frag, (node) => {
+    if (visitor(node) !== false) {
+      Arr.forEach(childFragments(node), (kid) => walkFragment(kid, visitor));
+    }
+  });
 }
 
 /**
- * Depth-first pre-order walk over every node in `input`. Return `false` from
- * `visitor` to skip descending into a node's children.
+ * Depth-first pre-order walk over every node in `input`, in document order:
+ * a node is visited before its children, and its children before its next
+ * sibling (the order {@link filter} returns). Return `false` from `visitor`
+ * to skip descending into a node's children.
  */
 export function walk(input: Fragment, visitor: (node: Node) => boolean | void): void {
   walkFragment(nodesOf(input), visitor);
@@ -95,8 +98,8 @@ export function templateName(template: Template): string {
 
 /**
  * Finds every {@link Template} in `input`, optionally restricted to a name
- * (compared via {@link normaliseTemplateName}). Nested templates are
- * included.
+ * (compared via {@link normaliseTemplateName}), in document order. Nested
+ * templates are included, each after the template that contains it.
  */
 export function findTemplates(input: Fragment, name?: string): Template[] {
   const want = name === undefined ? undefined : normaliseTemplateName(name);
