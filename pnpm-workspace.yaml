@@ -52,7 +52,7 @@ catalog:
   #
   # The stable 4.0.0 release (website#2059). The published peer floor in
   # `catalogs.peers` is `>=4.0.0` (#167), the floor effect-parse peers on.
-  effect: 4.0.4
+  effect: 4.0.5
   # The parser-combinator library the `Wikitext` parser is written in (#168):
   # the package's one runtime dependency besides the `effect` peer, which it
   # shares. First-party, so `minimumReleaseAgeExclude` lets a new release in
