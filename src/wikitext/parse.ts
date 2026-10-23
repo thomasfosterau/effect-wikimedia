@@ -125,10 +125,21 @@ interface SessionState {
    */
   readonly doomed: Int32Array[];
   /**
+   * What each construct opened one level short of {@link MAX_DEPTH} parsed
+   * to, and where it ended, keyed as in `failed` (see `memoFailure`).
+   */
+  readonly deepest: MutableHashMap.MutableHashMap<number, DeepParse>;
+  /**
    * Where each nested table a table's filler steps over ends (see
    * `nestedTableEnd`), keyed by its `{|` line's offset and the region end.
    */
   readonly tableEnds: MutableHashMap.MutableHashMap<number, number>;
+}
+
+/** A construct `memoFailure` remembers (see {@link SessionState.deepest}), and where it ended. */
+interface DeepParse {
+  readonly value: unknown;
+  readonly end: number;
 }
 
 /** A match of a closing delimiter in the source: where it starts, and its length. */
@@ -178,31 +189,56 @@ const OPEN_KINDS = 7;
 
 type OpenKind = (typeof Open)[keyof typeof Open];
 
+/** The memo key for `kind` at `pos` under the current region end. */
+const memoKey = (state: State, pos: number, kind: OpenKind): number =>
+  (pos * (state.input.length + 1) + state.end) * OPEN_KINDS + kind;
+
 /** Whether `kind` already failed at `pos` under the current region end. */
 function hasFailed(state: State, s: SessionState, pos: number, kind: OpenKind): boolean {
   return (
     (s.failedKinds[pos] & (1 << kind)) !== 0 &&
-    MutableHashSet.has(s.failed, (pos * (state.input.length + 1) + state.end) * OPEN_KINDS + kind)
+    MutableHashSet.has(s.failed, memoKey(state, pos, kind))
   );
 }
 
 /** Records that `kind` failed at `pos` under the current region end. */
 function addFailed(state: State, s: SessionState, pos: number, kind: OpenKind): void {
   s.failedKinds[pos] |= 1 << kind;
-  MutableHashSet.add(s.failed, (pos * (state.input.length + 1) + state.end) * OPEN_KINDS + kind);
+  MutableHashSet.add(s.failed, memoKey(state, pos, kind));
 }
 
 /**
  * Fails at once where `self` already failed at this offset under this region
  * end (see {@link SessionState.failed}), and records each new failure.
+ *
+ * One level short of {@link MAX_DEPTH}, `self`'s fragments open nothing, so
+ * what it parses depends only on the offset and the region end: there its
+ * successes are remembered too (see {@link SessionState.deepest}). Openers
+ * that close only at the page end reach that level over and over, and a
+ * template there with a parameter on every later line would otherwise
+ * parse the rest of the page each time (#179).
  */
 function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
   return Parser.make((state) => {
     const s = session(state);
     const pos = state.pos;
     if (hasFailed(state, s, pos, kind)) return state.backtrack("Fail");
+    if (s.depth < MAX_DEPTH - 1) {
+      const a = self.step(state);
+      if (a === Input.Fail) addFailed(state, s, pos, kind);
+      return a;
+    }
+    const key = memoKey(state, pos, kind);
+    const known = MutableHashMap.get(s.deepest, key);
+    if (Option.isSome(known)) {
+      state.pos = known.value.end;
+      // SAFETY: `key` includes `kind`, and each kind is one parser's: the
+      // value stored under it is what this `self` returned.
+      return known.value.value as A;
+    }
     const a = self.step(state);
     if (a === Input.Fail) addFailed(state, s, pos, kind);
+    else MutableHashMap.set(s.deepest, key, { value: a, end: state.pos });
     return a;
   });
 }
@@ -212,7 +248,10 @@ function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
  * parameters, then `}}`) or of a wikilink (its segments, then `]]`). When
  * it fails, it fails from every `|` it passed, so those are remembered
  * (under `kind`, as in {@link memoFailure}) and a later tail that reaches
- * one fails at once.
+ * one fails at once. One level short of {@link MAX_DEPTH}, where its
+ * segments open nothing, a tail that succeeds is remembered from every `|`
+ * it passed too (see {@link SessionState.deepest}), and a later one there
+ * that reaches one of them ends as it did.
  *
  * Openers that close only at the page end each nest the next, so they share
  * their tails: without this, a page of lines each opening a template, with
@@ -227,12 +266,19 @@ function segmentsThenClose<A>(
   const closing = literal(close);
   return Parser.make((state) => {
     const s = session(state);
+    const deep = s.depth >= MAX_DEPTH - 1;
     const passed: number[] = [];
     const segments: A[] = [];
     for (;;) {
       if (hasFailed(state, s, state.pos, kind)) break;
+      const known = deep ? knownTail<A>(state, s, kind) : Option.none<A[]>();
+      if (Option.isSome(known)) {
+        return rememberTail(state, s, kind, passed, [...segments, ...known.value]);
+      }
       passed.push(state.pos);
-      if (closing.step(state) !== Input.Fail) return segments;
+      if (closing.step(state) !== Input.Fail) {
+        return deep ? rememberTail(state, s, kind, passed, segments) : segments;
+      }
       const at = state.pos;
       const next = pipe.step(state) === Input.Fail ? Input.Fail : segment.step(state);
       if (next === Input.Fail) {
@@ -244,6 +290,42 @@ function segmentsThenClose<A>(
     Arr.forEach(passed, (pos) => addFailed(state, s, pos, kind));
     return state.backtrack("Fail");
   });
+}
+
+/** The tail from one `|` of a remembered one (see `segmentsThenClose`): its segments from there on. */
+interface TailFrom {
+  readonly segments: readonly unknown[];
+  readonly from: number;
+}
+
+/**
+ * The segments of the remembered tail of `kind` that passed the cursor (see
+ * `segmentsThenClose`), from the cursor on, with the cursor moved to where
+ * it ended; `None` when none did.
+ */
+function knownTail<A>(state: State, s: SessionState, kind: OpenKind): Option.Option<A[]> {
+  return Option.map(MutableHashMap.get(s.deepest, memoKey(state, state.pos, kind)), (known) => {
+    state.pos = known.end;
+    // SAFETY: `kind` is one tail's, whose parser stored `TailFrom`s of its own `A` segments.
+    const { segments, from } = known.value as TailFrom;
+    // SAFETY: as above, `segments` holds that parser's `A`s.
+    return segments.slice(from) as A[];
+  });
+}
+
+/** Remembers the tail ending at the cursor from each `|` it `passed` (see `segmentsThenClose`). */
+function rememberTail<A>(
+  state: State,
+  s: SessionState,
+  kind: OpenKind,
+  passed: readonly number[],
+  segments: A[],
+): A[] {
+  Arr.forEach(passed, (pos, from) => {
+    const value: TailFrom = { segments, from };
+    MutableHashMap.set(s.deepest, memoKey(state, pos, kind), { value, end: state.pos });
+  });
+  return segments;
 }
 
 /**
@@ -1367,6 +1449,7 @@ export function parse(source: string): Document {
       nestedEnds: undefined,
       closes: MutableHashMap.empty<string, CloseSearch>(),
       doomed: [],
+      deepest: MutableHashMap.empty<number, DeepParse>(),
       tableEnds: MutableHashMap.empty<number, number>(),
     }),
   });
