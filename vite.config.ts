@@ -202,8 +202,9 @@ export default defineConfig({
       },
       // The wikitext parser's cursor scanners: each advances a mutable index
       // through the source and exits early, which `Arr` combinators can't
-      // express and recursion would overflow on dump-scale articles. 6 sites
-      // (issue #174); delete this block when they reach zero.
+      // express and recursion would overflow on dump-scale articles. 8 sites
+      // (issue #174; #179 added the template / wikilink tail scan and the
+      // nested-table matcher); delete this block when they reach zero.
       {
         files: ["src/wikitext/parse.ts", "src/wikitext/brackets.ts"],
         rules: {
