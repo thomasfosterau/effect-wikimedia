@@ -18,6 +18,7 @@ import {
   filter,
   findTemplates,
   getParam,
+  type Node,
   normaliseTemplateName,
   parse,
   stripToText,
@@ -99,6 +100,37 @@ describe("filter / walk", () => {
     });
     expect(seen).toContain("Template");
     expect(seen).not.toContain("Wikilink");
+  });
+
+  it("visits siblings in source order, each node's children before its next sibling (#175)", () => {
+    const doc = parse("{{A|{{B}}}} {{C|[[D]]}}");
+    const seen: string[] = [];
+    walk(doc, (n) => {
+      seen.push(`${n._tag}@${n.span.start}`);
+    });
+    // Each template's `name` fragment holds a Text node, visited before its params.
+    expect(seen).toEqual([
+      "Template@0",
+      "Text@2",
+      "Template@4",
+      "Text@6",
+      "Text@11",
+      "Template@12",
+      "Text@14",
+      "Wikilink@16",
+      "Text@18",
+    ]);
+  });
+
+  it("agrees with filter on order, so findTemplates returns document order (#175)", () => {
+    const doc = parse("{{A}} {{B|{{C}}}} {{D}}");
+    const tags = (n: Node) => `${n._tag}@${n.span.start}`;
+    const walked: string[] = [];
+    walk(doc, (n) => {
+      walked.push(tags(n));
+    });
+    expect(walked).toEqual(filter(doc, () => true).map(tags));
+    expect(findTemplates(doc).map(templateName)).toEqual(["A", "B", "C", "D"]);
   });
 });
 
