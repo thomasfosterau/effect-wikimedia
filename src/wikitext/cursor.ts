@@ -40,11 +40,13 @@ export function seek<C>(
 }
 
 /**
- * Runs `step` until it returns `false`: a scan whose position lives
- * elsewhere (a parse cursor's `pos`), and whose step decides for itself
- * whether the scan goes on. `step` runs at least once.
+ * Runs `step` on `context` until it returns `false`: a scan whose position
+ * lives elsewhere (a parse cursor's `pos`), and whose step decides for
+ * itself whether the scan goes on. `step` runs at least once. As with
+ * {@link seek}, a step that takes its `context` can be a module-level
+ * function, so the scan allocates nothing.
  */
-export function repeatWhile(step: () => boolean): void {
-  let more = step();
-  while (more) more = step();
+export function repeatWhile<C>(context: C, step: (context: C) => boolean): void {
+  let more = step(context);
+  while (more) more = step(context);
 }

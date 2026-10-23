@@ -281,7 +281,7 @@ function segmentsThenClose<A>(
     const passed: number[] = [];
     const segments: A[] = [];
     let tail: Option.Option<A[]> = Option.none();
-    repeatWhile(() => {
+    repeatWhile(undefined, () => {
       if (hasFailed(state, s, state.pos, kind)) return false;
       const known = knownTail<A>(state, s, kind, deep);
       if (Option.isSome(known)) {
@@ -596,7 +596,7 @@ function fragment(stop: Stop, block: boolean): WikiParser<Node[]> {
     let quotes = false;
     // One step: a run of plain text, a construct, or a character that opens
     // none; `false` at the stop, the region end, or a doomed offset.
-    repeatWhile(() => {
+    repeatWhile(undefined, () => {
       const start = state.pos;
       if (start >= end) return false;
       if (isDoomed(state, stop, start)) {
@@ -763,14 +763,17 @@ const isTableMarker = (c: number): boolean => c === BANG || c === PIPE;
  * table's structure. Stops exactly at the next marker line, or the region end.
  */
 const tableFiller: WikiParser<void> = Parser.make((state) => {
-  const src = state.input;
-  repeatWhile(() => {
-    if (state.pos >= state.end || isTableMarker(src.charCodeAt(state.pos))) return false;
-    if (src.startsWith("{|", state.pos)) state.pos = nestedTableEnd(state, state.pos);
-    else logicalLine.step(state);
-    return true;
-  });
+  repeatWhile(state, fillerLine);
 });
+
+/** Steps over one line of {@link tableFiller}'s filler; `false` at a marker line or the region end. */
+function fillerLine(state: State): boolean {
+  const src = state.input;
+  if (state.pos >= state.end || isTableMarker(src.charCodeAt(state.pos))) return false;
+  if (src.startsWith("{|", state.pos)) state.pos = nestedTableEnd(state, state.pos);
+  else logicalLine.step(state);
+  return true;
+}
 
 /**
  * Where the nested table whose `{|` line starts at `at` ends: just past the
@@ -896,7 +899,7 @@ function linePieces(
   let openStart = state.pos;
   let segStart = state.pos + markerLength;
   // One step: the piece from `segStart`; `false` after the line's last.
-  repeatWhile(() => {
+  repeatWhile(undefined, () => {
     const sepIdx = findTopLevel(state, segStart, lineEnd, isSep);
     const hasMore = sepIdx < lineEnd;
     const { attrs, contentStart } = splitCellAttrs(state, segStart, sepIdx);
