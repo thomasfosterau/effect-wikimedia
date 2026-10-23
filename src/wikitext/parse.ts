@@ -74,10 +74,20 @@ import {
   type Wikilink,
 } from "./ast.ts";
 import { type BracketEnds, matchBrackets } from "./brackets.ts";
+import { repeatWhile, seek } from "./cursor.ts";
 import { resolveQuotes } from "./quotes.ts";
 
 /** Recursion ceiling; deeper nesting degrades to text (fail-soft, no throw). */
 const MAX_DEPTH = 100;
+
+/**
+ * Whether a tag name is one of {@link EXTENSION_TAGS}, tested as one
+ * anchored alternation: the parser asks at every `<`, and a `HashSet` lookup
+ * (hashing the name, then walking the trie) made a tag-heavy article parse
+ * about a tenth slower (#174). The names are lowercase ASCII letters, so
+ * none needs escaping.
+ */
+const EXTENSION_TAG_NAME = new RegExp(`^(?:${Arr.join(Arr.fromIterable(EXTENSION_TAGS), "|")})$`);
 
 const NEWLINE = 0x0a;
 const PIPE = 0x7c;
@@ -270,23 +280,29 @@ function segmentsThenClose<A>(
     const deep = s.depth >= MAX_DEPTH - 1;
     const passed: number[] = [];
     const segments: A[] = [];
-    while (!hasFailed(state, s, state.pos, kind)) {
+    let tail: Option.Option<A[]> = Option.none();
+    repeatWhile(undefined, () => {
+      if (hasFailed(state, s, state.pos, kind)) return false;
       const known = knownTail<A>(state, s, kind, deep);
       if (Option.isSome(known)) {
-        return rememberTail(state, s, kind, passed, [...segments, ...known.value]);
+        tail = Option.some(rememberTail(state, s, kind, passed, [...segments, ...known.value]));
+        return false;
       }
       passed.push(state.pos);
       if (closing.step(state) !== Input.Fail) {
-        return deep ? rememberTail(state, s, kind, passed, segments) : segments;
+        tail = Option.some(deep ? rememberTail(state, s, kind, passed, segments) : segments);
+        return false;
       }
       const at = state.pos;
       const a = next.step(state);
       if (a === Input.Fail) {
         state.pos = at;
-        break;
+        return false;
       }
       segments.push(a);
-    }
+      return true;
+    });
+    if (Option.isSome(tail)) return tail.value;
     Arr.forEach(passed, (pos) => addFailed(state, s, pos, kind));
     return state.backtrack("Fail");
   });
@@ -578,30 +594,34 @@ function fragment(stop: Stop, block: boolean): WikiParser<Node[]> {
     // Whether an apostrophe run (a `Formatting` marker, the only construct
     // opening at `'`) was taken, so `resolveQuotes` has anything to do.
     let quotes = false;
-    while (state.pos < end) {
+    // One step: a run of plain text, a construct, or a character that opens
+    // none; `false` at the stop, the region end, or a doomed offset.
+    repeatWhile(undefined, () => {
       const start = state.pos;
+      if (start >= end) return false;
       if (isDoomed(state, stop, start)) {
         state.pos = end;
-        break;
+        return false;
       }
       const c = src.charCodeAt(start);
       if (SPECIAL_CODES[c] !== 1) {
         PLAIN_TEXT.step(state);
-        continue;
+        return true;
       }
-      if (atStop(state, stop)) break;
+      if (atStop(state, stop)) return false;
       const node = opens[c] !== 1 ? Input.Fail : construct.step(state);
       if (node === Input.Fail) {
         // Not the start of a construct (or one that failed to close): the
         // character belongs to the surrounding text run.
         state.pos = start + 1;
-        continue;
+        return true;
       }
       pushText(nodes, src, textStart, start);
       nodes.push(node);
       textStart = state.pos;
       quotes ||= c === APOSTROPHE;
-    }
+      return true;
+    });
     markDoomed(state, stop, from);
     pushText(nodes, src, textStart, state.pos);
     return quotes ? resolveQuotes(nodes, src) : nodes;
@@ -712,15 +732,13 @@ function findTopLevel(
   state: State,
   from: number,
   to: number,
-  test: (i: number) => boolean,
+  test: (state: State, i: number) => boolean,
 ): number {
-  let i = from;
-  while (i < to) {
-    if (test(i)) return i;
-    i = skipNested(state, i);
-  }
-  return to;
+  return seek(state, from, to, test, skipNested);
 }
+
+/** Whether a line break is at `i`. */
+const isNewline = (state: State, i: number): boolean => state.input.charCodeAt(i) === NEWLINE;
 
 /**
  * End of the logical line containing `pos`: the first `\n` outside a nested
@@ -728,7 +746,7 @@ function findTopLevel(
  * multi-line template in a cell is therefore part of the line that opens it.
  */
 const tableLineEnd = (state: State, pos: number): number =>
-  findTopLevel(state, pos, state.end, (i) => state.input.charCodeAt(i) === NEWLINE);
+  findTopLevel(state, pos, state.end, isNewline);
 
 /** The rest of the logical line, and the newline that ends it. */
 const logicalLine: WikiParser<void> = Parser.make((state) => {
@@ -745,12 +763,17 @@ const isTableMarker = (c: number): boolean => c === BANG || c === PIPE;
  * table's structure. Stops exactly at the next marker line, or the region end.
  */
 const tableFiller: WikiParser<void> = Parser.make((state) => {
-  const src = state.input;
-  while (state.pos < state.end && !isTableMarker(src.charCodeAt(state.pos))) {
-    if (src.startsWith("{|", state.pos)) state.pos = nestedTableEnd(state, state.pos);
-    else logicalLine.step(state);
-  }
+  repeatWhile(state, fillerLine);
 });
+
+/** Steps over one line of {@link tableFiller}'s filler; `false` at a marker line or the region end. */
+function fillerLine(state: State): boolean {
+  const src = state.input;
+  if (state.pos >= state.end || isTableMarker(src.charCodeAt(state.pos))) return false;
+  if (src.startsWith("{|", state.pos)) state.pos = nestedTableEnd(state, state.pos);
+  else logicalLine.step(state);
+  return true;
+}
 
 /**
  * Where the nested table whose `{|` line starts at `at` ends: just past the
@@ -764,14 +787,25 @@ function nestedTableEnd(state: State, at: number): number {
   const ends = session(state).tableEnds;
   // The `{|` lines open since `at`, innermost last.
   const open: number[] = [];
-  let pos = at;
-  do {
-    pos = Option.getOrElse(knownTableEnd(state, pos), () => tableLineStep(state, pos, open));
-  } while (pos < state.end && Arr.isReadonlyArrayNonEmpty(open));
+  const scan: TableScan = { state, open };
+  seek(scan, nextTableLine(scan, at), state.end, allClosed, nextTableLine);
   // The `{|` lines still open close only at the region end.
   Arr.forEach(open, (line) => MutableHashMap.set(ends, tableKey(state, line), state.end));
   return Option.getOrElse(MutableHashMap.get(ends, tableKey(state, at)), () => state.end);
 }
+
+/** The scan in {@link nestedTableEnd}: the cursor, and the `{|` lines open since it began. */
+interface TableScan {
+  readonly state: State;
+  readonly open: number[];
+}
+
+/** Whether every `{|` line the scan opened has closed. */
+const allClosed = ({ open }: TableScan): boolean => !Arr.isReadonlyArrayNonEmpty(open);
+
+/** Steps over the logical line at `line` for the scan, returning where the next starts. */
+const nextTableLine = ({ state, open }: TableScan, line: number): number =>
+  Option.getOrElse(knownTableEnd(state, line), () => tableLineStep(state, line, open));
 
 /** The key of the `{|` line at `pos` in {@link SessionState.tableEnds}, under the current region end. */
 const tableKey = (state: State, pos: number): number => pos * (state.input.length + 1) + state.end;
@@ -818,13 +852,16 @@ interface CellSplit {
   readonly contentStart: number;
 }
 
+/** Whether `|`, `[[` or `-{` is at `i` (see {@link splitCellAttrs}). */
+function isAttrSplit(state: State, i: number): boolean {
+  const c = state.input.charCodeAt(i);
+  const next = state.input.charCodeAt(i + 1);
+  return c === PIPE || (c === 0x5b && next === 0x5b) || (c === 0x2d && next === 0x7b);
+}
+
 function splitCellAttrs(state: State, from: number, to: number): CellSplit {
   const src = state.input;
-  const at = findTopLevel(state, from, to, (i) => {
-    const c = src.charCodeAt(i);
-    const next = src.charCodeAt(i + 1);
-    return c === PIPE || (c === 0x5b && next === 0x5b) || (c === 0x2d && next === 0x7b); // |, [[ or -{
-  });
+  const at = findTopLevel(state, from, to, isAttrSplit);
   if (at >= to || src.charCodeAt(at) !== PIPE) return { attrs: undefined, contentStart: from };
   return { attrs: src.slice(from, at), contentStart: at + 1 };
 }
@@ -854,13 +891,15 @@ interface LinePiece {
 function linePieces(
   state: State,
   markerLength: number,
-  isSep: (i: number) => boolean,
+  isSep: (state: State, i: number) => boolean,
 ): Option.Option<LinePiece[]> {
   const lineEnd = tableLineEnd(state, state.pos);
   const pieces: LinePiece[] = [];
+  let closes = false;
   let openStart = state.pos;
   let segStart = state.pos + markerLength;
-  for (;;) {
+  // One step: the piece from `segStart`; `false` after the line's last.
+  repeatWhile(undefined, () => {
     const sepIdx = findTopLevel(state, segStart, lineEnd, isSep);
     const hasMore = sepIdx < lineEnd;
     const { attrs, contentStart } = splitCellAttrs(state, segStart, sepIdx);
@@ -870,20 +909,27 @@ function linePieces(
       trailingNewline.step(state);
       tableFiller.step(state);
       contentEnd = state.pos;
-      if (contentEnd >= state.end) return Option.none();
+      if (contentEnd >= state.end) return false;
     }
     const content = fragmentWithin(state, contentStart, contentEnd, cellContent);
     const marker = state.input.slice(openStart, segStart);
     pieces.push({ span: { start: openStart, end: contentEnd }, marker, attrs, content });
-    if (!hasMore) return Option.some(pieces);
+    closes = !hasMore;
     openStart = sepIdx;
     segStart = sepIdx + 2;
-  }
+    return hasMore;
+  });
+  return closes ? Option.some(pieces) : Option.none();
 }
 
 /** Whether `||` starts at `i`. */
 const isDoublePipe = (state: State, i: number): boolean =>
   state.input.charCodeAt(i) === PIPE && state.input.charCodeAt(i + 1) === PIPE;
+
+/** Whether `||` or `!!` starts at `i`: a header line's cell separators. */
+const isHeaderSeparator = (state: State, i: number): boolean =>
+  isDoublePipe(state, i) ||
+  (state.input.charCodeAt(i) === BANG && state.input.charCodeAt(i + 1) === BANG);
 
 /** Rewinds the cursor to `start` and fails, so the caller can try something else there. */
 function backtrackTo(state: State, start: number): Input.Fail {
@@ -899,19 +945,16 @@ const tableCaptions: WikiParser<Omit<TableCaption, "row">[]> = Parser.make((stat
   const start = state.pos;
   if (literal("|+").step(state) === Input.Fail) return Input.Fail;
   state.pos = start;
-  return Option.match(
-    linePieces(state, 2, (i) => isDoublePipe(state, i)),
-    {
-      onNone: () => backtrackTo(state, start),
-      onSome: (pieces) =>
-        pieces.map(({ span, attrs, content }, i): Omit<TableCaption, "row"> => ({
-          span,
-          inline: i > 0,
-          attrs,
-          content,
-        })),
-    },
-  );
+  return Option.match(linePieces(state, 2, isDoublePipe), {
+    onNone: () => backtrackTo(state, start),
+    onSome: (pieces) =>
+      pieces.map(({ span, attrs, content }, i): Omit<TableCaption, "row"> => ({
+        span,
+        inline: i > 0,
+        attrs,
+        content,
+      })),
+  });
 });
 
 /**
@@ -926,11 +969,8 @@ const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
   const first = src.charCodeAt(state.pos);
   if (state.pos >= state.end || !isTableMarker(first)) return state.backtrack("OneOf");
   const header = first === BANG;
-  const isSep = (i: number): boolean =>
-    isDoublePipe(state, i) ||
-    (header && src.charCodeAt(i) === BANG && src.charCodeAt(i + 1) === BANG);
   const start = state.pos;
-  return Option.match(linePieces(state, 1, isSep), {
+  return Option.match(linePieces(state, 1, header ? isHeaderSeparator : isDoublePipe), {
     onNone: () => backtrackTo(state, start),
     onSome: (pieces) =>
       pieces.map(({ span, marker, attrs, content }, i): TableCell => ({
@@ -1320,7 +1360,7 @@ const tag: WikiParser<Tag> = Parser.make((state) => {
     rawContent: undefined,
     closeRaw: undefined,
   });
-  if (closing || selfClosing || !EXTENSION_TAGS.has(name)) return marker();
+  if (closing || selfClosing || !EXTENSION_TAG_NAME.test(name)) return marker();
   // Extension tag: capture the body raw up to a matching close tag.
   const afterOpen = state.pos;
   const body = extensionBody(name).step(state);
@@ -1349,7 +1389,7 @@ const TAG_NAME_AT = /[A-Za-z0-9]*/y;
  * Runs over the whole source, whatever the region end is now.
  */
 function extensionTagEnd(state: State, at: number): number {
-  if (!EXTENSION_TAGS.has(tagNameAt(state.input, at + 1))) return -1;
+  if (!EXTENSION_TAG_NAME.test(tagNameAt(state.input, at + 1))) return -1;
   const savedPos = state.pos;
   const savedEnd = state.end;
   state.pos = at;

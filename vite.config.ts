@@ -200,24 +200,16 @@ export default defineConfig({
           "effect/avoid-try-catch": "off",
         },
       },
-      // The wikitext parser's cursor scanners: each advances a mutable index
-      // through the source and exits early, which `Arr` combinators can't
-      // express and recursion would overflow on dump-scale articles. 8 sites
-      // (issue #174; #179 added the template / wikilink tail scan and the
-      // nested-table matcher); delete this block when they reach zero.
+      // The wikitext parser's cursor drivers (`seek`, `repeatWhile`; #174):
+      // every scan in the parser advances a mutable index through the source
+      // and exits early, which `Arr` combinators can't express without
+      // allocating per character, and recursion would overflow on dump-scale
+      // articles. Each scan is written as one step that a driver here
+      // repeats, so these two loops are the parser's only ones.
       {
-        files: ["src/wikitext/parse.ts", "src/wikitext/brackets.ts"],
+        files: ["src/wikitext/cursor.ts"],
         rules: {
-          "effect/imperative-loops": "warn",
-        },
-      },
-      // Two public types (`EXTENSION_TAGS: ReadonlySet`, `templateParams()`'s
-      // `Map`): moving them to HashSet / HashMap is a breaking API change
-      // (issue #174). 2 sites; delete this block when they reach zero.
-      {
-        files: ["src/wikitext/ast.ts", "src/wikitext/query.ts"],
-        rules: {
-          "effect/avoid-native-object-helpers": "warn",
+          "effect/imperative-loops": "off",
         },
       },
       // The perf test logs its measured timings to the CI log; it is
