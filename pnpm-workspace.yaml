@@ -31,7 +31,7 @@ catalog:
   # TypeScript 7.0.2, oxlint 1.87.0 – 1.89.0 and tsgolint 7.0.2003 / 7.0.2004,
   # and vite-plus 1.3.0 carries oxlint 1.88.0 and tsgolint 7.0.2004. Bump
   # `@effect/tsgo`, `@typescript/native` and `vite-plus` together.
-  "@effect/tsgo": 0.55.0
+  "@effect/tsgo": 0.57.0
   # The Effect lint rules `vp check` runs (`effect.configs.recommended` in
   # vite.config.ts). Its own `effect` dependency (4.0.0) is on the stable line,
   # so the `effect` singleton override below loads it without a scoped
@@ -100,7 +100,7 @@ catalog:
   # forces every resolution to the catalog singleton. Bump the three together,
   # with `@vitest/coverage-istanbul` above, which peers on that exact `vitest`.
   # 1.3.0 carries oxlint 1.88.0, tsgolint 7.0.2004 and vitest 5.0.5.
-  vite-plus: 1.3.0
+  vite-plus: 1.4.0
   vite: npm:@voidzero-dev/vite-plus-core@1.3.0
   vitest: 5.0.5
 
