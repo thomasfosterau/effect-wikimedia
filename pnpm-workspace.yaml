@@ -57,7 +57,7 @@ catalog:
   # the package's one runtime dependency besides the `effect` peer, which it
   # shares. First-party, so `minimumReleaseAgeExclude` lets a new release in
   # at once. Its own `effect` peer (`^4.0.0`) sets our peer floor (#167).
-  "@thomasfosterau/effect-parse": ^0.1.0
+  "@thomasfosterau/effect-parse": ^0.3.0
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
   # The dead-code, duplication and complexity gates (`vp run fallow` and `vp
