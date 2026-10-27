@@ -71,7 +71,7 @@ catalog:
   # a different clone (#102). Exact, like the rest of the family: the
   # PreToolUse fallow gate (`.claude/hooks/fallow-gate.sh`) and CI must agree on
   # what a finding is.
-  fallow: 3.34.1
+  fallow: 3.36.0
   # The docs gate (`vp run docgen`, #20): TypeDoc renders the API reference from
   # the doc comments reachable from `src/index.ts` and, under `typedoc.json`'s
   # validation, fails on an undocumented export or an unresolved `{@link}`.
