@@ -14,12 +14,17 @@
  * Wikitext.serialize(doc) === "{{Infobox|name=Ada|born=1815}}";         // true
  * ```
  *
+ * Above the syntax tree sits a structured layer of read-only views that
+ * point back at its nodes: {@link sections} splits a page into its heading
+ * tree.
+ *
  * @copyright Thomas Foster
  * @module
  */
 
 export * from "./ast.ts";
 export { parse } from "./parse.ts";
+export { type Section, sections } from "./sections.ts";
 export { serialize, serializeNode, serializeNodes } from "./serialize.ts";
 export {
   basicTemplateRenderers,
