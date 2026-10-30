@@ -57,6 +57,18 @@ describe("classifyTag", () => {
     ],
     ["<!-- a comment -->", []],
     ["<?xml version='1.0'?>", []],
+    [
+      '<text xml:space="preserve" bytes="4">',
+      [{ t: "open", name: "text", attributes: 'xml:space="preserve" bytes="4"' }],
+    ],
+    [
+      '<redirect title="A &amp; B" />',
+      [
+        { t: "open", name: "redirect", attributes: 'title="A &amp; B"' },
+        { t: "close", name: "redirect" },
+      ],
+    ],
+    ["<page >", [{ t: "open", name: "page" }]],
   ];
   it.each(cases)("%j", (input, expected) => {
     expect(Dumps.classifyTag(input)).toEqual(expected);
@@ -209,7 +221,7 @@ describe("pageRecords pipeline", () => {
 
     const first = hits[0];
     if (first?._tag !== "revision") return expect.unreachable("expected revision");
-    expect(first.page).toEqual({ title: "Douglas Adams", ns: 0, id: 8091 });
+    expect(first.page).toEqual({ title: "Douglas Adams", ns: 0, id: 8091, redirect: null });
     expect(first.revision.id).toBe(100);
     expect(first.revision.minor).toBe(true);
     expect(first.revision.comment).toBe("first version");
@@ -226,7 +238,7 @@ describe("pageRecords pipeline", () => {
     const error = errors[0];
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.page).toEqual({ title: "Category:Writers", ns: 14, id: 200 });
+    expect(error.page).toEqual({ title: "Category:Writers", ns: 14, id: 200, redirect: null });
   });
 
   const perByte = (text: string): Stream.Stream<Uint8Array, never> => {
@@ -270,7 +282,7 @@ describe("pageRecords pipeline", () => {
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("truncated");
-    expect(error.page).toEqual({ title: "T", ns: 0, id: 1 });
+    expect(error.page).toEqual({ title: "T", ns: 0, id: 1, redirect: null });
   });
 
   it("degrades a revision left unclosed before </page> (not silently dropped)", async () => {
@@ -283,7 +295,7 @@ describe("pageRecords pipeline", () => {
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("not closed");
-    expect(error.page).toEqual({ title: "A", ns: 0, id: 1 });
+    expect(error.page).toEqual({ title: "A", ns: 0, id: 1, redirect: null });
   });
 
   it("degrades a revision left unclosed before the next <revision>, keeping the next one", async () => {
@@ -354,6 +366,75 @@ describe("pageRecords pipeline", () => {
         Dumps.pageRecords(bytesOf(multiSlot("z".repeat(17 * 1024 * 1024)))),
       );
       expect(records.map((r) => r._tag)).toEqual(["revision"]);
+    });
+  });
+
+  describe("redirects (#207)", () => {
+    const page = (id: number, head: string, revision = `<revision><id>${id}0</id></revision>`) =>
+      `<page><title>P${id}</title><ns>0</ns><id>${id}</id>${head}${revision}</page>`;
+    const dump =
+      "<mediawiki>" +
+      page(1, '<redirect title="Ada &amp; &quot;Lovelace&quot;" />') +
+      page(2, "") +
+      page(3, "<redirect title='  Single quoted  ' />") +
+      page(4, "<redirect />") +
+      page(5, '<redirect title="   " />') +
+      page(6, '<redirect title="Gone" />', "<revision><text>no id</text></revision>") +
+      page(7, "", `<revision><id>70</id><redirect title="Inside" /></revision>`) +
+      "</mediawiki>";
+
+    it("reads <redirect title> onto PageRef.redirect, decoded and trimmed", async () => {
+      const records = await collect(Dumps.pageRecords(bytesOf(dump)));
+      expect(records.map((r) => r.page?.redirect)).toEqual([
+        'Ada & "Lovelace"',
+        null,
+        "Single quoted",
+        null,
+        null,
+        "Gone",
+        null,
+      ]);
+      expect(records[0]?.page).toEqual({ title: "P1", ns: 0, id: 1, redirect: 'Ada & "Lovelace"' });
+    });
+
+    it("doesn't carry a redirect over to the next page", async () => {
+      const records = await collect(
+        Dumps.pageRecords(bytesOf("<mediawiki>" + page(1, '<redirect title="X"/>') + page(2, ""))),
+      );
+      expect(records.map((r) => r.page?.redirect)).toEqual(["X", null]);
+    });
+
+    it("is chunk-boundary safe", async () => {
+      const whole = await collect(Dumps.pageRecords(bytesOf(dump)));
+      const chunked = await collect(Dumps.pageRecords(perByte(dump)));
+      expect(chunked).toEqual(whole);
+    });
+
+    it("cuts a long redirect title to 4,096 code units", async () => {
+      const long = "x".repeat(5000);
+      const records = await collect(
+        Dumps.pageRecords(bytesOf(page(1, `<redirect title="${long}" />`))),
+      );
+      expect(records[0]?.page?.redirect).toBe("x".repeat(4096));
+    });
+
+    it("skipRedirects drops redirect pages' records, errors included", async () => {
+      const records = await collect(Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.skipRedirects));
+      expect(records.map((r) => r.page?.id)).toEqual([2, 4, 5, 7]);
+      const hits = await collect(
+        Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.onlyRevisions, Dumps.skipRedirects),
+      );
+      expect(hits.map((r) => r.revision.id)).toEqual([20, 40, 50, 70]);
+    });
+
+    it("skipRedirects keeps a record with no page", async () => {
+      const orphan: Dumps.PageRevisionError = {
+        _tag: "error",
+        reason: "dumps/malformed-revision",
+        page: null,
+        detail: "revision missing id",
+      };
+      expect(await collect(Stream.make(orphan).pipe(Dumps.skipRedirects))).toEqual([orphan]);
     });
   });
 

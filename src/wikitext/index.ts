@@ -38,3 +38,4 @@ export {
   templateParams,
   walk,
 } from "./query.ts";
+export { type RedirectTargetOptions, redirectTarget } from "./redirect.ts";
