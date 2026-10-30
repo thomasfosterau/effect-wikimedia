@@ -13,6 +13,11 @@
  *   materialising a document, via a scoped SAX-style scanner.
  * - **Incremental dumps** ({@link incrementalRecords}) — the daily
  *   `add/changes` stream, the same XML schema and the same typed surface.
+ * - **Multistream indexes** ({@link multistreamIndexRecords}) — the
+ *   `pages-articles-multistream-index.txt.bz2` that maps each page to the
+ *   bzip2 stream holding it in `pages-articles-multistream.xml.bz2`, grouped
+ *   into per-stream byte ranges by {@link multistreamRanges}, so one stream
+ *   can be decompressed and decoded through {@link pageRecords} on its own.
  *
  * Byte sources and decompression ({@link fromFile}, {@link fromHttpRange},
  * {@link decompressWith}) are the one Node-only corner of the package; the
@@ -101,6 +106,15 @@ export {
   type XmlTokenization,
   XmlPageReader,
 } from "./xml.ts";
+export {
+  decodeIndexLine,
+  type MultistreamIndexEntry,
+  MultistreamIndexError,
+  type MultistreamRange,
+  type MultistreamRangesOptions,
+  multistreamIndexRecords,
+  multistreamRanges,
+} from "./multistream.ts";
 export {
   type Decompressor,
   decompressWith,
