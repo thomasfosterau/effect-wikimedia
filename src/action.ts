@@ -1,7 +1,8 @@
 /**
  * The **Action** surface: MediaWiki's `action=query` / `action=parse`
- * endpoints (`/w/api.php`) — page wikitext, page metadata, search, and the
- * `parse` endpoint's typed sections / links / categories / templates.
+ * endpoints (`/w/api.php`) — page wikitext, page metadata, search, the
+ * `parse` endpoint's typed sections / links / categories / templates, and a
+ * wiki's hidden link prefixes for {@link Wikitext.stripToText}.
  *
  * Requests are anonymous: `Core` sends every `/w/api.php` request with
  * `origin=*`, so a browser page on another origin can read the response,
@@ -24,10 +25,11 @@
  * {@link ParsedSection.title}. Escape or sanitise them before putting them
  * into a page.
  *
- * The four `*Response` schemas are those raw wire shapes, the decode step
+ * The five `*Response` schemas are those raw wire shapes, the decode step
  * before each `normalise*` function. Read the typed results the normalisers
  * build ({@link WikitextResult}, {@link PageMetadata},
- * {@link SearchResult}, {@link ParsedPage}), not the raw fields.
+ * {@link SearchResult}, {@link ParsedPage}, the prefix list
+ * {@link normaliseHiddenLinkPrefixes} returns), not the raw fields.
  *
  * @copyright Thomas Foster
  * @module
@@ -693,4 +695,143 @@ export const parsePage = Effect.fn("Action.parsePage")(function* (
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
   return normaliseParse(response, validTitle);
+});
+
+// ── Hidden link prefixes (action=query&meta=siteinfo) ────────────────────
+
+const SiteNamespace = Schema.Struct({
+  /** The namespace number (6 is File, 14 is Category). */
+  id: Schema.optional(Schema.Unknown),
+  /** The namespace's canonical (English) name. */
+  canonical: Schema.optional(Schema.Unknown),
+  /** The namespace's localised name (`formatversion=1` writes it under `*`). */
+  "*": Schema.optional(Schema.Unknown),
+});
+
+const SiteNamespaceAlias = Schema.Struct({
+  /** The number of the namespace the alias names. */
+  id: Schema.optional(Schema.Unknown),
+  /** The alias (`formatversion=1` writes it under `*`). */
+  "*": Schema.optional(Schema.Unknown),
+});
+
+const SiteInterwiki = Schema.Struct({
+  /** The interwiki prefix, such as `fr` or `wikt`. */
+  prefix: Schema.optional(Schema.Unknown),
+  /** The language's name; present only when the prefix is a language code. */
+  language: Schema.optional(Schema.Unknown),
+  /** Present when the prefix is one of `$wgExtraInterlanguageLinkPrefixes`. */
+  extralanglink: Schema.optional(Schema.Unknown),
+  /** Present when the prefix names this wiki itself, so a link through it is a local link. */
+  localinterwiki: Schema.optional(Schema.Unknown),
+});
+
+/**
+ * Lenient schema for the
+ * `action=query&meta=siteinfo&siprop=namespaces|namespacealiases|interwikimap`
+ * response envelope: the decode step {@link getHiddenLinkPrefixes} runs before
+ * {@link normaliseHiddenLinkPrefixes}. Every field is optional and every leaf
+ * `Unknown`, so a partial or extended response decodes, but a container of the
+ * wrong kind (such as an alias list that is not an array) fails the decode,
+ * which {@link getHiddenLinkPrefixes} reports as a `RequestFailed`.
+ */
+export const SiteinfoResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
+  query: Schema.optional(
+    Schema.Struct({
+      /** The wiki's namespaces, keyed by namespace number. */
+      namespaces: Schema.optional(Schema.Record(Schema.String, SiteNamespace)),
+      /** The wiki's namespace aliases, such as `Image` for File. */
+      namespacealiases: Schema.optional(Schema.Array(SiteNamespaceAlias)),
+      /** The wiki's interwiki prefixes. */
+      interwikimap: Schema.optional(Schema.Array(SiteInterwiki)),
+    }),
+  ),
+});
+export type SiteinfoResponse = typeof SiteinfoResponse.Type;
+
+/** Cap on how many prefixes {@link normaliseHiddenLinkPrefixes} keeps. */
+export const MAX_HIDDEN_LINK_PREFIXES = 2000;
+
+/** Whether `id` is the File (6) or Category (14) namespace, whose links render outside the prose. */
+const isHiddenLinkNamespace = (id: unknown): boolean => id === 6 || id === 14;
+
+/** A prefix from the response, or `None` when it is not a usable namespace or interwiki name. */
+function linkPrefix(value: unknown): Option.Option<string> {
+  return Option.filter(
+    Option.fromNullOr(sanitiseText(value)),
+    (prefix) => prefix.length <= 255 && !/[:|[\]{}#<>]/.test(prefix),
+  );
+}
+
+/** Whether an interwiki entry is an interlanguage prefix other than this wiki's own. */
+function isInterlanguage(iw: SiteinfoInterwiki): boolean {
+  return (
+    (iw.language !== undefined || iw.extralanglink !== undefined) && iw.localinterwiki === undefined
+  );
+}
+
+type SiteinfoInterwiki = typeof SiteInterwiki.Type;
+
+/**
+ * Normalises a `SiteinfoResponse` to the link prefixes whose wikilinks render
+ * outside the prose: the File and Category namespaces' canonical and
+ * localised names and their aliases, then the interlanguage prefixes (an
+ * interwiki prefix that is a language code or an extra interlanguage prefix,
+ * less one naming this wiki itself). Deduplicated, in response order, and
+ * capped at {@link MAX_HIDDEN_LINK_PREFIXES}; a value that is not a string,
+ * is empty, or holds a character a title prefix cannot is dropped.
+ */
+export function normaliseHiddenLinkPrefixes(response: SiteinfoResponse): readonly string[] {
+  const query = response.query;
+  const namespaces = Rec.values(query?.namespaces ?? {}).filter((ns) =>
+    isHiddenLinkNamespace(ns.id),
+  );
+  const aliases = (query?.namespacealiases ?? []).filter((alias) =>
+    isHiddenLinkNamespace(alias.id),
+  );
+  const candidates = [
+    ...namespaces.flatMap((ns) => [ns.canonical, ns["*"]]),
+    ...aliases.map((alias) => alias["*"]),
+    ...(query?.interwikimap ?? []).filter(isInterlanguage).map((iw) => iw.prefix),
+  ];
+  return Arr.take(
+    Arr.dedupe(Arr.getSomes(Arr.map(candidates, linkPrefix))),
+    MAX_HIDDEN_LINK_PREFIXES,
+  );
+}
+
+/**
+ * Fetches the link prefixes whose wikilinks render outside the prose on
+ * `host` (its File and Category namespace names and aliases, and its
+ * interlanguage prefixes) from the Action API's
+ * `meta=siteinfo&siprop=namespaces|namespacealiases|interwikimap`, for
+ * {@link Wikitext.StripToTextOptions.hiddenLinkPrefixes}:
+ *
+ * ```ts
+ * const hiddenLinkPrefixes = yield* Action.getHiddenLinkPrefixes("de.wikipedia.org");
+ * Wikitext.stripToText(doc, { hiddenLinkPrefixes });
+ * ```
+ *
+ * A wiki's set changes rarely, so fetch it once per wiki and reuse it.
+ * Fails with {@link InvalidRequest}, before any request is sent, for an
+ * invalid host; {@link Core.RateLimited} for a `429` / `503` or a `maxlag`
+ * error once `retry` (default {@link Core.DEFAULT_RETRY_OPTIONS}) is
+ * exhausted; and {@link Core.RequestFailed} for any other non-2xx status, a
+ * transport error or a response that does not decode.
+ */
+export const getHiddenLinkPrefixes = Effect.fn("Action.getHiddenLinkPrefixes")(function* (
+  host: string,
+  retry?: RetryOptions,
+) {
+  const client = yield* WikimediaClient;
+  const response = yield* client.getJson(
+    actionRequest(host, "query", {
+      meta: "siteinfo",
+      siprop: "namespaces|namespacealiases|interwikimap",
+    }),
+    SiteinfoResponse,
+    retry ?? DEFAULT_RETRY_OPTIONS,
+  );
+  return normaliseHiddenLinkPrefixes(response);
 });

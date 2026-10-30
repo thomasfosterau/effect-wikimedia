@@ -14,7 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Rec from "effect/Record";
 import { FetchHttpClient } from "effect/http";
-import { Action, Core } from "../src/index.ts";
+import { Action, Core, Wikitext } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 interface StubRoute {
@@ -444,5 +444,100 @@ describe("Action.parsePage", () => {
       "action=parse": { status: 200, body: { error: { code: "missingtitle" } } },
     });
     expect(await run(layer, Action.parsePage("en.wikipedia.org", "Nonexistent"))).toBeNull();
+  });
+});
+
+describe("Action.getHiddenLinkPrefixes (#208)", () => {
+  // The `formatversion=1` shape dewiki's siteinfo answers with, cut down.
+  const dewikiSiteinfo = {
+    query: {
+      namespaces: {
+        "0": { id: 0, case: "first-letter", "*": "" },
+        "2": { id: 2, case: "first-letter", canonical: "User", "*": "Benutzer" },
+        "6": { id: 6, case: "first-letter", canonical: "File", "*": "Datei" },
+        "14": { id: 14, case: "first-letter", canonical: "Category", "*": "Kategorie" },
+      },
+      namespacealiases: [
+        { id: 6, "*": "Bild" },
+        { id: 6, "*": "Image" },
+        { id: 2, "*": "Benutzerin" },
+      ],
+      interwikimap: [
+        { prefix: "de", local: "", language: "Deutsch", localinterwiki: "", url: "x" },
+        { prefix: "fr", local: "", language: "français", url: "x" },
+        { prefix: "ar", local: "", language: "العربية", url: "x" },
+        { prefix: "simple", local: "", language: "Simple English", url: "x" },
+        { prefix: "wikt", local: "", url: "x" },
+        { prefix: "commons", local: "", url: "x" },
+        { prefix: "extra", extralanglink: "", url: "x" },
+      ],
+    },
+  };
+
+  it("collects the File and Category names, their aliases and the interlanguage prefixes", async () => {
+    const { urls, layer } = stubRouter({
+      "meta=siteinfo": { status: 200, body: dewikiSiteinfo },
+    });
+    const prefixes = await run(layer, Action.getHiddenLinkPrefixes("de.wikipedia.org"));
+    expect(prefixes).toEqual([
+      "File",
+      "Datei",
+      "Category",
+      "Kategorie",
+      "Bild",
+      "Image",
+      "fr",
+      "ar",
+      "simple",
+      "extra",
+    ]);
+    const url = new URL(urls[0]);
+    expect(url.host).toBe("de.wikipedia.org");
+    expect(url.searchParams.get("siprop")).toBe("namespaces|namespacealiases|interwikimap");
+  });
+
+  it("feeds Wikitext.stripToText so localised file, category and language links drop", async () => {
+    const { layer } = stubRouter({ "meta=siteinfo": { status: 200, body: dewikiSiteinfo } });
+    const hiddenLinkPrefixes = await run(layer, Action.getHiddenLinkPrefixes("de.wikipedia.org"));
+    const doc = Wikitext.parse(
+      "Berlin[[Datei:B.jpg|mini|Brandenburger Tor]] ist eine [[Stadt]].[[Kategorie:Ort]][[fr:Berlin]]",
+    );
+    expect(Wikitext.stripToText(doc, { hiddenLinkPrefixes })).toBe("Berlin ist eine Stadt.");
+  });
+
+  it("drops unusable values and returns nothing for an error response", async () => {
+    const { layer } = stubRouter({
+      "meta=siteinfo": {
+        status: 200,
+        body: {
+          query: {
+            namespaces: { "6": { id: 6, canonical: 6, "*": "  " } },
+            namespacealiases: [{ id: 14, "*": "Bad:Alias" }, { id: 14 }, { id: 14, "*": "Kat" }],
+            interwikimap: [{ prefix: "x|y", language: "Bad" }, { language: "No prefix" }],
+          },
+        },
+      },
+    });
+    expect(await run(layer, Action.getHiddenLinkPrefixes("de.wikipedia.org"))).toEqual(["Kat"]);
+    expect(Action.normaliseHiddenLinkPrefixes({})).toEqual([]);
+  });
+
+  it("caps the list at MAX_HIDDEN_LINK_PREFIXES", () => {
+    const interwikimap = Arr.makeBy(Action.MAX_HIDDEN_LINK_PREFIXES + 10, (i) => ({
+      prefix: `l${i}`,
+      language: "L",
+    }));
+    expect(Action.normaliseHiddenLinkPrefixes({ query: { interwikimap } })).toHaveLength(
+      Action.MAX_HIDDEN_LINK_PREFIXES,
+    );
+  });
+
+  it("fails with InvalidRequest for a host outside the allowed set", async () => {
+    const { urls, layer } = stubRouter({});
+    await expectFailureInstanceOf(
+      toEffect(layer, Action.getHiddenLinkPrefixes("evil.example.com")),
+      Core.InvalidRequest,
+    );
+    expect(urls).toEqual([]);
   });
 });
