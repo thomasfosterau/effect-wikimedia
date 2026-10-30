@@ -100,7 +100,7 @@ const withLookup = (
     readonly searchByLabel: (label: string) => Effect.Effect<Result, LookupError>;
     readonly searchByIdentifier: (id: ExternalIdentifier) => Effect.Effect<Result, LookupError>;
   }) => Effect.Effect<Result, LookupError>,
-): Effect.Effect<Result, LookupError, never> =>
+): Effect.Effect<Result, LookupError> =>
   Effect.gen(function* () {
     const lookup = yield* WikidataLookup;
     return yield* use(lookup);

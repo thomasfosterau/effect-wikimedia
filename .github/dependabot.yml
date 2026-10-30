@@ -13,8 +13,8 @@
 #   failing `pnpm install` itself; `vite-plus` pins the oxlint, oxfmt,
 #   tsgolint and vitest it carries, `vite` is its core under an alias,
 #   `vitest` must equal its pin, and `@vitest/coverage-istanbul` peers on that
-#   exact `vitest`. The effect lint plugin loads inside that oxlint. Before
-#   merging a toolchain PR, check the `components` table in
+#   exact `vitest`. The effect lint rules (`@enfect/oxlint`) load inside that
+#   oxlint. Before merging a toolchain PR, check the `components` table in
 #   node_modules/@effect/tsgo/dist/effect-tsgo.cjs (see the catalog comments).
 # - `effect`: the Effect release line is a lockstep, singleton set.
 # - `typedoc`, `fallow`, `changesets`: each tool's own packages.
@@ -25,11 +25,14 @@
 # `@voidzero-dev/vite-plus-core`, `typescript` → `@typescript/typescript6`,
 # `@typescript/native` → `typescript`) are by-hand steps with their group;
 # AGENTS.md lists them. The `overrides` in pnpm-workspace.yaml are all
-# `catalog:`, so they follow the catalog and need no bump of their own.
+# `catalog:` (`vite@*` / `vitest@*` are the keys `vp migrate` manages), so
+# they follow the catalog and need no bump of their own.
 #
-# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
-# `@thomasfosterau/*` exempt as `minimumReleaseAgeExclude` is, so Dependabot
-# never proposes a version pnpm's own supply-chain gate would reject.
+# `cooldown` follows pnpm-workspace.yaml's `minimumReleaseAge`, with
+# `@thomasfosterau/*` exempt as `minimumReleaseAgeExclude` is. pnpm waits 8
+# hours (480 minutes) but `cooldown` only takes whole days, so it waits 1 day:
+# longer than pnpm's gate, so Dependabot never proposes a version pnpm would
+# still refuse.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -60,7 +63,10 @@ updates:
           - "@typescript/native"
           - "typescript"
           - "@typescript/typescript6"
-          - "@mpsuesser/oxlint-plugin-effect"
+          - "@oxlint/*"
+          - "@oxlint-tsgolint/*"
+          - "@oxfmt/*"
+          - "@enfect/oxlint"
         update-types: ["major", "minor", "patch"]
       effect:
         applies-to: version-updates
@@ -101,6 +107,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore"
+    # Third-party actions are pinned to full commit SHAs (with a `# vX.Y.Z`
+    # comment); Dependabot updates both.
+    cooldown:
+      default-days: 1
     groups:
       github-actions:
         patterns:

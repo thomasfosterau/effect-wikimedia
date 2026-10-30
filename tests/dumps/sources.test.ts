@@ -278,7 +278,7 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
     stage.write = ((chunk: Uint8Array) => {
       if (stage.paused) writesWhilePaused++;
       const accepted = write(chunk);
-      if (accepted === false) refused++;
+      if (!accepted) refused++;
       return accepted;
     }) as typeof stage.write;
     const bytes = await orHung(

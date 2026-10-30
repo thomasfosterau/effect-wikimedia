@@ -417,19 +417,19 @@ function nested<A>(self: WikiParser<A>): WikiParser<A> {
 }
 
 /**
- * Parses `[start, end)` alone with `fragment` (narrowing the region so
+ * Parses `[start, end)` alone with `parser` (narrowing the region so
  * nothing nested can reach past `end`), then leaves the cursor at `end`.
  */
 function fragmentWithin(
   state: State,
   start: number,
   end: number,
-  fragment: WikiParser<Node[]>,
+  parser: WikiParser<Node[]>,
 ): Node[] {
   const savedEnd = state.end;
   state.pos = start;
   state.end = end;
-  const nodes = fragment.step(state);
+  const nodes = parser.step(state);
   state.end = savedEnd;
   state.pos = end;
   return nodes === Input.Fail ? [] : nodes;
@@ -1458,11 +1458,16 @@ const heading: WikiParser<Heading> = Parser.preceded(
     const line = restOfLine.step(state);
     const m = line === Input.Fail ? null : HEADING_LINE.exec(line);
     if (m === null) return state.backtrack("Verify", [], start);
-    const [, left, inner, right, trailing] = m;
-    const innerStart = start + left.length;
+    const [, left, titleText, right, trailing] = m;
+    const titleTextStart = start + left.length;
     // The title is parsed over its bounded region, so nested constructs
     // cannot reach past the closing equals run.
-    const title = fragmentWithin(state, innerStart, innerStart + inner.length, headingTitle);
+    const title = fragmentWithin(
+      state,
+      titleTextStart,
+      titleTextStart + titleText.length,
+      headingTitle,
+    );
     state.pos = start + m[0].length;
     return {
       _tag: "Heading",

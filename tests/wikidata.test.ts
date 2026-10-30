@@ -48,7 +48,7 @@ const stubWikidata = (handler: (url: URL) => Schema.Json) => {
 const toEffect = <A, E>(
   layer: Layer.Layer<Core.WikimediaClient>,
   effect: Effect.Effect<A, E, Core.WikimediaClient>,
-): Effect.Effect<A, E, never> => effect.pipe(Effect.provide(layer)) as Effect.Effect<A, E, never>;
+): Effect.Effect<A, E> => effect.pipe(Effect.provide(layer));
 
 const run = <A, E>(
   layer: Layer.Layer<Core.WikimediaClient>,

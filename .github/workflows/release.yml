@@ -21,7 +21,9 @@ jobs:
     name: Version or publish
     # Never run on forks (they have neither the environment nor the trusted
     # publisher binding, so a fork cannot publish on your behalf).
-    if: github.repository == 'thomasfosterau/effect-wikimedia'
+    # Nor for Dependabot (it cannot push to `trunk`, but the guard keeps the
+    # release environment and its OIDC token out of its reach regardless).
+    if: github.repository == 'thomasfosterau/effect-wikimedia' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Requires manual approval via a protected GitHub Environment named
@@ -32,9 +34,10 @@ jobs:
       pull-requests: write # open/update the "Version Packages" PR
       id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
     steps:
-      - name: Checkout
+      - name: Checkout # zizmor: ignore[artipacked]
         # The Changesets action pushes the version branch, so it needs the
-        # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN).
+        # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN),
+        # hence no `persist-credentials: false`; the job uploads no artifacts.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup

@@ -27,16 +27,18 @@ catalog:
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping either.
   # `prepare` also patches oxlint (`--oxlint`), which loads the
   # `@effect/tsgo/oxlint-presets` rules in `vp check`, so this release must also
-  # list the `oxlint` and `oxlint-tsgolint` that `vite-plus` pins: 0.55.0 ships
-  # TypeScript 7.0.2, oxlint 1.87.0 – 1.89.0 and tsgolint 7.0.2003 / 7.0.2004,
-  # and vite-plus 1.3.0 carries oxlint 1.88.0 and tsgolint 7.0.2004. Bump
+  # list the `oxlint` and `oxlint-tsgolint` that `vite-plus` pins: 0.63.0 ships
+  # TypeScript 7.0.2, oxlint 1.88.0 – 1.90.0 and tsgolint 7.0.2004 / 7.0.2005,
+  # and vite-plus 1.4.0 carries oxlint 1.89.0 and tsgolint 7.0.2004. Bump
   # `@effect/tsgo`, `@typescript/native` and `vite-plus` together.
-  "@effect/tsgo": 0.55.0
+  "@effect/tsgo": 0.63.0
   # The Effect lint rules `vp check` runs (`effect.configs.recommended` in
-  # vite.config.ts). Its own `effect` dependency (4.0.0) is on the stable line,
-  # so the `effect` singleton override below loads it without a scoped
-  # override.
-  "@mpsuesser/oxlint-plugin-effect": ^0.6.0
+  # vite.config.ts, every rule under the `effect/` namespace; it replaced
+  # `@mpsuesser/oxlint-plugin-effect`, #221). It depends on `effect` 4.1.0
+  # exactly, but the `effect` singleton override below loads our pin in its
+  # place, and it lints fine on that. It loads inside the oxlint `vite-plus`
+  # carries, so it moves with the `toolchain` group.
+  "@enfect/oxlint": 0.9.0
   "@types/node": ^26.1.2
   # Types for `unbzip2-stream` below (test-only). They describe its stream as a
   # `stream.Transform`, which it isn't: see that entry.
@@ -71,7 +73,7 @@ catalog:
   # a different clone (#102). Exact, like the rest of the family: the
   # PreToolUse fallow gate (`.claude/hooks/fallow-gate.sh`) and CI must agree on
   # what a finding is.
-  fallow: 3.36.0
+  fallow: 3.37.0
   # The docs gate (`vp run docgen`, #20): TypeDoc renders the API reference from
   # the doc comments reachable from `src/index.ts` and, under `typedoc.json`'s
   # validation, fails on an undocumented export or an unresolved `{@link}`.
@@ -99,9 +101,10 @@ catalog:
   # vite-plus's exact pin because the `vitest: "catalog:"` override below
   # forces every resolution to the catalog singleton. Bump the three together,
   # with `@vitest/coverage-istanbul` above, which peers on that exact `vitest`.
-  # 1.3.0 carries oxlint 1.88.0, tsgolint 7.0.2004 and vitest 5.0.5.
-  vite-plus: 1.3.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  # 1.4.0 carries oxlint 1.89.0, oxfmt 0.74.0, tsgolint 7.0.2004 and vitest
+  # 5.0.5.
+  vite-plus: 1.4.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vitest: 5.0.5
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
@@ -119,8 +122,9 @@ overrides:
   # resolution to the catalog version so a hoisting reshuffle cannot introduce
   # a second copy.
   effect: "catalog:"
-  vite: "catalog:"
-  vitest: "catalog:"
+  # `vite@*` / `vitest@*` are the keys `vp migrate` manages under pnpm.
+  vite@*: "catalog:"
+  vitest@*: "catalog:"
 # vitest declares a peer on `vite` by its public version range, which the
 # aliased `@voidzero-dev/vite-plus-core` package cannot satisfy by name even
 # though it is the same release; `pnpm install` would warn on every run.
@@ -140,10 +144,12 @@ allowBuilds:
   # the Vite+ toolchain); the pure-JS fallback is used when it isn't built.
   msgpackr-extract: false
 
-# Supply-chain delay (owner's policy, gardeneria #1149): hold newly published
-# versions for 1 day (unit: MINUTES) before pnpm will install them. Mirrored by
-# `cooldown` in .github/dependabot.yml.
-minimumReleaseAge: 1440
+# Supply-chain delay (owner's policy, gardeneria #1149; relaxed to 8 hours in
+# #221): hold newly published versions for 480 MINUTES before pnpm will install
+# them. Dependabot's `cooldown` (.github/dependabot.yml) only takes whole days,
+# so it waits 1 day: longer than this, so it never proposes a version pnpm
+# would still refuse.
+minimumReleaseAge: 480
 minimumReleaseAgeExclude:
   # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
   - "@thomasfosterau/*"

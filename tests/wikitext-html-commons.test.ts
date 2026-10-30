@@ -62,7 +62,7 @@ const layer = Core.wikimediaClientLayer.pipe(
 
 /** Runs a fully-typed `WikimediaClient`-requiring effect against the fixture-backed stub above. */
 const run = <A, E>(effect: Effect.Effect<A, E, Core.WikimediaClient>): Promise<A> =>
-  runTest(effect.pipe(Effect.provide(layer)) as Effect.Effect<A, E, never>);
+  runTest(effect.pipe(Effect.provide(layer)));
 
 describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
   it("fetches Douglas Adams's wikitext via Action", async () => {

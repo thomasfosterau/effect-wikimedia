@@ -222,11 +222,19 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefi
  * adapter destroys the classic stream. Its own `error` listener means an
  * error the classic stream emits after teardown is dropped, not thrown.
  */
+/**
+ * A classic stream's `write()`, typed as it behaves: Node's `Duplex` type says
+ * `boolean`, but a classic `through` stream (unbzip2-stream) can return
+ * `undefined`, which means "keep writing", like `true`.
+ */
+const writeClassic = (classic: Duplex, chunk: Uint8Array): boolean | undefined =>
+  classic.write(chunk);
+
 const adaptClassicDuplex = (classic: Duplex): Duplex => {
   let ended = false;
   const adapter = new Duplex({
     write: (chunk: Uint8Array, _encoding, callback) => {
-      const written = attempt(() => classic.write(chunk) !== false, callback);
+      const written = attempt(() => writeClassic(classic, chunk) !== false, callback);
       if (written === true) callback();
       else if (written === false) classic.once("drain", () => callback());
     },
@@ -421,8 +429,8 @@ const openNodeReadable = (
       // `Stream.fromAsyncIterable` has created the iterator and registered its
       // `return()` as a finalizer: an interruption the fiber observes between
       // this step and that one.
-      const readable = yield* Effect.acquireRelease(open, (readable) =>
-        Effect.sync(() => destroyReadable(readable)),
+      const readable = yield* Effect.acquireRelease(open, (opened) =>
+        Effect.sync(() => destroyReadable(opened)),
       );
       return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
     }),
@@ -642,7 +650,7 @@ export const fromHttpRange = (
   options?: FromHttpRangeOptions,
 ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> => {
   const maxResumes = options?.maxResumes ?? DEFAULT_MAX_RESUMES;
-  const attempt = (
+  const download = (
     offset: number,
     resumesLeft: number,
   ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> => {
@@ -652,9 +660,9 @@ export const fromHttpRange = (
       // Resume only on a transport SourceError — never on interruption, which
       // must propagate and tear the download down (see the interruption test).
       Stream.catchTag("SourceError", (error) =>
-        resumesLeft > 0 ? attempt(received, resumesLeft - 1) : Stream.fail(error),
+        resumesLeft > 0 ? download(received, resumesLeft - 1) : Stream.fail(error),
       ),
     );
   };
-  return attempt(options?.startByte ?? 0, maxResumes);
+  return download(options?.startByte ?? 0, maxResumes);
 };
