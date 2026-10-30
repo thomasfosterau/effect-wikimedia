@@ -18,7 +18,7 @@ Branch off `trunk` as `issue-<n>-<slug>`, rebase onto `origin/trunk` rather than
 
 ## Git hooks
 
-Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pre-commit) is committed. **pre-commit** runs `vp staged` (`vp check --fix` on the staged files). There is no pre-push hook: run the gates yourself.
+Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pre-commit) is committed. **pre-commit** runs `vp staged` on the staged files: `vp check --fix --no-lint` (format with fixes) then `vp check --no-fmt` (lint without autofixes, since type-aware fixes would change the commit after you verified it). There is no pre-push hook: run the gates yourself.
 
 ## CI expectations
 
