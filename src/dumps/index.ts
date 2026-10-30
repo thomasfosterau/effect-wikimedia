@@ -94,6 +94,7 @@ export {
   type PageRevisionRecord,
   pageRecords,
   type Revision,
+  skipRedirects,
   tagName,
   tokenizeXml,
   type XmlToken,

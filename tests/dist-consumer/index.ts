@@ -111,6 +111,7 @@ assert<
 const document: Wikitext.Document = Wikitext.parse("{{Infobox person|name=Ada}}");
 const templates: Wikitext.Template[] = Wikitext.findTemplates(document, "Infobox person");
 const roundTrip: string = Wikitext.serialize(document);
+const redirect: string | null = Wikitext.redirectTarget(document, { aliases: ["#WEITERLEITUNG"] });
 
 // --- Dumps ------------------------------------------------------------------
 
@@ -120,6 +121,10 @@ assert<
 >();
 const items: Stream.Stream<Wikidata.WikidataItem> = Dumps.onlyEntities(Dumps.entityRecords(bytes));
 assert<Equals<ReturnType<typeof Dumps.fromFile>, Stream.Stream<Uint8Array, Dumps.SourceError>>>();
+assert<Equals<Dumps.PageRef["redirect"], string | null>>();
+const articles: Stream.Stream<Dumps.PageRevisionHit> = Dumps.onlyRevisions(
+  Dumps.pageRecords(bytes),
+).pipe(Dumps.skipRedirects);
 // The Node-only byte sources type their streams structurally, so naming them
 // needs no `@types/node` (#73).
 assert<Equals<Dumps.Decompressor, () => Dumps.NodeDuplexLike>>();
@@ -139,4 +144,4 @@ assert<Equals<Reconciliation.WikidataFact["_tag"], "Item" | "Identifier" | "Date
 assert<Equals<typeof Reconciliation.WikidataFact.Type, Reconciliation.WikidataFact>>();
 assert<Equals<Reconciliation.DateFact["calendar"], "gregorian" | "julian" | null>>();
 
-export { document, items, qid, roundTrip, templates, unbranded };
+export { articles, document, items, qid, redirect, roundTrip, templates, unbranded };

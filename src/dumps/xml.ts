@@ -82,6 +82,17 @@ export interface PageRef {
   readonly ns: number | null;
   /** The page id, from the page's own `<id>`; `null` under the same rules as {@link PageRef.ns}. */
   readonly id: number | null;
+  /**
+   * The redirect target when the page is a redirect: the `title` attribute
+   * of the page's `<redirect title="…" />`, entity-decoded, trimmed and cut
+   * to 4,096 UTF-16 code units, as MediaWiki's exporter writes it (the
+   * namespace-prefixed title with spaces and without any `#section`). `null`
+   * when the page has no `<redirect>`, or one whose `title` is absent or
+   * blank, as in export schemas before 0.5, which wrote a bare
+   * `<redirect />`. A `<redirect>` inside a `<revision>` is ignored.
+   * {@link skipRedirects} drops the records of pages where it is set.
+   */
+  readonly redirect: string | null;
 }
 
 /** Who made a revision. A suppressed / anonymous edit leaves fields `null`. */
@@ -183,8 +194,8 @@ export interface PageRevisionHit {
   /** Always `"revision"`; tells a hit from a {@link PageRevisionError} (`"error"`). */
   readonly _tag: "revision";
   /**
-   * The enclosing `<page>`'s `title`, `ns` and `id` as read up to this
-   * revision (MediaWiki writes them before the first `<revision>`), in a
+   * The enclosing `<page>`'s `title`, `ns`, `id` and `redirect` as read up
+   * to this revision (MediaWiki writes them before the first `<revision>`), in a
    * fresh object per record. Every field is `null` for a revision outside
    * any `<page>`.
    */
@@ -236,6 +247,12 @@ export type XmlToken =
       readonly t: "open";
       /** The element name from {@link tagName}: lower-cased, attributes dropped, any prefix kept. */
       readonly name: string;
+      /**
+       * The raw text after the element name (`title="A &amp; B"`), trimmed and
+       * still entity-escaped, with a self-closing tag's `/` dropped. Absent
+       * when the tag has no attributes.
+       */
+      readonly attributes?: string;
     }
   | {
       /** `"close"`: an end tag, or the second half of a self-closing one. */
@@ -256,29 +273,38 @@ export type XmlToken =
 /** Extracts a lower-cased element name from a tag body (`revision xml:space="…"` → `revision`). */
 export function tagName(body: string): string {
   const trimmed = body.trim();
+  return trimmed.slice(0, nameEnd(trimmed)).toLowerCase();
+}
+
+/** Where a trimmed tag body's element name ends: its length when nothing follows the name. */
+function nameEnd(trimmed: string): number {
   const end = trimmed.search(/[\s/>]/);
-  const raw = end === -1 ? trimmed : trimmed.slice(0, end);
-  return raw.toLowerCase();
+  return end === -1 ? trimmed.length : end;
+}
+
+/** The open token for a tag body, with its `attributes` when it has any. */
+function openToken(body: string): XmlToken {
+  const name = tagName(body);
+  const trimmed = body.trim();
+  const attributes = trimmed.slice(nameEnd(trimmed)).trim();
+  return Str.isEmpty(attributes) ? { t: "open", name } : { t: "open", name, attributes };
 }
 
 /**
  * Classifies one complete `<…>` tag (angle brackets included) into zero or
  * more tokens: a comment / declaration / doctype yields none; a self-closing
  * `<minor/>` yields an open **and** a close so downstream logic need not
- * special-case it.
+ * special-case it. Only the open token carries the tag's attributes.
  */
 export function classifyTag(tag: string): readonly XmlToken[] {
   const inner = tag.slice(1, -1).trim();
   if (Str.isEmpty(inner) || inner.startsWith("!") || inner.startsWith("?")) return [];
   if (inner.startsWith("/")) return [{ t: "close", name: tagName(inner.slice(1)) }];
   if (inner.endsWith("/")) {
-    const name = tagName(inner.slice(0, -1));
-    return [
-      { t: "open", name },
-      { t: "close", name },
-    ];
+    const open = openToken(inner.slice(0, -1));
+    return [open, { t: "close", name: tagName(inner.slice(0, -1)) }];
   }
-  return [{ t: "open", name: tagName(inner) }];
+  return [openToken(inner)];
 }
 
 /** What {@link tokenizeXml} returns: a buffer's complete tokens and its carry. */
@@ -412,12 +438,23 @@ function toField(value: string): string | null {
   return trimmed.length > MAX_FIELD_LENGTH ? trimmed.slice(0, MAX_FIELD_LENGTH) : trimmed;
 }
 
+// A `title="…"` (or `title='…'`) attribute in a tag's raw attribute text.
+const TITLE_ATTRIBUTE_RE = /(?:^|\s)title\s*=\s*(?:"([^"]*)"|'([^']*)')/;
+
+/** The decoded, bounded `title` attribute of a `<redirect>`; `null` when absent or blank. */
+function redirectTitle(attributes: string | undefined): string | null {
+  const match = attributes === undefined ? null : TITLE_ATTRIBUTE_RE.exec(attributes);
+  const raw = match?.[1] ?? match?.[2];
+  return raw === undefined ? null : toField(decodeXmlEntities(raw));
+}
+
 // ── Assembler: tokens → page/revision records ────────────────────────────
 
 interface MutablePage {
   title: string | null;
   ns: number | null;
   id: number | null;
+  redirect: string | null;
 }
 
 interface MutableRevision {
@@ -436,7 +473,7 @@ interface MutableRevision {
   hasContributor: boolean;
 }
 
-const freshPage = (): MutablePage => ({ title: null, ns: null, id: null });
+const freshPage = (): MutablePage => ({ title: null, ns: null, id: null, redirect: null });
 
 const freshRevision = (): MutableRevision => ({
   id: null,
@@ -550,7 +587,7 @@ export class XmlPageReader {
       if (this.capturing !== null) this.appendText(token.value);
       return;
     }
-    if (token.t === "open") return this.onOpen(token.name, out);
+    if (token.t === "open") return this.onOpen(token.name, out, token.attributes);
     this.onClose(token.name, out);
   }
 
@@ -567,7 +604,7 @@ export class XmlPageReader {
     }
   }
 
-  private onOpen(name: string, out: PageRevisionRecord[]): void {
+  private onOpen(name: string, out: PageRevisionRecord[], attributes?: string): void {
     if (name === "page") {
       // A new page while a revision is still open means the previous one was
       // never closed — emit it as malformed rather than dropping it silently.
@@ -578,25 +615,34 @@ export class XmlPageReader {
       this.flushPendingRevision(out, "revision not closed before next revision");
       return this.startRevision();
     }
-    if (name === "contributor") {
-      if (this.rev !== null) {
-        this.inContributor = true;
-        this.rev.hasContributor = true;
-      }
-      return;
-    }
-    if (name === "content") {
-      if (this.rev !== null) this.inContent = true;
-      return;
-    }
-    if (name === "minor") {
-      if (this.rev !== null) this.rev.minor = true;
+    if (this.onRevisionMarker(name)) return;
+    if (name === "redirect") {
+      if (this.rev === null) this.page.redirect = redirectTitle(attributes);
       return;
     }
     if (isCaptured(name) && !this.inContent) {
       this.capturing = name;
       this.textBuf = "";
     }
+  }
+
+  /**
+   * Opens `<contributor>`, `<content>` or `<minor>`, which mean something only
+   * inside a revision (and are ignored outside one); `false` for any other
+   * element, which the caller then handles.
+   */
+  private onRevisionMarker(name: string): boolean {
+    if (name !== "contributor" && name !== "content" && name !== "minor") return false;
+    if (this.rev === null) return true;
+    if (name === "contributor") {
+      this.inContributor = true;
+      this.rev.hasContributor = true;
+    } else if (name === "content") {
+      this.inContent = true;
+    } else {
+      this.rev.minor = true;
+    }
+    return true;
   }
 
   private onClose(name: string, out: PageRevisionRecord[]): void {
@@ -679,7 +725,12 @@ export class XmlPageReader {
   }
 
   private snapshotPage(): PageRef {
-    return { title: this.page.title, ns: this.page.ns, id: this.page.id };
+    return {
+      title: this.page.title,
+      ns: this.page.ns,
+      id: this.page.id,
+      redirect: this.page.redirect,
+    };
   }
 
   private finalizeRevision(): PageRevisionRecord {
@@ -769,3 +820,16 @@ const isRevisionHit = (record: PageRevisionRecord): record is PageRevisionHit =>
 export const onlyRevisions = <E, R>(
   records: Stream.Stream<PageRevisionRecord, E, R>,
 ): Stream.Stream<PageRevisionHit, E, R> => records.pipe(Stream.filter(isRevisionHit));
+
+/**
+ * Drops the records of redirect pages, those whose {@link PageRef.redirect}
+ * is set, from a {@link PageRevisionRecord} stream: the usual "skip
+ * redirects" dump filter, read from the export's `<redirect>` element rather
+ * than from each revision's text. A per-record error on a redirect page is
+ * dropped with it; one with no page (`page: null`) is kept. Works before or
+ * after {@link onlyRevisions}, and never fails.
+ */
+export const skipRedirects = <A extends PageRevisionRecord, E, R>(
+  records: Stream.Stream<A, E, R>,
+): Stream.Stream<A, E, R> =>
+  records.pipe(Stream.filter((record) => record.page === null || record.page.redirect === null));
