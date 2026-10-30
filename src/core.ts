@@ -5,9 +5,10 @@
  * etiquette Wikimedia's API usage guidelines ask of every caller.
  *
  * The `HttpClient` layer is split into an injectable test layer and a
- * `FetchHttpClient` production layer, and it serves any `*.wikipedia.org` /
- * `wikidata.org` / `*.wikimedia.org` host — the host is a **parameter** of
- * every request, never a constant baked into the module.
+ * `FetchHttpClient` production layer, and it serves any Wikimedia project
+ * host — Wikipedia, Wikidata, `*.wikimedia.org`, the sister projects
+ * (Wiktionary, Wikisource, …), mediawiki.org and Wikifunctions — the host is
+ * a **parameter** of every request, never a constant baked into the module.
  *
  * Etiquette this module owns so no surface module has to reimplement it:
  * - a polite `User-Agent`, and an `Api-User-Agent` with the same value, set
@@ -197,29 +198,60 @@ export type WikimediaError = InvalidRequest | RequestFailed | RateLimited;
 
 // ── Per-wiki addressing (host is a parameter, not a constant) ───────────
 
-/** Hosts allowed verbatim, in addition to the suffix-matched families below. */
-const ALLOWED_HOSTS: HashSet.HashSet<string> = HashSet.make("wikidata.org", "www.wikidata.org");
+/**
+ * Hosts allowed verbatim, in addition to the suffix-matched families below:
+ * Wikidata's bare and `www` hosts, MediaWiki's own wiki (`www.mediawiki.org`),
+ * Wikifunctions (`www.wikifunctions.org`), and multilingual Wikisource,
+ * which lives on the bare `wikisource.org`. Each bare form is listed because
+ * it redirects to, or is, a wiki in its own right.
+ */
+const ALLOWED_HOSTS: HashSet.HashSet<string> = HashSet.make(
+  "wikidata.org",
+  "www.wikidata.org",
+  "mediawiki.org",
+  "www.mediawiki.org",
+  "wikifunctions.org",
+  "www.wikifunctions.org",
+  "wikisource.org",
+);
 
 /**
  * Host suffixes accepted for the per-wiki families: any language edition of
  * Wikipedia (`en.wikipedia.org`, `zh-yue.wikipedia.org`, …), any other
- * Wikimedia project host (`commons.wikimedia.org`, `meta.wikimedia.org`, …),
- * and any Wikidata subdomain — notably `query.wikidata.org`, the Wikidata
- * Query Service (WDQS) SPARQL endpoint the `Sparql` module targets.
+ * Wikimedia project host (`commons.wikimedia.org`, `meta.wikimedia.org`,
+ * `species.wikimedia.org`, …), any Wikidata subdomain — notably
+ * `query.wikidata.org`, the Wikidata Query Service (WDQS) SPARQL endpoint the
+ * `Sparql` module targets — and any language edition of the sister projects
+ * that run on their own second-level domain (`en.wiktionary.org`,
+ * `de.wikivoyage.org`, `fr.wikisource.org`, …). A closed list of
+ * Wikimedia-owned domains: third-party MediaWiki sites (Fandom and the like)
+ * stay out, so the SSRF guard still pins every request to Wikimedia.
  */
 const ALLOWED_HOST_SUFFIXES: readonly string[] = [
   ".wikipedia.org",
   ".wikimedia.org",
   ".wikidata.org",
+  ".wiktionary.org",
+  ".wikivoyage.org",
+  ".wikisource.org",
+  ".wikiquote.org",
+  ".wikibooks.org",
+  ".wikinews.org",
+  ".wikiversity.org",
 ];
 
 /** Upper bound on a host string before it is even pattern-checked. */
 const MAX_HOST_LENGTH = 100;
 
 /**
- * Validates and lower-cases an untrusted wiki host. Only exact matches
- * against `ALLOWED_HOSTS` or a subdomain of `ALLOWED_HOST_SUFFIXES`
- * are accepted — this is the SSRF guard: every request this package builds
+ * Validates and lower-cases an untrusted wiki host. Only Wikimedia-owned
+ * hosts are accepted: a subdomain of `wikipedia.org`, `wikimedia.org`,
+ * `wikidata.org` or a sister project's domain (`wiktionary.org`,
+ * `wikivoyage.org`, `wikisource.org`, `wikiquote.org`, `wikibooks.org`,
+ * `wikinews.org`, `wikiversity.org`), or exactly `wikidata.org`,
+ * `www.wikidata.org`, `mediawiki.org`, `www.mediawiki.org`,
+ * `wikifunctions.org`, `www.wikifunctions.org` or `wikisource.org`. This is
+ * the SSRF guard: every request this package builds
  * targets `https://<validated host><fixed path>`, so a caller (or a value
  * threaded through from an untrusted source) can never redirect a request
  * to an arbitrary host. Returns `null` for anything else.

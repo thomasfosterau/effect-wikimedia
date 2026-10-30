@@ -167,6 +167,34 @@ describe("Action.getWikitext", () => {
     },
   );
 
+  it("reaches a sister-project host such as Wiktionary", async () => {
+    const { urls, layer } = stubRouter({
+      "action=query": {
+        status: 200,
+        body: {
+          query: {
+            pages: {
+              "7": {
+                pageid: 7,
+                title: "cat",
+                revisions: [
+                  {
+                    revid: 123,
+                    timestamp: "2024-01-01T00:00:00Z",
+                    slots: { main: { contentmodel: "wikitext", "*": "==English==" } },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+    const result = await run(layer, Action.getWikitext("en.wiktionary.org", "cat"));
+    expect(result?.wikitext).toBe("==English==");
+    expect(urls[0]).toMatch(/^https:\/\/en\.wiktionary\.org\/w\/api\.php\?/);
+  });
+
   it("rejects an invalid host before any request", async () => {
     const { urls, layer } = stubRouter({});
     await expectFailureInstanceOf(
