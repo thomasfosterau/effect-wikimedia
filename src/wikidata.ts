@@ -1023,7 +1023,9 @@ export const getEntities = Effect.fn("Wikidata.getEntities")(function* (
 ) {
   const validated = yield* Effect.forEach(
     ids,
-    (id) => {
+    // `unknown`: a JavaScript caller can pass anything, and the error reports
+    // what it was given.
+    (id: unknown) => {
       const parsed = parseEntityId(id);
       return parsed === null
         ? Effect.fail(new InvalidRequest({ kind: "entityId", value: String(id) }))

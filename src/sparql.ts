@@ -372,8 +372,12 @@ export const query = Effect.fn("Sparql.query")(function* (
   options?: QueryOptions,
   retry?: RetryOptions,
 ) {
-  if (!Predicate.isString(sparql) || Str.isEmpty(sparql.trim())) {
+  // A JavaScript caller can pass a non-string, which the error reports as given.
+  if (!Predicate.isString(sparql)) {
     return yield* new InvalidRequest({ kind: "query", value: String(sparql) });
+  }
+  if (Str.isEmpty(sparql.trim())) {
+    return yield* new InvalidRequest({ kind: "query", value: sparql });
   }
   if (sparql.length > MAX_QUERY_LENGTH) {
     return yield* new InvalidRequest({ kind: "queryLength", value: String(sparql.length) });

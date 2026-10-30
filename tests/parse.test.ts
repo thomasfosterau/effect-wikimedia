@@ -13,13 +13,11 @@ import * as Arr from "effect/Array";
 import * as Predicate from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import {
-  type Argument,
   type AutoLink,
   type ExternalLink,
   filter,
   findTemplates,
   getParam,
-  type Heading,
   type Node,
   parse,
   serialize,
@@ -46,7 +44,7 @@ const text = (nodes: readonly Node[]): string => serializeNodes(nodes);
 
 describe("templates", () => {
   it("parses name and positional + named params", () => {
-    const t = only("{{Infobox|a|b|key=value}}", "Template") as Template;
+    const t = only("{{Infobox|a|b|key=value}}", "Template");
     expect(text(t.name)).toBe("Infobox");
     expect(t.params).toHaveLength(3);
     expect(t.params[0].name).toBeUndefined();
@@ -57,27 +55,27 @@ describe("templates", () => {
   });
 
   it("splits a param on the first equals only", () => {
-    const t = only("{{t|k=a=b}}", "Template") as Template;
+    const t = only("{{t|k=a=b}}", "Template");
     expect(t.params[0].name && text(t.params[0].name)).toBe("k");
     expect(text(t.params[0].value)).toBe("a=b");
   });
 
   it("keeps whitespace inside name/value (not on the separators)", () => {
-    const t = only("{{ t | k = v }}", "Template") as Template;
+    const t = only("{{ t | k = v }}", "Template");
     expect(text(t.name)).toBe(" t ");
     expect(t.params[0].name && text(t.params[0].name)).toBe(" k ");
     expect(text(t.params[0].value)).toBe(" v ");
   });
 
   it("nests templates in a parameter value", () => {
-    const t = only("{{outer|x={{inner|y}}}}", "Template") as Template;
+    const t = only("{{outer|x={{inner|y}}}}", "Template");
     const inner = t.params[0].value.find(Predicate.isTagged("Template")) as Template;
     expect(inner).toBeDefined();
     expect(text(inner.name)).toBe("inner");
   });
 
   it("parses parser functions structurally without evaluating", () => {
-    const t = only("{{#if:{{{x|}}}|yes|no}}", "Template") as Template;
+    const t = only("{{#if:{{{x|}}}|yes|no}}", "Template");
     expect(text(t.name)).toBe("#if:{{{x|}}}");
     expect(text(t.params[0].value)).toBe("yes");
     expect(text(t.params[1].value)).toBe("no");
@@ -91,13 +89,13 @@ describe("templates", () => {
 
 describe("arguments (triple brace)", () => {
   it("parses name and default", () => {
-    const a = only("{{{name|fallback}}}", "Argument") as Argument;
+    const a = only("{{{name|fallback}}}", "Argument");
     expect(text(a.name)).toBe("name");
     expect(a.default && text(a.default)).toBe("fallback");
   });
 
   it("has no default when the pipe is absent", () => {
-    const a = only("{{{1}}}", "Argument") as Argument;
+    const a = only("{{{1}}}", "Argument");
     expect(text(a.name)).toBe("1");
     expect(a.default).toBeUndefined();
   });
@@ -105,19 +103,19 @@ describe("arguments (triple brace)", () => {
 
 describe("wikilinks", () => {
   it("parses a bare target", () => {
-    const w = only("[[London]]", "Wikilink") as Wikilink;
+    const w = only("[[London]]", "Wikilink");
     expect(text(w.target)).toBe("London");
     expect(w.segments).toHaveLength(0);
   });
 
   it("parses target and label", () => {
-    const w = only("[[London|the capital]]", "Wikilink") as Wikilink;
+    const w = only("[[London|the capital]]", "Wikilink");
     expect(text(w.target)).toBe("London");
     expect(w.segments.map(text)).toEqual(["the capital"]);
   });
 
   it("keeps every pipe segment for file links", () => {
-    const w = only("[[File:X.png|thumb|right|caption]]", "Wikilink") as Wikilink;
+    const w = only("[[File:X.png|thumb|right|caption]]", "Wikilink");
     expect(text(w.target)).toBe("File:X.png");
     expect(w.segments.map(text)).toEqual(["thumb", "right", "caption"]);
   });
@@ -130,13 +128,13 @@ describe("wikilinks", () => {
 
 describe("external links", () => {
   it("parses url and label", () => {
-    const e = only("[https://example.org Example]", "ExternalLink") as ExternalLink;
+    const e = only("[https://example.org Example]", "ExternalLink");
     expect(e.url).toBe("https://example.org");
     expect(e.label && text(e.label)).toBe(" Example");
   });
 
   it("parses a bare bracketed url", () => {
-    const e = only("[https://example.org]", "ExternalLink") as ExternalLink;
+    const e = only("[https://example.org]", "ExternalLink");
     expect(e.url).toBe("https://example.org");
     expect(e.label).toBeUndefined();
   });
@@ -149,13 +147,13 @@ describe("external links", () => {
 
 describe("headings", () => {
   it("parses level and title", () => {
-    const h = only("== Biography ==\n", "Heading") as Heading;
+    const h = only("== Biography ==\n", "Heading");
     expect(h.level).toBe(2);
     expect(text(h.title)).toBe(" Biography ");
   });
 
   it("takes level from the shorter equals run and keeps the surplus raw", () => {
-    const h = only("=== Title ==\n", "Heading") as Heading;
+    const h = only("=== Title ==\n", "Heading");
     expect(h.level).toBe(2);
     expect(h.leftEquals).toBe("===");
     expect(h.rightEquals).toBe("==");
@@ -167,7 +165,7 @@ describe("headings", () => {
   });
 
   it("parses links inside a title", () => {
-    const h = only("== See [[also]] ==\n", "Heading") as Heading;
+    const h = only("== See [[also]] ==\n", "Heading");
     expect(h.title.some(Predicate.isTagged("Wikilink"))).toBe(true);
   });
 });
@@ -188,7 +186,7 @@ describe("comments", () => {
 
 describe("tags", () => {
   it("captures an extension tag body raw", () => {
-    const t = only("<ref>{{cite|x}} '''kept'''</ref>", "Tag") as Tag;
+    const t = only("<ref>{{cite|x}} '''kept'''</ref>", "Tag");
     expect(t.name).toBe("ref");
     expect(t.rawContent).toBe("{{cite|x}} '''kept'''");
     expect(t.closeRaw).toBe("</ref>");
@@ -211,17 +209,17 @@ describe("tags", () => {
   });
 
   it("parses a self-closing tag", () => {
-    const t = only("<br/>", "Tag") as Tag;
+    const t = only("<br/>", "Tag");
     expect(t).toMatchObject({ name: "br", selfClosing: true });
   });
 
   it("keeps a quoted attribute containing '>' inside the tag", () => {
-    const t = only('<span title="a>b">', "Tag") as Tag;
+    const t = only('<span title="a>b">', "Tag");
     expect(t.raw).toBe('<span title="a>b">');
   });
 
   it("degrades an unclosed extension tag to an open-only marker", () => {
-    const t = only("<ref>citation with no close", "Tag") as Tag;
+    const t = only("<ref>citation with no close", "Tag");
     expect(t).toMatchObject({ name: "ref", rawContent: undefined, closeRaw: undefined });
   });
 });
@@ -267,12 +265,12 @@ describe("html entities", () => {
 
 describe("bare url autolinking (issue #1287)", () => {
   it("recognises a bare http(s) url in running text", () => {
-    const l = only("See http://example.org for details.", "AutoLink") as AutoLink;
+    const l = only("See http://example.org for details.", "AutoLink");
     expect(l.url).toBe("http://example.org");
   });
 
   it("is case-insensitive on the protocol", () => {
-    expect((only("HTTPS://Example.org", "AutoLink") as AutoLink).url).toBe("HTTPS://Example.org");
+    expect(only("HTTPS://Example.org", "AutoLink").url).toBe("HTTPS://Example.org");
   });
 
   it("does not link a lone protocol with nothing after it", () => {
@@ -316,9 +314,7 @@ describe("bare url autolinking (issue #1287)", () => {
   });
 
   it('stops the url body at whitespace, ], <, > and "', () => {
-    expect((only("http://example.org/a b", "AutoLink") as AutoLink).url).toBe(
-      "http://example.org/a",
-    );
+    expect(only("http://example.org/a b", "AutoLink").url).toBe("http://example.org/a");
     const doc = parse("http://example.org]after");
     const link = filter(doc, Predicate.isTagged("AutoLink"))[0] as AutoLink;
     expect(link.url).toBe("http://example.org");
@@ -345,7 +341,7 @@ describe("bare url autolinking (issue #1287)", () => {
 
 describe("wikitables (issue #1287)", () => {
   it("parses a minimal table with an implicit first row", () => {
-    const t = only("{|\n| a\n|}", "Table") as Table;
+    const t = only("{|\n| a\n|}", "Table");
     expect(t.open).toBe("\n");
     expect(t.rows).toHaveLength(1);
     expect(t.rows[0].open).toBeUndefined();
@@ -355,14 +351,14 @@ describe("wikitables (issue #1287)", () => {
   });
 
   it("distinguishes an explicit |- row (open defined) from the implicit first row", () => {
-    const t = only('{|\n| a\n|- style="x"\n| b\n|}', "Table") as Table;
+    const t = only('{|\n| a\n|- style="x"\n| b\n|}', "Table");
     expect(t.rows).toHaveLength(2);
     expect(t.rows[0].open).toBeUndefined();
     expect(t.rows[1].open).toBe(' style="x"\n');
   });
 
   it("parses header cells and keeps table attributes verbatim", () => {
-    const t = only('{| class="wikitable"\n! Name\n! Age\n|}', "Table") as Table;
+    const t = only('{| class="wikitable"\n! Name\n! Age\n|}', "Table");
     expect(t.open).toBe(' class="wikitable"\n');
     expect(t.rows).toHaveLength(1);
     expect(t.rows[0].cells.map((c) => c.header)).toEqual([true, true]);
@@ -370,7 +366,7 @@ describe("wikitables (issue #1287)", () => {
   });
 
   it("splits inline cells on || / !! and marks them inline", () => {
-    const t = only("{|\n! A !! B\n|-\n| 1 || 2\n|}", "Table") as Table;
+    const t = only("{|\n! A !! B\n|-\n| 1 || 2\n|}", "Table");
     const [headerRow, dataRow] = t.rows;
     expect(headerRow.cells.map((c) => c.inline)).toEqual([false, true]);
     expect(headerRow.cells.map((c) => text(c.content))).toEqual([" A ", " B\n"]);
@@ -379,21 +375,21 @@ describe("wikitables (issue #1287)", () => {
   });
 
   it("splits a cell's leading attributes from its content on the single pipe", () => {
-    const t = only('{|\n| style="color:red" | content\n|}', "Table") as Table;
+    const t = only('{|\n| style="color:red" | content\n|}', "Table");
     const cell = t.rows[0].cells[0];
     expect(cell.attrs).toBe(' style="color:red" ');
     expect(text(cell.content)).toBe(" content\n");
   });
 
   it("does not split attrs when there is no pipe at all", () => {
-    const t = only("{|\n| just content\n|}", "Table") as Table;
+    const t = only("{|\n| just content\n|}", "Table");
     expect(t.rows[0].cells[0].attrs).toBeUndefined();
   });
 
   it("does not misread a wikilink's own pipe as the attrs separator", () => {
     // The documented `Parser::doTableStuff` guard: reject the attrs split
     // when the text before the pipe contains `[[`.
-    const t = only("{|\n| [[Foo|Bar]]\n|}", "Table") as Table;
+    const t = only("{|\n| [[Foo|Bar]]\n|}", "Table");
     const cell = t.rows[0].cells[0];
     expect(cell.attrs).toBeUndefined();
     const link = cell.content.find(Predicate.isTagged("Wikilink")) as Wikilink;
@@ -402,27 +398,27 @@ describe("wikitables (issue #1287)", () => {
   });
 
   it("parses nested formatting and links inside a cell", () => {
-    const t = only("{|\n| '''bold''' and [[Link]] and ''italic''\n|}", "Table") as Table;
+    const t = only("{|\n| '''bold''' and [[Link]] and ''italic''\n|}", "Table");
     const content = t.rows[0].cells[0].content;
     expect(content.some(Predicate.isTagged("Formatting"))).toBe(true);
     expect(content.some(Predicate.isTagged("Wikilink"))).toBe(true);
   });
 
   it("parses a caption with attributes, split the same way as cells", () => {
-    const t = only('{|\n|+ style="text-align:left" | The caption\n| a\n|}', "Table") as Table;
+    const t = only('{|\n|+ style="text-align:left" | The caption\n| a\n|}', "Table");
     expect(t.captions).toHaveLength(1);
     expect(t.captions[0].attrs).toBe(' style="text-align:left" ');
     expect(text(t.captions[0].content)).toBe(" The caption\n");
   });
 
   it("extends a cell's content across continuation lines up to the next marker", () => {
-    const t = only("{|\n| line one\nline two\n|-\n| next\n|}", "Table") as Table;
+    const t = only("{|\n| line one\nline two\n|-\n| next\n|}", "Table");
     expect(text(t.rows[0].cells[0].content)).toBe(" line one\nline two\n");
   });
 
   it("parses a nested table inside a cell without confusing its markers for the outer table's", () => {
     const src = "{|\n| outer\n{|\n| inner\n|}\nmore\n|}";
-    const t = only(src, "Table") as Table;
+    const t = only(src, "Table");
     expect(t.rows).toHaveLength(1);
     const inner = t.rows[0].cells[0].content.find(Predicate.isTagged("Table")) as Table;
     expect(inner).toBeDefined();
@@ -430,7 +426,7 @@ describe("wikitables (issue #1287)", () => {
   });
 
   it("treats a |- line as a row marker even where it looks like a negative number", () => {
-    const t = only("{|\n| a\n|-5\n|}", "Table") as Table;
+    const t = only("{|\n| a\n|-5\n|}", "Table");
     expect(t.rows).toHaveLength(2);
     expect(t.rows[1].open).toBe("5\n");
     expect(t.rows[1].cells).toHaveLength(0);
@@ -465,7 +461,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
         src.slice(n.span.start, n.span.end),
       );
     });
-    return only(src, "Table") as Table;
+    return only(src, "Table");
   }
 
   const names = (nodes: readonly Node[]): string[] =>
@@ -473,7 +469,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
 
   it("keeps a template's own pipe out of the attribute split (the issue's example)", () => {
     const doc = parse("{|\n| {{flag|France}}\n|}");
-    const cell = (only("{|\n| {{flag|France}}\n|}", "Table") as Table).rows[0].cells[0];
+    const cell = only("{|\n| {{flag|France}}\n|}", "Table").rows[0].cells[0];
     expect(cell.attrs).toBeUndefined();
     expect(text(cell.content)).toBe(" {{flag|France}}\n");
     expect(names(cell.content)).toEqual(["flag"]);
@@ -642,7 +638,7 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
         src.slice(n.span.start, n.span.end),
       );
     });
-    return only(src, "Table") as Table;
+    return only(src, "Table");
   }
 
   it("splits a header line on || as well as !!, every piece a header cell", () => {
@@ -703,7 +699,7 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
         src.slice(n.span.start, n.span.end),
       );
     });
-    return only(src, "Table") as Table;
+    return only(src, "Table");
   }
 
   /** The table's captions and rows in source order, as `caption:<text>` / `row:<cell texts>`. */
@@ -771,7 +767,7 @@ describe("wikitables: the -{ attribute guard (#158)", () => {
         src.slice(n.span.start, n.span.end),
       );
     });
-    return only(src, "Table") as Table;
+    return only(src, "Table");
   }
 
   it("reads a cell with -{ before its first | as all content (the issue's example)", () => {

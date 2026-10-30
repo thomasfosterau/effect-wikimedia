@@ -17,7 +17,7 @@ The package is published with an automated pipeline designed to resist supply-ch
 - **Pinned actions.** Every GitHub Action is pinned to a full commit SHA, so a hijacked tag cannot inject workflow code.
 - **Least privilege.** Workflows default to `permissions: {}`; each job opts into only the scopes it needs. CI checks out with `persist-credentials: false` and holds read permissions only.
 - **Manual approval gate.** Publishing runs in a protected `release` environment that requires manual approval.
-- **Locked dependencies with a cooling-off period.** Installs use `pnpm install --frozen-lockfile` against the committed `pnpm-lock.yaml`; `allowBuilds` in `pnpm-workspace.yaml` lists the only dependencies allowed to run build scripts; `minimumReleaseAge` holds newly published third-party versions for a day before pnpm installs them, and Dependabot proposes updates with the same cooldown. CI fails on any `high` advisory (`pnpm audit --audit-level high`).
+- **Locked dependencies with a cooling-off period.** Installs use `pnpm install --frozen-lockfile` against the committed `pnpm-lock.yaml`; `allowBuilds` in `pnpm-workspace.yaml` lists the only dependencies allowed to run build scripts; `minimumReleaseAge` holds newly published third-party versions for 8 hours before pnpm installs them, and Dependabot proposes updates after a 1-day cooldown (it takes whole days only), so never sooner. CI fails on any `high` advisory (`pnpm audit --audit-level high`).
 - **Small runtime footprint.** The published package depends only on `@thomasfosterau/effect-parse` (first-party) and its `effect` peer.
 
 ## Release pipeline

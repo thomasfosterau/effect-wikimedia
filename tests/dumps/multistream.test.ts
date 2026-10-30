@@ -32,22 +32,20 @@ const fixturePath = (name: string): string =>
 const DUMP_BZ2 = readFileSync(fixturePath("multistream.xml.bz2"));
 const INDEX_BZ2 = fixturePath("multistream-index.txt.bz2");
 
-const bytesOf = (text: string): Stream.Stream<Uint8Array, never> =>
+const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
   Stream.make(new TextEncoder().encode(text));
 
-const collect = <A, E>(stream: Stream.Stream<A, E, never>): Promise<ReadonlyArray<A>> =>
+const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
   runTest(Stream.runCollect(stream));
 
 /** What `stream` emits before it fails with a {@link Dumps.MultistreamIndexError}. */
 const collectUntilIndexError = <A, E>(
-  stream: Stream.Stream<A, E | Dumps.MultistreamIndexError, never>,
+  stream: Stream.Stream<A, E | Dumps.MultistreamIndexError>,
 ): Promise<ReadonlyArray<A>> =>
   collect(stream.pipe(Stream.catchTag("MultistreamIndexError", () => Stream.empty)));
 
 /** The {@link Dumps.MultistreamIndexError} `stream` fails with. */
-const indexErrorOf = <A, E>(
-  stream: Stream.Stream<A, E, never>,
-): Promise<Dumps.MultistreamIndexError> =>
+const indexErrorOf = <A, E>(stream: Stream.Stream<A, E>): Promise<Dumps.MultistreamIndexError> =>
   expectFailureInstanceOf(Stream.runDrain(stream), Dumps.MultistreamIndexError);
 
 const entry = (line: number, offset: number, pageId: number, title: string) => ({

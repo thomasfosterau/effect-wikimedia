@@ -1,5 +1,5 @@
 import { recommended } from "@effect/tsgo/oxlint-presets";
-import effect from "@mpsuesser/oxlint-plugin-effect";
+import effect from "@enfect/oxlint";
 import { defineConfig } from "vite-plus";
 
 /**
@@ -132,8 +132,14 @@ export default defineConfig({
     // after the build instead.
     ignorePatterns: ["**/dist/**", "api-docs/**", "coverage/**", "tests/dist-consumer/**"],
     extends: [recommended, effect.configs.recommended],
+    // Oxlint's default plugins plus the ones this codebase has code for:
+    // `import` (ESM graph), `promise` (the Node stream adapters and tests),
+    // `vitest` (the suite) and `jsdoc` (every export is documented).
+    plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "vitest", "jsdoc"],
     categories: {
       correctness: "error",
+      suspicious: "error",
+      perf: "error",
     },
     rules: {
       // `casting-awareness` is an awareness prompt, not a defect rule: it
@@ -159,6 +165,24 @@ export default defineConfig({
       "effect/no-unsafe-dictionary-type": "warn",
       "effect/no-runtime-typeof": "warn",
       "vite-plus/prefer-vite-plus-imports": "error",
+      // ---- Oxlint categories: rules this package's conventions cut across --
+      // `_tag` is Effect's discriminator, on every tagged error and union this
+      // package defines and matches.
+      "no-underscore-dangle": "off",
+      // Type assertions are governed by the Effect rules above
+      // (`casting-awareness`, `require-safety-comment-for-type-assertion`),
+      // which ask for the `// SAFETY:` reason this rule cannot see.
+      "typescript/no-unsafe-type-assertion": "off",
+      // A generic read-as-`A` helper over raw JSON (`objectsIn<A>`) uses its
+      // type parameter once on purpose: the caller names the wire shape.
+      "typescript/no-unnecessary-type-parameters": "off",
+      // Vitest's `expect(value, message)` takes a failure message.
+      "vitest/valid-expect": ["error", { maxArgs: 2 }],
+      // Tests assert through `expect…` helpers and `assert`.
+      "vitest/expect-expect": [
+        "error",
+        { assertFunctionNames: ["expect", "expect*", "assert", "assert*"] },
+      ],
     },
     overrides: [
       // Build configs and the TypeDoc plugin are evaluated by Vite, Vitest and
@@ -241,6 +265,18 @@ export default defineConfig({
           // Stays visible as a warning, because a fixture cannot be written
           // another way.
           "effect/require-safety-comment-for-type-assertion": "warn",
+          // Each test is an entry point: it provides its stubbed layers once,
+          // at the edge, which is what this diagnostic asks for.
+          "effecttsgo/strict-effect-provide": "off",
+          // Tests narrow a union with `if (!guard) return expect.unreachable(…)`
+          // and then assert on the narrowed value; that return and the
+          // assertions after it are the idiom, not a missing return or a
+          // skipped assertion.
+          "typescript/consistent-return": "off",
+          "vitest/no-conditional-expect": "off",
+          // A helper sits next to the one test that reads it, inside that
+          // test's `describe`, so the test reads top to bottom.
+          "unicorn/consistent-function-scoping": "off",
         },
       },
       // The unit suite's runtime boundary: `@effect/vitest`'s `it.effect`

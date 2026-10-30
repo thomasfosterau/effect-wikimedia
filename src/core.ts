@@ -616,6 +616,16 @@ export class WikimediaClient extends Context.Service<
 >()("effect-wikimedia/Client") {}
 
 /**
+ * Normalises `request.host`, failing with {@link InvalidRequest} for a host
+ * outside the allowed Wikimedia families.
+ */
+const validated = (request: WikimediaRequest): Effect.Effect<WikimediaRequest, InvalidRequest> => {
+  const host = normaliseWikimediaHost(request.host);
+  if (host === null) return Effect.fail(new InvalidRequest({ kind: "host", value: request.host }));
+  return Effect.succeed({ ...request, host });
+};
+
+/**
  * Builds the {@link WikimediaClient} service over an `HttpClient`, sending
  * the {@link UserAgent} in context at build time as both `User-Agent` and
  * `Api-User-Agent`. Wrapped by
@@ -636,15 +646,6 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
       ),
     ),
   );
-
-  const validated = (
-    request: WikimediaRequest,
-  ): Effect.Effect<WikimediaRequest, InvalidRequest> => {
-    const host = normaliseWikimediaHost(request.host);
-    if (host === null)
-      return Effect.fail(new InvalidRequest({ kind: "host", value: request.host }));
-    return Effect.succeed({ ...request, host });
-  };
 
   /**
    * Validates the request, runs one attempt, and classifies the response:

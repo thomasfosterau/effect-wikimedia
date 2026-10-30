@@ -256,7 +256,7 @@ function trimMatch(logger, project, { cls, base, keep }) {
  * @param {Set<EffectBase>} matched
  */
 function reportUnmatched(logger, matched) {
-  for (const base of EFFECT_BASES.filter((base) => !matched.has(base))) {
+  for (const base of EFFECT_BASES.filter((entry) => !matched.has(entry))) {
     logger.error(
       `typedoc-effect-bases: no class extends ${base.recorded}; update or remove its entry in the plugin (${base.issue}).`,
     );

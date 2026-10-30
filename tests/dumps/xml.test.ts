@@ -21,10 +21,10 @@ const fixtureXml = readFileSync(
   fileURLToPath(new URL("../fixtures/dumps/pages-slice.xml", import.meta.url)),
 );
 
-const bytesOf = (text: string): Stream.Stream<Uint8Array, never> =>
+const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
   Stream.make(new TextEncoder().encode(text));
 
-const collect = <A, E>(stream: Stream.Stream<A, E, never>): Promise<ReadonlyArray<A>> =>
+const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
   runTest(Stream.runCollect(stream));
 
 // ── tagName (table-driven) ───────────────────────────────────────────────
@@ -241,7 +241,7 @@ describe("pageRecords pipeline", () => {
     expect(error.page).toEqual({ title: "Category:Writers", ns: 14, id: 200, redirect: null });
   });
 
-  const perByte = (text: string): Stream.Stream<Uint8Array, never> => {
+  const perByte = (text: string): Stream.Stream<Uint8Array> => {
     const encoded = new TextEncoder().encode(text);
     // One UTF-8 *byte* per chunk — the worst case for tag / entity straddling
     // and for multibyte code points split mid-sequence.

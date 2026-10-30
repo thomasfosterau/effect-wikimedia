@@ -61,11 +61,11 @@ beforeAll(async () => {
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 /** Collects a stream to an array under the test runtime. */
-const collect = <A, E>(stream: Stream.Stream<A, E, never>): Promise<ReadonlyArray<A>> =>
+const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
   runTest(Stream.runCollect(stream));
 
 /** Counts a stream under the test runtime. */
-const count = <A, E>(stream: Stream.Stream<A, E, never>): Promise<number> =>
+const count = <A, E>(stream: Stream.Stream<A, E>): Promise<number> =>
   runTest(Stream.runCount(stream));
 
 // ── stripFraming (table-driven) ──────────────────────────────────────────

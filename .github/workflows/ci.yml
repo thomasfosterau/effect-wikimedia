@@ -15,7 +15,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
-# No permissions by default; the single job grants only read access.
+# No permissions by default; the single job grants only read access. It needs
+# no secrets, so a Dependabot PR runs it exactly as any other PR does.
 permissions: {}
 
 jobs:
@@ -45,7 +46,7 @@ jobs:
 
       # Vite+'s built-in `vp check`, not the `check` task below.
       - name: Format, lint and type-check
-        run: vp check
+        run: pnpm exec vp check
 
       # `vp check` type-checks with tsgolint, which reports no Effect
       # diagnostics. The `check` task runs `tsc -p tsconfig.json` with the
@@ -54,7 +55,7 @@ jobs:
       # suggestions don't affect its exit code
       # (`ignoreEffectWarningsInTscExitCode` in tsconfig.json) (#31, #20).
       - name: Effect diagnostics
-        run: vp run check
+        run: pnpm exec vp run check
 
       # fallow's dead-code analysis: fails on an unused file, export, type,
       # devDependency or catalog entry, a duplicate export, an unresolved
@@ -65,11 +66,11 @@ jobs:
       # needs no build, and it takes well under a second, so it runs with the
       # static checks, before the tests.
       - name: Dead code and duplication
-        run: vp run fallow
+        run: pnpm exec vp run fallow
 
       # Also writes coverage/coverage-final.json for the complexity step.
       - name: Test
-        run: vp run test:unit
+        run: pnpm exec vp run test:unit
 
       # fallow's complexity analysis: fails on a function over a cyclomatic,
       # cognitive or CRAP ceiling (`health` in `.fallowrc.json`: the defaults,
@@ -77,10 +78,10 @@ jobs:
       # computed from the Test step's coverage, so it runs straight after it;
       # its `test:unit` dependency replays from that step's cache entry.
       - name: Complexity
-        run: vp run fallow:health
+        run: pnpm exec vp run fallow:health
 
       - name: Build
-        run: vp run build
+        run: pnpm exec vp run build
 
       # Type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts`
       # with `skipLibCheck: false`, as a consumer's compiler sees the published
@@ -88,7 +89,7 @@ jobs:
       # type-check passes (#20). Its `build` dependency replays from the step
       # above.
       - name: Dist-consumer declaration check
-        run: vp run check:dist
+        run: pnpm exec vp run check:dist
 
       # Renders the API reference from the doc comments with TypeDoc and fails
       # on an undocumented export or a `{@link}` that resolves to nothing in the
@@ -97,7 +98,7 @@ jobs:
       # declaration check with the other published-surface gates, and the
       # audit stays last as the one step that needs the npm registry.
       - name: API docs
-        run: vp run docgen
+        run: pnpm exec vp run docgen
 
       - name: Audit
         run: pnpm audit --audit-level high

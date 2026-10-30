@@ -3,9 +3,10 @@
 # Sets up pnpm + Node.js, restores the pnpm store cache (keyed on
 # pnpm-lock.yaml by setup-node), and installs dependencies with a FROZEN
 # lockfile, so a manifest/lockfile drift fails here rather than shipping.
-# `vp` (vite-plus is a devDependency) lands in node_modules/.bin, which this
-# adds to PATH so later steps invoke `vp …` directly — no separate Vite+
-# installer action, and one fewer third-party action to pin.
+# `vp` (vite-plus is a devDependency) lands in node_modules/.bin; later steps
+# call it as `pnpm exec vp …` rather than through a `GITHUB_PATH` write
+# (zizmor flags those) — no separate Vite+ installer action, and one fewer
+# third-party action to pin.
 #
 # Callers must run `actions/checkout` BEFORE this (a local composite action
 # needs the repo on disk first).
@@ -31,6 +32,4 @@ runs:
     # `allowBuilds` in pnpm-workspace.yaml.
     - name: Install dependencies
       shell: bash
-      run: |
-        pnpm install --frozen-lockfile
-        echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      run: pnpm install --frozen-lockfile
