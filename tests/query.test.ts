@@ -16,6 +16,7 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  basicTemplateRenderers,
   EXTENSION_TAGS,
   filter,
   findTemplates,
@@ -24,6 +25,7 @@ import {
   normaliseTemplateName,
   parse,
   stripToText,
+  type TemplateRenderer,
   templateName,
   templateParams,
   walk,
@@ -194,6 +196,82 @@ describe("strip to plain text", () => {
     // each cell's own trailing newline shows through the join too.
     const doc = parse("{|\n|+ Cap\n! A !! B\n|-\n| 1 || 2\n|}");
     expect(stripToText(doc)).toBe(" Cap\n\n A   B\n\n 1   2\n");
+  });
+});
+
+describe("strip to plain text: template renderers (#210)", () => {
+  const withBasic = (src: string): string =>
+    stripToText(parse(src), { templates: basicTemplateRenderers });
+
+  it("renders every template as nothing without options, as before", () => {
+    expect(stripToText(parse("a {{nowrap|37 ft}} wall"))).toBe("a  wall");
+    expect(stripToText(parse("a {{nowrap|37 ft}} wall"), {})).toBe("a  wall");
+  });
+
+  it.each([
+    ["a {{nowrap|37 ft}} wall", "a 37 ft wall"],
+    ["{{small|(fine print)}}", "(fine print)"],
+    ["{{abbr|NASA|National Aeronautics and Space Administration}}", "NASA"],
+    ["the {{lang|fr|mot juste}} here", "the mot juste here"],
+    ["{{lang|fr}}", ""],
+    ["{{nowrap}}", ""],
+  ])("basicTemplateRenderers renders %j as %j", (src, text) => {
+    expect(withBasic(src)).toBe(text);
+  });
+
+  it("matches names via normaliseTemplateName, on both sides", () => {
+    expect(withBasic("{{ Nowrap_ |x}}{{NOWRAP|y}}")).toBe("x");
+    const shout: TemplateRenderer = () => "!";
+    expect(
+      stripToText(parse("{{Big deal}}{{big_deal}}"), { templates: { " big_deal ": shout } }),
+    ).toBe("!!");
+  });
+
+  it("renders nested templates and markup inside a parameter", () => {
+    expect(withBasic("{{nowrap|[[Paris|the city]] {{lang|fr|''ville''}}{{unknown}}}}")).toBe(
+      "the city ville",
+    );
+  });
+
+  it("keeps positional whitespace and trims named values, as MediaWiki does", () => {
+    const show: TemplateRenderer = (_, { param }) => `[${param(1) ?? "-"}|${param("k") ?? "-"}]`;
+    const strip = (src: string) => stripToText(parse(src), { templates: { show } });
+    expect(strip("{{show| a b | k = v }}")).toBe("[ a b |v]");
+    expect(strip("{{show|x|1= y }}")).toBe("[y|-]");
+    expect(strip("{{show}}")).toBe("[-|-]");
+  });
+
+  it("calls the fallback for unregistered templates only", () => {
+    const fallback: TemplateRenderer = (t) => `<${templateName(t)}>`;
+    expect(
+      stripToText(parse("{{nowrap|a}} {{convert|37|ft}}"), {
+        templates: basicTemplateRenderers,
+        templateFallback: fallback,
+      }),
+    ).toBe("a <convert>");
+    expect(stripToText(parse("x{{a}}y"), { templateFallback: () => "-" })).toBe("x-y");
+  });
+
+  it("lets a renderer strip any fragment with the same options", () => {
+    const first: TemplateRenderer = (t, { strip }) => strip(t.params[0]?.value ?? []);
+    expect(
+      stripToText(parse("{{first|{{nowrap|n}}&amp;}}"), {
+        templates: { ...basicTemplateRenderers, first },
+      }),
+    ).toBe("n&");
+  });
+
+  it("restores the {{nowrap}} prose of the recorded Ada Lovelace article", () => {
+    const plain = stripToText(parse(ada));
+    const rendered = stripToText(parse(ada), { templates: basicTemplateRenderers });
+    expect(plain).toContain("including  and Michael Faraday.");
+    expect(rendered).toContain("including Charles Babbage and Michael Faraday.");
+  });
+
+  it("applies to a single node and a bare fragment", () => {
+    const doc = parse("{{nowrap|z}}");
+    expect(stripToText(doc.children[0], { templates: basicTemplateRenderers })).toBe("z");
+    expect(stripToText(doc.children, { templates: basicTemplateRenderers })).toBe("z");
   });
 });
 

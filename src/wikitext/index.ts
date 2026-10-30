@@ -22,6 +22,7 @@ export * from "./ast.ts";
 export { parse } from "./parse.ts";
 export { serialize, serializeNode, serializeNodes } from "./serialize.ts";
 export {
+  basicTemplateRenderers,
   type Fragment,
   filter,
   findTemplates,
@@ -29,7 +30,10 @@ export {
   normaliseTemplateName,
   paramName,
   paramValue,
+  type StripToTextOptions,
   stripToText,
+  type TemplateRenderContext,
+  type TemplateRenderer,
   templateName,
   templateParams,
   walk,
