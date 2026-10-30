@@ -11,9 +11,13 @@ import { defineConfig } from "vite-plus";
  */
 export default defineConfig({
   // Staged-file checks run by `vp staged` (the pre-commit hook in
-  // `.vite-hooks/`, installed by `vp config` in `prepare`).
+  // `.vite-hooks/`, installed by `vp config` in `prepare`). Format with
+  // fixes, lint without: lint is type-aware, and `vp check --fix` would apply
+  // the autofixes of type-aware rules (even ones at `warn`) to the staged
+  // files at commit time, so the commit would differ from the tree that was
+  // verified (#225).
   staged: {
-    "*.{js,mjs,ts,json,md}": "vp check --fix",
+    "*.{js,mjs,ts,json,md}": ["vp check --fix --no-lint", "vp check --no-fmt"],
   },
   run: {
     cache: true,

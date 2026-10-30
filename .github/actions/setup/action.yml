@@ -23,7 +23,14 @@ runs:
     - name: Setup Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: latest
+        # Never `latest`: setup-node resolves it to the first entry of the
+        # nodejs.org index, pre-releases included (since 2026-10-29 that is
+        # `v27.0.0-alpha.0.0.0`, which hangs some test suites, effect-svelte#214,
+        # and would let Release publish from an alpha). `"*"` with
+        # `check-latest` takes the newest stable release from setup-node's
+        # manifest instead (#225). The floor is package.json `engines` (>=22).
+        node-version: "*"
+        check-latest: true
         cache: pnpm
 
     # `--frozen-lockfile`: the committed pnpm-lock.yaml is the dependency tree
