@@ -1,7 +1,8 @@
 /**
  * The query / manipulation surface over a parsed {@link Document}: node
  * visitors and filters, template extraction (name + parameters), and a
- * strip-to-plain-text projection. All read-only and pure; edits are made by
+ * strip-to-plain-text projection with an optional registry of template
+ * renderers. All read-only and pure; edits are made by
  * rebuilding nodes and re-serializing (`./serialize.ts`).
  *
  * @copyright Thomas Foster
@@ -14,6 +15,7 @@ import * as HashSet from "effect/HashSet";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import * as Rec from "effect/Record";
 import * as Str from "effect/String";
 import type { Document, Node, Param, Template } from "./ast.ts";
 import { NAMED_ENTITIES } from "./entities.ts";
@@ -126,19 +128,28 @@ export function paramValue(param: Param): string {
 }
 
 /**
+ * The effective `name → Param` map for a template: positional parameters
+ * take 1-based indices and later duplicates win, so `1=` overrides the first
+ * positional value (both MediaWiki behaviours).
+ */
+function effectiveParams(template: Template): HashMap.HashMap<string, Param> {
+  const [, entries] = Arr.mapAccum(template.params, 0, (positional, p) => {
+    const name = paramName(p);
+    return name === null
+      ? [positional + 1, [String(positional + 1), p] as const]
+      : [positional, [name, p] as const];
+  });
+  return HashMap.fromIterable(entries);
+}
+
+/**
  * Builds the effective `name → trimmed value` `HashMap` for a template, assigning
  * 1-based indices to positional parameters and letting later duplicates win
  * (both MediaWiki behaviours). Named and positional keys share the space, so
  * an explicit `1=` overrides the first positional value.
  */
 export function templateParams(template: Template): HashMap.HashMap<string, string> {
-  const [, entries] = Arr.mapAccum(template.params, 0, (positional, p) => {
-    const name = paramName(p);
-    return name === null
-      ? [positional + 1, [String(positional + 1), paramValue(p)] as const]
-      : [positional, [name, paramValue(p)] as const];
-  });
-  return HashMap.fromIterable(entries);
+  return HashMap.map(effectiveParams(template), (p) => paramValue(p));
 }
 
 /**
@@ -200,6 +211,79 @@ function decodeEntity(raw: string): string {
 const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
 
 /**
+ * What a {@link TemplateRenderer} gets besides the template: the projection
+ * {@link stripToText} is running, so a renderer can strip a parameter, or any
+ * other fragment, with the same renderers and fallback.
+ */
+export interface TemplateRenderContext {
+  /**
+   * Strips a fragment or node to plain text with the options of the
+   * {@link stripToText} call that invoked the renderer, so templates nested
+   * in it are rendered too. Calling it on the template being rendered
+   * recurses without end.
+   */
+  readonly strip: (input: Fragment | Node) => string;
+  /**
+   * The plain text of the template's parameter `key` (a name, or a 1-based
+   * positional index), stripped with {@link TemplateRenderContext.strip};
+   * `undefined` when the template has no such parameter. Keys resolve as in
+   * {@link templateParams}: later duplicates win, and `1=` overrides the
+   * first positional value. As in MediaWiki, a named value is trimmed and a
+   * positional one keeps its whitespace.
+   */
+  readonly param: (key: string | number) => string | undefined;
+}
+
+/**
+ * Renders one {@link Template} to the plain text {@link stripToText} puts in
+ * its place. It must be pure and synchronous, and it sees only the parsed
+ * invocation: nothing expands the template's source.
+ */
+export type TemplateRenderer = (template: Template, context: TemplateRenderContext) => string;
+
+/** Options for {@link stripToText}: which templates render to text, and how. */
+export interface StripToTextOptions {
+  /**
+   * Renderers keyed by template name. Keys and invocation names are both
+   * compared via {@link normaliseTemplateName}, so `nowrap`, `Nowrap` and
+   * `Nowrap_` name the same template; when two keys normalise alike the later
+   * one wins. A `Template:` prefix in the invocation is not removed, and a
+   * parser function's name includes its argument (`#if:x`), so neither
+   * matches a bare key. {@link basicTemplateRenderers} is a starting set to
+   * spread into it.
+   */
+  readonly templates?: Readonly<Record<string, TemplateRenderer>> | undefined;
+  /**
+   * Renders a template that `templates` has no entry for. Defaults to
+   * rendering it as `""`.
+   */
+  readonly templateFallback?: TemplateRenderer | undefined;
+}
+
+/** Renders a template as its first positional parameter, or `""` without one. */
+const firstParam: TemplateRenderer = (_, { param }) => param(1) ?? "";
+
+/**
+ * A small set of {@link TemplateRenderer}s for enwiki's purely textual
+ * templates, which show one of their parameters and need no data:
+ * `nowrap`, `small` and `abbr` (`{{abbr|NASA|National …}}` → `"NASA"`) render
+ * their first positional parameter, and `lang` (`{{lang|fr|texte}}` →
+ * `"texte"`) its second. A missing parameter renders as `""`. Nothing in
+ * {@link stripToText} uses it unless passed in
+ * {@link StripToTextOptions.templates}; spread it to add your own renderers.
+ */
+export const basicTemplateRenderers = {
+  /** `{{nowrap|text}}` (text kept on one line) renders as `text`. */
+  nowrap: firstParam,
+  /** `{{small|text}}` (text in a smaller font) renders as `text`. */
+  small: firstParam,
+  /** `{{abbr|short|expansion}}` (an abbreviation with a tooltip) renders as `short`. */
+  abbr: firstParam,
+  /** `{{lang|code|text}}` (text tagged with a language code) renders as `text`. */
+  lang: (_, { param }) => param(2) ?? "",
+} as const satisfies Readonly<Record<string, TemplateRenderer>>;
+
+/**
  * Projects `input` to plain text — approximately what a reader sees with all
  * markup removed. Templates and template arguments strip to nothing (they
  * are never expanded — an explicit non-goal), reference/citation tags are
@@ -212,51 +296,105 @@ const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
  * a control character other than tab and newline (NUL and DEL included), a
  * surrogate, U+FFFE, U+FFFF or a code point past U+10FFFF.
  *
+ * `options` registers {@link TemplateRenderer}s that put text in place of
+ * the templates they name ({@link StripToTextOptions.templates}), and a
+ * fallback for every other template
+ * ({@link StripToTextOptions.templateFallback}); without them every template
+ * strips to `""`. Only the registered renderers run: the result stays pure
+ * and synchronous, and no template's source is expanded.
+ *
+ * ```ts
+ * stripToText(parse("a {{nowrap|37 ft}} wall"));                                     // "a  wall"
+ * stripToText(parse("a {{nowrap|37 ft}} wall"), { templates: basicTemplateRenderers }); // "a 37 ft wall"
+ * ```
+ *
  * This is a best-effort prose extraction, **not** a MediaWiki renderer: text
- * produced by template expansion is necessarily absent, so it matches an
- * Action API `extract` only on template-free prose. Whitespace is left
- * as-is for the caller to normalise.
+ * produced by template expansion is absent unless a renderer supplies it, so
+ * it matches an Action API `extract` only on prose whose templates it can
+ * render. Whitespace is left as-is for the caller to normalise.
  */
-export function stripToText(input: Fragment | Node): string {
-  if (isNodeArray(input)) return stripNodes(input);
-  return Predicate.isTagged(input, "Document") ? stripNodes(input.children) : stripNode(input);
+export function stripToText(input: Fragment | Node, options?: StripToTextOptions): string {
+  const strip = options === undefined ? stripDefault : makeStrip(options);
+  return strip(input);
 }
 
-function stripNodes(nodes: readonly Node[]): string {
-  return nodes.map(stripNode).join("");
+/** Strips one input with a node projection: a fragment, document or node. */
+type Strip = (input: Fragment | Node) => string;
+
+const renderNothing: TemplateRenderer = () => "";
+
+/** The projection with every template rendered by `renderTemplate`. */
+function makeStripper(renderTemplate: (template: Template, strip: Strip) => string): Strip {
+  const stripNodes = (nodes: readonly Node[]): string => nodes.map(stripNode).join("");
+  const strip: Strip = (input) => {
+    if (isNodeArray(input)) return stripNodes(input);
+    return Predicate.isTagged(input, "Document") ? stripNodes(input.children) : stripNode(input);
+  };
+  const stripNode: (node: Node) => string = Match.type<Node>().pipe(
+    Match.tagsExhaustive({
+      Text: (node) => node.text,
+      HtmlEntity: (node) => decodeEntity(node.raw),
+      Heading: (node) => stripNodes(node.title),
+      Formatting: () => "",
+      Comment: () => "",
+      Template: (node) => renderTemplate(node, strip),
+      Argument: () => "",
+      Wikilink: (node) => {
+        if (NAMESPACE_LINK_RE.test(serializeNodes(node.target))) return "";
+        return Arr.match(node.segments, {
+          onEmpty: () => stripNodes(node.target),
+          onNonEmpty: (segments) => segments.map(stripNodes).join("|"),
+        });
+      },
+      ExternalLink: (node) => (node.label === undefined ? "" : stripNodes(node.label).trim()),
+      AutoLink: (node) => node.url,
+      Tag: (node) => {
+        if (node.name === "br") return "\n";
+        if (node.rawContent !== undefined && HashSet.has(STRIP_KEEP_RAW, node.name)) {
+          return node.rawContent;
+        }
+        return "";
+      },
+      Table: (node) => {
+        const caption = node.captions.map((c) => stripNodes(c.content)).join(" ");
+        const body = node.rows
+          .map((r) => r.cells.map((c) => stripNodes(c.content)).join(" "))
+          .join("\n");
+        return Str.isNonEmpty(caption) ? `${caption}\n${body}` : body;
+      },
+    }),
+  );
+  return strip;
 }
 
-const stripNode: (node: Node) => string = Match.type<Node>().pipe(
-  Match.tagsExhaustive({
-    Text: (node) => node.text,
-    HtmlEntity: (node) => decodeEntity(node.raw),
-    Heading: (node) => stripNodes(node.title),
-    Formatting: () => "",
-    Comment: () => "",
-    Template: () => "",
-    Argument: () => "",
-    Wikilink: (node) => {
-      if (NAMESPACE_LINK_RE.test(serializeNodes(node.target))) return "";
-      return Arr.match(node.segments, {
-        onEmpty: () => stripNodes(node.target),
-        onNonEmpty: (segments) => segments.map(stripNodes).join("|"),
-      });
-    },
-    ExternalLink: (node) => (node.label === undefined ? "" : stripNodes(node.label).trim()),
-    AutoLink: (node) => node.url,
-    Tag: (node) => {
-      if (node.name === "br") return "\n";
-      if (node.rawContent !== undefined && HashSet.has(STRIP_KEEP_RAW, node.name)) {
-        return node.rawContent;
-      }
-      return "";
-    },
-    Table: (node) => {
-      const caption = node.captions.map((c) => stripNodes(c.content)).join(" ");
-      const body = node.rows
-        .map((r) => r.cells.map((c) => stripNodes(c.content)).join(" "))
-        .join("\n");
-      return Str.isNonEmpty(caption) ? `${caption}\n${body}` : body;
-    },
-  }),
-);
+/** The projection with no renderers: every template strips to `""`. */
+const stripDefault = makeStripper(() => "");
+
+/** The renderer context for one template, under the projection `strip`. */
+function renderContext(template: Template, strip: Strip): TemplateRenderContext {
+  const param = (key: string | number): string | undefined =>
+    Option.getOrUndefined(
+      Option.map(HashMap.get(effectiveParams(template), String(key)), (p) =>
+        p.name === undefined ? strip(p.value) : strip(p.value).trim(),
+      ),
+    );
+  return { strip, param };
+}
+
+/** The projection that renders templates as `options` registers them. */
+function makeStrip(options: StripToTextOptions): Strip {
+  const renderers = HashMap.fromIterable(
+    Arr.map(Rec.toEntries(options.templates ?? {}), ([name, render]) => [
+      normaliseTemplateName(name),
+      render,
+    ]),
+  );
+  const fallback = options.templateFallback ?? renderNothing;
+  return makeStripper((template, strip) => {
+    const render = Option.getOrElse(
+      HashMap.get(renderers, normaliseTemplateName(templateName(template))),
+      () => fallback,
+    );
+    return render(template, renderContext(template, strip));
+  });
+}
