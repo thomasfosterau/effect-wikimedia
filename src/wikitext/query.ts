@@ -208,7 +208,30 @@ function decodeEntity(raw: string): string {
   return isRenderableCodePoint(code) ? String.fromCodePoint(code) : raw;
 }
 
-const NAMESPACE_LINK_RE = /^\s*:?\s*(file|image|category)\s*:/i;
+/**
+ * The prefixes MediaWiki accepts for the File and Category namespaces on
+ * every wiki, whatever its content language: the canonical `File` and
+ * `Category` and the legacy `Image` alias, as `normaliseLinkPrefix` keeps them.
+ */
+const CANONICAL_HIDDEN_PREFIXES = HashSet.make("file", "image", "category");
+
+// How MediaWiki compares a namespace or interwiki prefix: `_` and space are
+// one character, a run of them collapses, and case is ignored.
+function normaliseLinkPrefix(raw: string): string {
+  return raw
+    .replace(/[\s_]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Whether a link target, as written, names a link MediaWiki renders outside the prose. */
+function isHiddenLink(target: string, hidden: HashSet.HashSet<string>): boolean {
+  // A leading `:` is how wikitext writes a visible link to a file or category
+  // page (`[[:Category:Foo]]`) or an inline interlanguage link (`[[:fr:Paris]]`).
+  if (/^\s*:/.test(target)) return false;
+  const colon = target.indexOf(":");
+  return colon > 0 && HashSet.has(hidden, normaliseLinkPrefix(target.slice(0, colon)));
+}
 
 /**
  * What a {@link TemplateRenderer} gets besides the template: the projection
@@ -241,7 +264,10 @@ export interface TemplateRenderContext {
  */
 export type TemplateRenderer = (template: Template, context: TemplateRenderContext) => string;
 
-/** Options for {@link stripToText}: which templates render to text, and how. */
+/**
+ * Options for {@link stripToText}: which templates render to text, and how,
+ * and which link prefixes hide a wikilink.
+ */
 export interface StripToTextOptions {
   /**
    * Renderers keyed by template name. Keys and invocation names are both
@@ -258,6 +284,21 @@ export interface StripToTextOptions {
    * rendering it as `""`.
    */
   readonly templateFallback?: TemplateRenderer | undefined;
+  /**
+   * More link prefixes whose wikilinks render as nothing, added to the
+   * canonical `File`, `Image` and `Category` that every wiki accepts: the
+   * wiki's localised names and aliases for its File and Category namespaces
+   * (`Datei`, `Bild` and `Kategorie` on dewiki) and its interlanguage
+   * prefixes (`fr`, `de`, …), which render in the sidebar rather than the
+   * text. Matched as MediaWiki matches them: case-insensitively, with `_`
+   * read as a space. {@link Action.getHiddenLinkPrefixes} fetches a wiki's
+   * set from its siteinfo. Without them only the canonical names hide a
+   * link, so a `[[Datei:…|thumb|Caption]]` caption or a `[[fr:Paris]]`
+   * interlanguage link shows through as text. The set also applies to
+   * {@link TemplateRenderContext.strip}, so text a renderer strips hides
+   * the same links.
+   */
+  readonly hiddenLinkPrefixes?: Iterable<string> | undefined;
 }
 
 /** Renders a template as its first positional parameter, or `""` without one. */
@@ -287,7 +328,14 @@ export const basicTemplateRenderers = {
  * Projects `input` to plain text — approximately what a reader sees with all
  * markup removed. Templates and template arguments strip to nothing (they
  * are never expanded — an explicit non-goal), reference/citation tags are
- * dropped, wikilinks reduce to their label, and entities are decoded.
+ * dropped, and entities are decoded. A wikilink reduces to its label, or to
+ * its target less a leading `:`. A file, category or interlanguage link
+ * (`[[File:…]]`, `[[Category:…]]`, `[[fr:…]]`) strips to nothing, since it
+ * renders outside the prose, unless its target starts with `:`
+ * (`[[:Category:Foo]]` reads `Category:Foo`). Only the canonical `File`,
+ * `Image` and `Category` prefixes count unless `options` adds the wiki's
+ * localised names and interlanguage prefixes
+ * ({@link StripToTextOptions.hiddenLinkPrefixes}).
  * Every entity MediaWiki renders as a character decodes: each HTML5 named
  * entity with its `;` (`&eacute;`, `&AMP;`; names are case-sensitive, and a
  * few stand for two code points), MediaWiki's aliases for `&rlm;`, and every
@@ -323,8 +371,14 @@ type Strip = (input: Fragment | Node) => string;
 
 const renderNothing: TemplateRenderer = () => "";
 
-/** The projection with every template rendered by `renderTemplate`. */
-function makeStripper(renderTemplate: (template: Template, strip: Strip) => string): Strip {
+/**
+ * The projection with every template rendered by `renderTemplate` and a
+ * wikilink hidden when its prefix is in `hidden` (normalised prefixes).
+ */
+function makeStripper(
+  renderTemplate: (template: Template, strip: Strip) => string,
+  hidden: HashSet.HashSet<string>,
+): Strip {
   const stripNodes = (nodes: readonly Node[]): string => nodes.map(stripNode).join("");
   const strip: Strip = (input) => {
     if (isNodeArray(input)) return stripNodes(input);
@@ -340,9 +394,9 @@ function makeStripper(renderTemplate: (template: Template, strip: Strip) => stri
       Template: (node) => renderTemplate(node, strip),
       Argument: () => "",
       Wikilink: (node) => {
-        if (NAMESPACE_LINK_RE.test(serializeNodes(node.target))) return "";
+        if (isHiddenLink(serializeNodes(node.target), hidden)) return "";
         return Arr.match(node.segments, {
-          onEmpty: () => stripNodes(node.target),
+          onEmpty: () => stripNodes(node.target).replace(/^(\s*):/, "$1"),
           onNonEmpty: (segments) => segments.map(stripNodes).join("|"),
         });
       },
@@ -367,8 +421,11 @@ function makeStripper(renderTemplate: (template: Template, strip: Strip) => stri
   return strip;
 }
 
-/** The projection with no renderers: every template strips to `""`. */
-const stripDefault = makeStripper(() => "");
+/**
+ * The projection with no options: every template strips to `""` and only the
+ * canonical prefixes hide a link. Built once, for the no-options call.
+ */
+const stripDefault = makeStripper(() => "", CANONICAL_HIDDEN_PREFIXES);
 
 /** The renderer context for one template, under the projection `strip`. */
 function renderContext(template: Template, strip: Strip): TemplateRenderContext {
@@ -381,7 +438,20 @@ function renderContext(template: Template, strip: Strip): TemplateRenderContext 
   return { strip, param };
 }
 
-/** The projection that renders templates as `options` registers them. */
+/** The canonical prefixes plus `extra`, normalised; the canonical set itself without `extra`. */
+function hiddenPrefixes(extra: Iterable<string> | undefined): HashSet.HashSet<string> {
+  if (extra === undefined) return CANONICAL_HIDDEN_PREFIXES;
+  return HashSet.union(
+    CANONICAL_HIDDEN_PREFIXES,
+    HashSet.map(HashSet.fromIterable(extra), normaliseLinkPrefix),
+  );
+}
+
+/**
+ * The projection that renders templates as `options` registers them and hides
+ * links under its {@link StripToTextOptions.hiddenLinkPrefixes}; the renderer
+ * context's `strip` is this same projection.
+ */
 function makeStrip(options: StripToTextOptions): Strip {
   const renderers = HashMap.fromIterable(
     Arr.map(Rec.toEntries(options.templates ?? {}), ([name, render]) => [
@@ -396,5 +466,5 @@ function makeStrip(options: StripToTextOptions): Strip {
       () => fallback,
     );
     return render(template, renderContext(template, strip));
-  });
+  }, hiddenPrefixes(options.hiddenLinkPrefixes));
 }

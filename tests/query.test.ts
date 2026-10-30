@@ -275,6 +275,82 @@ describe("strip to plain text: template renderers (#210)", () => {
   });
 });
 
+describe("strip to plain text: file, category and interlanguage links (#208)", () => {
+  it.each([
+    ["[[:Category:Foo]]", "Category:Foo"],
+    ["[[:File:Bar.jpg]]", "File:Bar.jpg"],
+    ["[[ :Category:Foo]]", " Category:Foo"],
+    ["[[:Category:Foo|the Foo category]]", "the Foo category"],
+    ["[[:fr:Paris]]", "fr:Paris"],
+    ["[[:Plain]]", "Plain"],
+  ])("renders the colon link %s as visible text", (src, expected) => {
+    expect(stripToText(parse(src))).toBe(expected);
+  });
+
+  it.each([
+    "[[File:x.png|thumb|cap]]",
+    "[[file:x.png]]",
+    "[[Image:x.png|left]]",
+    "[[ Category : Y ]]",
+    "[[CATEGORY:Y|sort key]]",
+  ])("drops the canonical-prefix link %s with no options", (src) => {
+    expect(stripToText(parse(src))).toBe("");
+  });
+
+  it("leaves localised and interlanguage links visible by default", () => {
+    const doc = parse("[[Datei:x.png|mini|Bildunterschrift]][[Kategorie:Y]][[fr:Paris]]");
+    expect(stripToText(doc)).toBe("mini|BildunterschriftKategorie:Yfr:Paris");
+  });
+
+  it("drops links under the prefixes the caller supplies, on top of the canonical ones", () => {
+    const doc = parse(
+      "Text[[Datei:x.png|mini|Bildunterschrift]][[Bild:y.png]][[kategorie:Y]]" +
+        "[[Fichier:z.png]][[ملف:a.png]][[fr:Paris]][[FR:Paris]][[File:b.png]] [[Berlin|Stadt]].",
+    );
+    const hiddenLinkPrefixes = ["Datei", "Bild", "Kategorie", "Fichier", "ملف", "fr"];
+    expect(stripToText(doc, { hiddenLinkPrefixes })).toBe("Text Stadt.");
+  });
+
+  it("matches a supplied prefix with `_` read as a space and surrounding space ignored", () => {
+    const doc = parse("[[Catégorie _de_ test:Y]][[ catégorie de  test :Z]]shown");
+    expect(stripToText(doc, { hiddenLinkPrefixes: ["Catégorie_de_test"] })).toBe("shown");
+  });
+
+  it("keeps a colon link and an ordinary link visible under supplied prefixes", () => {
+    const doc = parse("[[:Kategorie:Y]] [[:de:Berlin]] [[Datei]] [[wikt:Haus]]");
+    expect(stripToText(doc, { hiddenLinkPrefixes: ["Kategorie", "de"] })).toBe(
+      "Kategorie:Y de:Berlin Datei wikt:Haus",
+    );
+  });
+
+  it("applies the supplied prefixes inside headings and table cells", () => {
+    const doc = parse("== A[[Kategorie:Y]] ==\n{|\n| B[[de:B]]\n|}");
+    expect(stripToText(doc, { hiddenLinkPrefixes: ["Kategorie", "de"] })).toBe(" A \n B\n");
+  });
+
+  it("strips a single node with the supplied prefixes", () => {
+    const [link] = parse("[[Datei:x.png|mini|Unterschrift]]").children;
+    expect(stripToText(link, { hiddenLinkPrefixes: ["Datei"] })).toBe("");
+    expect(stripToText(link)).toBe("mini|Unterschrift");
+  });
+
+  it("hides the supplied prefixes inside a parameter a renderer strips", () => {
+    const options = {
+      hiddenLinkPrefixes: ["Kategorie"],
+      templates: { ...basicTemplateRenderers },
+      templateFallback: ((_, { strip }) => strip(parse("[[Kategorie:Z]]f"))) as TemplateRenderer,
+    };
+    expect(
+      stripToText(parse("{{nowrap|a[[Kategorie:Y]] [[:Kategorie:Y]]}}{{other}}"), options),
+    ).toBe("a Kategorie:Yf");
+  });
+
+  it("keeps the canonical set alone when hiddenLinkPrefixes is absent but templates are set", () => {
+    const doc = parse("{{nowrap|[[Datei:x.png]][[File:y.png]]}}");
+    expect(stripToText(doc, { templates: basicTemplateRenderers })).toBe("Datei:x.png");
+  });
+});
+
 describe("strip to plain text: entities (#107)", () => {
   /** Strips `src`, first checking the parser read all of it as entities. */
   const stripEntities = (src: string): string => {
