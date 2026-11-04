@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-wikimedia": minor
----
-
-`Wikitext.stripToText` takes an optional second argument, `Wikitext.StripToTextOptions`, that renders templates to text instead of dropping them (#210). `templates` maps a template name (compared via `normaliseTemplateName`, on both sides) to a `Wikitext.TemplateRenderer`, `(template, context) => string`, and `templateFallback` renders every other template (it defaults to `""`, as before). A renderer's `Wikitext.TemplateRenderContext` gives `param(key)`, a parameter's plain text (named values trimmed, positional ones not, as in MediaWiki), and `strip`, which strips any fragment with the same options so nested templates render too. The new `Wikitext.basicTemplateRenderers` covers four purely textual enwiki templates: `nowrap`, `small` and `abbr` render their first positional parameter and `lang` its second, so `stripToText(parse("a {{nowrap|37 ft}} wall"), { templates: Wikitext.basicTemplateRenderers })` is `"a 37 ft wall"`. Nothing is expanded from template source, and the result stays pure and synchronous. Without options, `stripToText` is unchanged.

@@ -1,5 +1,39 @@
 # @thomasfosterau/effect-wikimedia
 
+## 0.8.0
+
+### Minor Changes
+
+- 58fd9ea: Redirects are now visible in `Dumps` and `Wikitext` (#207). `Dumps.PageRef` has a new `redirect: string | null` field: the entity-decoded `title` of the page's `<redirect title="…" />`, or `null` for a page that isn't a redirect. `Dumps.skipRedirects` drops the records of redirect pages from a record stream, before or after `Dumps.onlyRevisions`. An open `Dumps.XmlToken` now carries its raw `attributes` text when the tag has any. `Wikitext.redirectTarget(document, { aliases })` returns the target of a `#REDIRECT [[Target]]` page by MediaWiki's rule (the magic word first, after only whitespace, case-insensitive, an optional `:`, then the link), or `null` for any other page; `aliases` adds a wiki's localised spellings such as `#WEITERLEITUNG`. Code that builds a `Dumps.PageRef` by hand must now set `redirect`.
+- 50eb698: Add a reader for the `pages-articles-multistream` index (part of #211). It is runtime-agnostic, and both of its stages are strict: a corrupt index fails the stream with a typed `Dumps.MultistreamIndexError` rather than emitting per-line error elements.
+
+  - `Dumps.multistreamIndexRecords` decodes the index's `offset:pageId:title` lines into typed entries. A malformed line fails the stream with reason `dumps/malformed-index-line`.
+  - `Dumps.multistreamRanges({ fileSize? })` groups the entries into the dump's per-stream byte ranges `[start, end)`. Each range can be decompressed on its own and decoded through `Dumps.pageRecords`.
+    - With `fileSize`, the last range ends at the file size. Without it, the last range's `end` is `null`.
+    - An offset that goes backwards fails the stream with reason `dumps/index-offset-decreased`.
+    - An offset at or past `fileSize` fails the stream with reason `dumps/index-offset-past-file-size`.
+  - `Dumps.decodeIndexLine` decodes a single line to a `Result`.
+
+- 8235ceb: `Wikitext.sections(doc, options?)` splits a parsed page into its sections. It is the first view in a structured layer over the AST (#209).
+
+  It returns the lead at index 0, then one `Wikitext.Section` per heading MediaWiki numbers, in document order, so `index` is the `section=N` that `action=edit` takes. Each section has:
+
+  - its `level` and a plain-text `title`;
+  - `parent` / `children` indices, nested as MediaWiki nests them;
+  - the document's own `heading` node and own body `nodes` (the same objects, not copies);
+  - a node-aligned `span`, and a `fullSpan`: the text `action=edit&section=N` replaces.
+
+  Absent values are `Option`s: the lead's `heading` and `title`, and the `parent` of a top-level section. `options` is passed to `stripToText` for the titles.
+
+  A heading on its own line inside a table cell is counted and nested too, as an in-table section. Its `table` is the top-level `Table` that holds it, its `nodes` are empty, and the table stays whole in the section it sits in. So the sections with no `table` partition `doc.children` exactly, and the tree and `serialize` round-trip are unaffected.
+
+- e137c24: `Wikitext.stripToText` takes an optional second argument, `Wikitext.StripToTextOptions`, that renders templates to text instead of dropping them (#210). `templates` maps a template name (compared via `normaliseTemplateName`, on both sides) to a `Wikitext.TemplateRenderer`, `(template, context) => string`, and `templateFallback` renders every other template (it defaults to `""`, as before). A renderer's `Wikitext.TemplateRenderContext` gives `param(key)`, a parameter's plain text (named values trimmed, positional ones not, as in MediaWiki), and `strip`, which strips any fragment with the same options so nested templates render too. The new `Wikitext.basicTemplateRenderers` covers four purely textual enwiki templates: `nowrap`, `small` and `abbr` render their first positional parameter and `lang` its second, so `stripToText(parse("a {{nowrap|37 ft}} wall"), { templates: Wikitext.basicTemplateRenderers })` is `"a 37 ft wall"`. Nothing is expanded from template source, and the result stays pure and synchronous. Without options, `stripToText` is unchanged.
+
+### Patch Changes
+
+- 482a7d0: `Core.normaliseWikimediaHost` now accepts the Wikimedia sister projects, so every surface can address them instead of failing with `InvalidRequest`: any language edition of Wiktionary, Wikivoyage, Wikisource, Wikiquote, Wikibooks, Wikinews and Wikiversity (`en.wiktionary.org`, …), plus `mediawiki.org` / `www.mediawiki.org`, `wikifunctions.org` / `www.wikifunctions.org` and multilingual Wikisource (`wikisource.org`). The list stays closed to Wikimedia-owned domains; third-party wikis are still rejected.
+- 1c399a5: `Wikitext.stripToText` keeps a colon link (`[[:Category:Foo]]`, `[[:File:Bar.jpg]]`) as the visible text MediaWiki renders, `Category:Foo`, where it used to return `""`. `StripToTextOptions` gains `hiddenLinkPrefixes`, which adds a wiki's localised File and Category namespace names and aliases (`Datei`, `Bild`, `Kategorie`) and its interlanguage prefixes (`fr`, `de`) to the canonical `File` / `Image` / `Category` set, so those links strip to nothing too, including in text a template renderer strips through `TemplateRenderContext.strip`. The new `Action.getHiddenLinkPrefixes(host)` fetches that set from the wiki's siteinfo (`SiteinfoResponse`, `normaliseHiddenLinkPrefixes` and `MAX_HIDDEN_LINK_PREFIXES` come with it).
+
 ## 0.7.0
 
 ### Minor Changes
