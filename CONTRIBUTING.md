@@ -12,7 +12,7 @@ pnpm install --frozen-lockfile
 
 `prepare` installs the Vite+ git hooks (`vp config`) and patches the native `tsc` and `oxlint` with `@effect/tsgo` (`effect-tsgo patch --typescript --oxlint`), so `vp run check` reports Effect diagnostics and `vp check` runs the Effect lint preset. Nothing needs a credential, a database or Docker: tests run against the recorded fixtures in `tests/fixtures/` with the network stubbed.
 
-Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions.
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions. The `Dev Container` workflow (`.github/workflows/devcontainer.yml`) builds it in CI whenever its inputs change; to try a change locally, `pnpm dlx @devcontainers/cli@0.89.0 up --workspace-folder .` (needs Docker).
 
 ## Branches
 
