@@ -37,7 +37,8 @@ catalog:
   # `@mpsuesser/oxlint-plugin-effect`, #221). It depends on `effect` 4.1.0
   # exactly, but the `effect` singleton override below loads our pin in its
   # place, and it lints fine on that. It loads inside the oxlint `vite-plus`
-  # carries, so it moves with the `toolchain` group.
+  # carries, but takes `@oxlint/plugins` as a caret range, so Dependabot
+  # proposes it on its own, outside the `toolchain` group.
   "@enfect/oxlint": 0.9.0
   "@types/node": ^26.1.2
   # Types for `unbzip2-stream` below (test-only). They describe its stream as a
