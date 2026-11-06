@@ -39,7 +39,7 @@ catalog:
   # place, and it lints fine on that. It loads inside the oxlint `vite-plus`
   # carries, but takes `@oxlint/plugins` as a caret range, so Dependabot
   # proposes it on its own, outside the `toolchain` group.
-  "@enfect/oxlint": 0.9.0
+  "@enfect/oxlint": 0.10.0
   "@types/node": ^26.1.2
   # Types for `unbzip2-stream` below (test-only). They describe its stream as a
   # `stream.Transform`, which it isn't: see that entry.

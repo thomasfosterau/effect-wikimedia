@@ -16,8 +16,8 @@ catalogs:
       specifier: 0.63.0
       version: 0.63.0
     '@enfect/oxlint':
-      specifier: 0.9.0
-      version: 0.9.0
+      specifier: 0.10.0
+      version: 0.10.0
     '@thomasfosterau/effect-parse':
       specifier: ^0.4.0
       version: 0.4.0
@@ -82,7 +82,7 @@ importers:
         version: 0.63.0
       '@enfect/oxlint':
         specifier: 'catalog:'
-        version: 0.9.0
+        version: 0.10.0
       '@types/node':
         specifier: 'catalog:'
         version: 26.1.2
@@ -322,8 +322,8 @@ packages:
     resolution: {integrity: sha512-bRbvVj+YLE/nBmcBWGAwsul3mjEYlqqOmWMxvwSVKq/oNnJEuZYgi2OFDeUf7q49E2g3w+oMHMWyN2QayZ77RQ==}
     hasBin: true
 
-  '@enfect/oxlint@0.9.0':
-    resolution: {integrity: sha512-xOKRAj9DmtVb5DqF/EznATObYldQBEWO2nmRYg7E+FxG258dsn5PHOODhakORbR0PVcs9VZ3MfvkuU0JSTRVbA==}
+  '@enfect/oxlint@0.10.0':
+    resolution: {integrity: sha512-A5VEkq8tV8FDRnvK0/AAQePX5iszZ6FlBIwWOsnb6EJFUDURwUIxpJvv3R5sXINId2zkYk1DIjOhpP4W0YsbHg==}
 
   '@esbuild/aix-ppc64@0.28.1':
     resolution: {integrity: sha512-Svl7tq8k/08+p6CXPpRjQ1fKX+1odH/BQbb48fV6fj3CWHhsoIOoY87w1oHXm0qEpkIK3ZfVgp0hed3XBXzXMQ==}
@@ -2095,7 +2095,7 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.63.0
       '@effect/tsgo-win32-x64': 0.63.0
 
-  '@enfect/oxlint@0.9.0':
+  '@enfect/oxlint@0.10.0':
     dependencies:
       '@oxlint/plugins': 1.89.0
       effect: 4.0.4
