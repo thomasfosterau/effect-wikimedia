@@ -46,5 +46,5 @@ vp run fallow:health              # the complexity ratchet (reads the coverage m
 vp run build                      # vp pack → dist/
 vp run check:dist                 # type-check tests/dist-consumer/ against dist/
 vp run docgen                     # TypeDoc API reference → api-docs/
-fallow audit --base origin/trunk  # change-set review (the agent gate; not a CI step)
+vp exec fallow audit --base origin/trunk  # change-set review (the agent gate; not a CI step)
 ```
