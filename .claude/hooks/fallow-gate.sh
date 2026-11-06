@@ -15,6 +15,10 @@ set -euo pipefail
 # Floor comparison uses `sort -V`; GNU and BSD agree on plain semver but
 # diverge on prereleases (BSD sorts `2.48.0-alpha.1` ABOVE `2.48.0`, GNU below).
 # If you set a prerelease floor explicitly, verify the behavior on the target OS.
+#
+# Local deviations, re-apply after `fallow hooks install` regenerates this
+# file: the trusted-checkout block that replaces the generated fallow lookup
+# arms, and `--base origin/trunk` on the audit call, both marked below.
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "fallow-gate: jq not on PATH, skipping audit." >&2
@@ -28,18 +32,42 @@ if ! printf '%s\n' "$CMD" | grep -Eq '(^|[[:space:];|&()])git[[:space:]]+(commit
   exit 0
 fi
 
-PROJECT_FALLOW="${CLAUDE_PROJECT_DIR:-.}/node_modules/.bin/fallow"
-if command -v fallow >/dev/null 2>&1; then
-  RUNNER=(fallow)
-  BIN_DESC="$(command -v fallow)"
-elif [ -x "$PROJECT_FALLOW" ]; then
-  # The project's own pinned fallow (pnpm only: no npx fallback).
-  RUNNER=("$PROJECT_FALLOW")
-  BIN_DESC="$PROJECT_FALLOW"
+# --- Trusted checkouts and the vp runner: local deviation from the generated script ---
+# Replaces the generated lookup arms (a `fallow` on PATH, then the project's
+# node_modules/.bin; no npx fallback, pnpm only). Everything below runs code
+# from the checkout it audits, which is this hook's working directory: fallow
+# from its node_modules. Only this project and its `.claude/worktrees/*`
+# checkouts are trusted for that; from any other tree (a scratch clone, a
+# third-party checkout) the gate says so and runs nothing there rather than
+# execute what that tree carries.
+# Inside a trusted checkout fallow runs through Vite+ (`vp exec fallow`),
+# which resolves the checkout's own pinned copy; its `./node_modules/.bin/fallow`
+# is the fallback where `vp` is not on PATH.
+# `fallow hooks install --target agent --agent claude` overwrites this script
+# without asking, so re-apply this block (and `--base origin/trunk` on the
+# audit call) after regenerating.
+GATE_PROJECT="${CLAUDE_PROJECT_DIR:-}"
+GATE_PROJECT="${GATE_PROJECT%/}"
+case "$PWD" in
+  "$GATE_PROJECT" | "$GATE_PROJECT"/.claude/worktrees/*) ;;
+  *)
+    if [ -n "$GATE_PROJECT" ]; then
+      echo "fallow-gate: $PWD is not this project or one of its worktrees; not running its tooling, skipping audit." >&2
+      exit 0
+    fi
+    ;;
+esac
+if command -v vp >/dev/null 2>&1 && [ -x ./node_modules/.bin/fallow ]; then
+  RUNNER=(vp exec fallow)
+  BIN_DESC="vp exec fallow ($PWD/node_modules/.bin/fallow)"
+elif [ -x ./node_modules/.bin/fallow ]; then
+  RUNNER=(./node_modules/.bin/fallow)
+  BIN_DESC="./node_modules/.bin/fallow"
 else
-  echo "fallow-gate: fallow binary not found (tried PATH and node_modules/.bin), skipping audit." >&2
+  echo "fallow-gate: fallow not installed in $PWD (run \`vp install\`), skipping audit." >&2
   exit 0
 fi
+# --- End trusted checkouts and the vp runner ---
 
 VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null || true)"
 VERSION="${VERSION_RAW#fallow }"
@@ -67,6 +95,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Local deviation: the audit base is pinned to origin/trunk.
 if "${RUNNER[@]}" audit --format json --quiet --explain --gate-marker agent --base origin/trunk >"$TMP_JSON" 2>"$TMP_ERR"; then
   STATUS=0
 else

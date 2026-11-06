@@ -36,7 +36,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 - `vp run check:dist` — the dist-consumer declaration check: builds, then type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts` (`skipLibCheck: false`, `nodenext`) with both TS 7 (`tsc`) and TS 6 (`tsc6`). A change to a public type the fixture pins means updating the fixture alongside the changeset.
 - `vp run docgen` — the docs gate: TypeDoc renders the API reference from the doc comments reachable from `src/index.ts` into the gitignored `api-docs/`, and fails on an undocumented export, method or property (a field of a public interface, schema or error class) or a `{@link}` that resolves to nothing in the published surface (`typedoc.json`; `tsdoc.json` registers `@copyright`). Needs no build.
 - `pnpm audit --audit-level high` — the supply-chain gate (network: needs the npm registry).
-- `fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` — the change-set review the PreToolUse fallow gate runs (below); not a CI step. It reads `coverage/coverage-final.json`, so run `vp run test:coverage` first.
+- `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` — the change-set review the PreToolUse fallow gate runs (below); not a CI step. It reads `coverage/coverage-final.json`, so run `vp run test:coverage` first.
 - `pnpm changeset` — add a changeset.
 
 Use `./node_modules/.bin/vp` if `vp` is not on PATH. `vp run` puts this package's `node_modules/.bin` first on PATH, so its tasks always get the patched `tsc`. Run a bare `tsc` yourself only as `./node_modules/.bin/tsc`: a global `tsc` is not the patched one and reports no Effect diagnostics.
@@ -54,7 +54,7 @@ Before you report work as done, run these in CI's order (`.github/workflows/ci.y
 7. `vp run check:dist`
 8. `vp run docgen`
 9. `pnpm audit --audit-level high`
-10. `vp run test:coverage`, then `fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step). Its verdict must not be `fail`.
+10. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step). Its verdict must not be `fail`.
 
 Steps 1–9 are CI's required `ci` job, in its order.
 
@@ -84,7 +84,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 
 ## Agent sessions
 
-The SessionStart hook (`.claude/hooks/session-start.sh`) installs dependencies against the lockfile and puts `vp` (a re-exec shim that prefers the nearest worktree's `node_modules`) and `fallow` on PATH for non-interactive shells. It hydrates no secrets; nothing here needs one. A PreToolUse hook (`.claude/hooks/fallow-gate.sh`) blocks `git commit` / `git push` when `fallow audit --base origin/trunk` returns `fail`; it reads the coverage map on disk and never refreshes it, so run `vp run test:coverage` first. A PostToolUse hook runs `vp fmt --write` on each edited file. The `@enfect/claude` plugin (Effect guidance and post-write pattern checks) is meant to be enabled in `.claude/settings.json`, pinned to a reviewed commit. Publishing (the Release workflow's OIDC exchange) is the only thing that can't run in a session; the audit needs the npm registry.
+The SessionStart hook (`.claude/hooks/session-start.sh`) installs the global Vite+ CLI at the catalog's `vite-plus` pin with the official installer (npm-provenance and SHA-512 checked; it needs `vite.plus` and `viteplus.dev` on the environment's allowlist), links `vp` and `vpx` into `~/.local/bin` (also exported through `$CLAUDE_ENV_FILE` where the harness offers it), and installs dependencies against the lockfile with `vp install --frozen-lockfile`. It removes the `fallow` shim and the walking `vp` shim earlier versions put there. Everything else goes through Vite+: `vp exec fallow …` for fallow, `vpx <file>.ts` for scripts; the global `vp` delegates to each checkout's own `vite-plus`, worktrees included. If the installer can't run, `vp` falls back to this checkout's `node_modules` copy. It hydrates no secrets; nothing here needs one. A PreToolUse hook (`.claude/hooks/fallow-gate.sh`) blocks `git commit` / `git push` when `fallow audit --base origin/trunk` returns `fail`; it reads the coverage map on disk and never refreshes it, so run `vp run test:coverage` first. It runs only in this project and its `.claude/worktrees/*` checkouts, with fallow as `vp exec fallow` (the checkout's own pinned copy); from any other tree it skips with a notice and runs none of that tree's tooling. A PostToolUse hook runs `vp fmt --write` on each edited file. The `@enfect/claude` plugin (Effect guidance and post-write pattern checks) is meant to be enabled in `.claude/settings.json`, pinned to a reviewed commit. Publishing (the Release workflow's OIDC exchange) is the only thing that can't run in a session; the audit needs the npm registry.
 
 ## Documentation surfaces
 
