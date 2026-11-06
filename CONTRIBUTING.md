@@ -12,6 +12,8 @@ pnpm install --frozen-lockfile
 
 `prepare` installs the Vite+ git hooks (`vp config`) and patches the native `tsc` and `oxlint` with `@effect/tsgo` (`effect-tsgo patch --typescript --oxlint`), so `vp run check` reports Effect diagnostics and `vp check` runs the Effect lint preset. Nothing needs a credential, a database or Docker: tests run against the recorded fixtures in `tests/fixtures/` with the network stubbed.
 
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions.
+
 ## Branches
 
 Branch off `trunk` as `issue-<n>-<slug>`, rebase onto `origin/trunk` rather than merging it, and squash-merge with a conventional prefix: see [AGENTS.md](AGENTS.md#branches-and-pull-requests).

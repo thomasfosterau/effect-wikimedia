@@ -1,0 +1,22 @@
+{
+  "name": "effect-wikimedia",
+  // The Vite+ base image: Node + pnpm + the vp CLI. The tag is the catalog's
+  // `vite-plus` pin (pnpm-workspace.yaml); move it in the same PR that bumps
+  // vite-plus, since Dependabot's devcontainers updates cover only the features.
+  "image": "ghcr.io/voidzero-dev/vite-plus:1.4.0",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/devcontainer-community/devcontainer-features/jq:1": {}
+  },
+  // Same provisioning as an agent session: the pinned Vite+ CLI, vp/vpx links
+  // and the frozen install (see that file's header).
+  "postCreateCommand": "bash .claude/hooks/session-start.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": ["Anthropic.claude-code", "oxc.oxc-vscode"]
+    }
+  },
+  "workspaceFolder": "/workspaces/effect-wikimedia"
+}
