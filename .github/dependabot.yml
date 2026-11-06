@@ -1,10 +1,11 @@
 # Dependabot version updates (the shape the @thomasfosterau family shares).
 #
 # The `npm` ecosystem at `/` reads pnpm-workspace.yaml's catalogs and
-# pnpm-lock.yaml. `groups` hold the sets that MUST move together, so a
+# pnpm-lock.yaml. `groups` hold only the sets that MUST move together, so a
 # lockstep set arrives as one PR (every update type, majors included) and can
-# never drift one package at a time. Dependabot puts a dependency in the FIRST
-# group that matches, so the groups run specific → general, with
+# never drift one package at a time; every other dependency (typedoc, fallow,
+# `@changesets/*`, `@enfect/oxlint`, each GitHub Action, …) gets a PR of its
+# own. Dependabot puts a dependency in the FIRST group that matches, with
 # `exclude-patterns` keeping a package out of a broader group:
 #
 # - `toolchain`: `effect-tsgo patch` (the `prepare` script) matches the
@@ -13,13 +14,11 @@
 #   failing `pnpm install` itself; `vite-plus` pins the oxlint, oxfmt,
 #   tsgolint and vitest it carries, `vite` is its core under an alias,
 #   `vitest` must equal its pin, and `@vitest/coverage-istanbul` peers on that
-#   exact `vitest`. The effect lint rules (`@enfect/oxlint`) load inside that
-#   oxlint. Before merging a toolchain PR, check the `components` table in
-#   node_modules/@effect/tsgo/dist/effect-tsgo.cjs (see the catalog comments).
+#   exact `vitest`. Before merging a toolchain PR, check the `components`
+#   table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs (see the catalog
+#   comments). `@enfect/oxlint` is not in it: its `@oxlint/plugins`
+#   dependency is a caret range, not tied to vite-plus's oxlint.
 # - `effect`: the Effect release line is a lockstep, singleton set.
-# - `typedoc`, `fallow`, `changesets`: each tool's own packages.
-# - `minor-and-patch`: everything else, minor and patch only, so PR volume
-#   stays low; a major outside the sets above stays its own PR.
 #
 # Catalog entries Dependabot may not bump on its own (npm aliases: `vite` →
 # `@voidzero-dev/vite-plus-core`, `typescript` → `@typescript/typescript6`,
@@ -48,6 +47,8 @@ updates:
       exclude:
         - "@thomasfosterau/*"
     groups:
+      # vite-plus pins vitest / oxlint exactly; @effect/tsgo patches only listed
+      # TS / oxlint versions.
       toolchain:
         applies-to: version-updates
         patterns:
@@ -56,18 +57,12 @@ updates:
           - "@voidzero-dev/*"
           - "vitest"
           - "@vitest/*"
-          - "oxlint"
-          - "oxfmt"
-          - "oxlint-tsgolint"
           - "@effect/tsgo"
           - "@typescript/native"
           - "typescript"
           - "@typescript/typescript6"
-          - "@oxlint/*"
-          - "@oxlint-tsgolint/*"
-          - "@oxfmt/*"
-          - "@enfect/oxlint"
         update-types: ["major", "minor", "patch"]
+      # One release train, one singleton.
       effect:
         applies-to: version-updates
         patterns:
@@ -76,29 +71,6 @@ updates:
         exclude-patterns:
           - "@effect/tsgo"
         update-types: ["major", "minor", "patch"]
-      typedoc:
-        applies-to: version-updates
-        patterns:
-          - "typedoc"
-          - "typedoc-plugin-*"
-          - "@microsoft/tsdoc*"
-        update-types: ["major", "minor", "patch"]
-      fallow:
-        applies-to: version-updates
-        patterns:
-          - "fallow"
-          - "@fallow-cli/*"
-        update-types: ["major", "minor", "patch"]
-      changesets:
-        applies-to: version-updates
-        patterns:
-          - "@changesets/*"
-        update-types: ["major", "minor", "patch"]
-      minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -111,7 +83,3 @@ updates:
     # comment); Dependabot updates both.
     cooldown:
       default-days: 1
-    groups:
-      github-actions:
-        patterns:
-          - "*"
