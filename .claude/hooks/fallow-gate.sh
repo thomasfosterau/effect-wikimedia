@@ -52,6 +52,11 @@ fi
 # without asking, so re-apply this block after regenerating.
 GATE_PROJECT="${CLAUDE_PROJECT_DIR:-}"
 GATE_PROJECT="${GATE_PROJECT%/}"
+# `--show-toplevel` prints a physical path, so compare against the physical
+# project path (CLAUDE_PROJECT_DIR may go through a symlink).
+if [ -n "$GATE_PROJECT" ]; then
+  GATE_PROJECT="$(cd "$GATE_PROJECT" 2>/dev/null && pwd -P || printf '%s' "$GATE_PROJECT")"
+fi
 GATE_CHECKOUT="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")"
 GATE_TRUSTED=
 case "$GATE_CHECKOUT" in
