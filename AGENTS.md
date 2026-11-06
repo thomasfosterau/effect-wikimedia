@@ -78,7 +78,7 @@ Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm insta
 ## Effect
 
 - Read the Effect API from the installed package, never from memory, and never guess at one: signatures and doc comments in `node_modules/effect/dist/*.d.ts`, implementations in `node_modules/effect/src`, and the guides the pinned version ships in `node_modules/effect/AGENTS.md` and `node_modules/effect/ai-docs/`.
-- The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer floor is `catalogs.peers.effect`.
+- The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer range is `catalogs.peers.effect`: `^4.0.0`, raised only when a dependency requires it (or the package needs an unstable module first shipped in a later minor), naming the dependency or module in the catalog comment, and proved by re-running the gates with the catalog pin at the floor.
 - In the rc line, HTTP modules live under `effect/http` (`HttpApi` under `effect/http-api`); there are no `effect/unstable/*` paths and no `@effect/platform`. `FileSystem` / `Path` are `effect/*` modules.
 - The peer floor is a published contract: raising it is a breaking change for consumers and gets its own issue and a `minor` changeset while on 0.x (a major one once stable), never a drive-by bump.
 
