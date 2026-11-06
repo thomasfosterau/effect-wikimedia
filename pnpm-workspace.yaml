@@ -53,13 +53,13 @@ catalog:
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
   #
-  # The stable 4.0.0 release (website#2059). The published peer floor in
-  # `catalogs.peers` is `>=4.0.0` (#167), the floor effect-parse peers on.
+  # The stable 4.0.0 release (website#2059). The published peer range in
+  # `catalogs.peers` is `^4.0.0` (the owner's peer-range policy).
   effect: 4.0.4
   # The parser-combinator library the `Wikitext` parser is written in (#168):
   # the package's one runtime dependency besides the `effect` peer, which it
   # shares. First-party, so `minimumReleaseAgeExclude` lets a new release in
-  # at once. Its own `effect` peer (`^4.0.0`) sets our peer floor (#167).
+  # at once. Its own `effect` peer is `^4.0.0`, so it forces no higher floor.
   "@thomasfosterau/effect-parse": ^0.4.0
   # The tree-shaking test (`tests/tree-shaking.test.ts`) drives esbuild directly.
   esbuild: ^0.28.1
@@ -110,13 +110,14 @@ catalog:
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.4` peer would reject a consumer on another 4.x release). The floor is
-# 4.0.0, the `effect` peer of `@thomasfosterau/effect-parse` (#167).
+# `4.0.4` peer would reject a consumer on another 4.x release). The owner's
+# policy: `effect ^4.0.0`, raised only when a dependency requires more (name
+# it here). None does: `@thomasfosterau/effect-parse` peers on `^4.0.0`.
 # `pnpm publish` (which `changeset publish` runs) replaces `catalog:peers`
 # with these ranges in the published manifest.
 catalogs:
   peers:
-    effect: ">=4.0.0"
+    effect: ^4.0.0
 
 overrides:
   # `effect` MUST be a singleton (see the catalog comment): force every

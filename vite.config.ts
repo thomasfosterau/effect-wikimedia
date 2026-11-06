@@ -16,8 +16,12 @@ export default defineConfig({
   // the autofixes of type-aware rules (even ones at `warn`) to the staged
   // files at commit time, so the commit would differ from the tree that was
   // verified (#225).
+  // JSON and Markdown are formatted only: lint has nothing to check in them,
+  // and `vp check --no-fmt` fails with "No files found to lint" when they
+  // are the only files staged.
   staged: {
-    "*.{js,mjs,ts,json,md}": ["vp check --fix --no-lint", "vp check --no-fmt"],
+    "*.{js,mjs,ts}": ["vp check --fix --no-lint", "vp check --no-fmt"],
+    "*.{json,md}": "vp check --fix --no-lint",
   },
   run: {
     cache: true,
