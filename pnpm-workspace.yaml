@@ -53,9 +53,11 @@ catalog:
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
   #
-  # The stable 4.0.0 release (website#2059). The published peer range in
-  # `catalogs.peers` is `^4.0.0` (the owner's peer-range policy).
-  effect: 4.0.4
+  # The 4.1 line the rest of the family is on (#235; 4.0.0 was the first
+  # stable release, website#2059). The published peer range in
+  # `catalogs.peers` stays `^4.0.0` (the owner's peer-range policy), and the
+  # gates pass with this pin set to 4.0.0.
+  effect: 4.1.2
   # The parser-combinator library the `Wikitext` parser is written in (#168):
   # the package's one runtime dependency besides the `effect` peer, which it
   # shares. First-party, so `minimumReleaseAgeExclude` lets a new release in
