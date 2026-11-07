@@ -1,5 +1,26 @@
 # @thomasfosterau/effect-wikimedia
 
+## 0.9.0
+
+### Minor Changes
+
+- 2ccafb0: Dumps: ranged sources for multistream dumps (#211, slice 2).
+
+  - `fromFile` takes `start` / `end` to read one byte range of a file.
+  - `fromHttpRange` takes `endByte`, so it downloads one range and its resumes stay inside it.
+  - The new `fromMultistreamRange(path, range, decompressor)` reads one `MultistreamRange` straight from a `pages-articles-multistream.xml.bz2`.
+
+  `end` and `endByte` are exclusive, matching `MultistreamRange.end`. An invalid range, and now an invalid `startByte` too, fails the stream with a `SourceError` (`dumps/invalid-byte-range`) before the file is opened or a request is sent.
+
+- 167aee7: Add `Wikitext.infoboxes(input, options?)`, the infobox view over the AST (#209, slice 2). It finds each template named `Infobox` or `Infobox …`, plus any names given in `options.names` (`Taxobox`, `Chembox`, …). Each field is returned as a fragment trimmed at its edges, so links and templates survive, along with its text. Every record holds the document's own `Template` and `Param` nodes. `options` also takes `stripToText`'s options, which are applied to each field's `text`. New types: `Infobox`, `InfoboxField`, `InfoboxesOptions`.
+- d67d327: Add `Wikitext.lists(input)`, the list view over the AST (#209, slice 3). It groups consecutive `*` / `#` / `:` / `;` lines into lists. Each item carries its full marker (`#*`), depth and kind (bullet, number, indent, term, definition), its content nodes, and its span. A one-line `;term:definition` gives two items. A multi-line text node is split into fresh per-line `Text` nodes with exact spans; every other node is the document's own. New types: `List`, `ListItem`, `ListItemKind`.
+
+### Patch Changes
+
+- 652ef7b: Dumps: stream teardown now behaves the same on every `effect` 4.x, including 4.1 (#235). Interrupting a `fromNodeReadable`, `fromFile` or `decompressWith` stream again waits, for at most one second, for the Readable to close before the interruption returns. Under `effect` 4.1 it had stopped waiting, because `Stream.fromAsyncIterable` no longer awaits the iterator's `return()` while a read is pending. `decompressWith` now rejects a bad stage before it starts the upstream source, as `fromFile` already did before opening its file, so a rejected stage never opens the source.
+- c8121f1: Add `Action.getRedirectAliases(host, retry?)` (#220). It fetches a wiki's spellings of the redirect magic word (such as `#WEITERLEITUNG` on the German Wikipedia) from `meta=siteinfo&siprop=magicwords`, ready to pass to `Wikitext.redirectTarget`'s `aliases`. Also adds `MagicWordsResponse`, `normaliseRedirectAliases` and `MAX_REDIRECT_ALIASES`.
+- 987097e: The package now ships `CHANGELOG.md`, so the release notes can be read from `node_modules` (#241).
+
 ## 0.8.1
 
 ### Patch Changes
