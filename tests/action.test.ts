@@ -447,6 +447,94 @@ describe("Action.parsePage", () => {
   });
 });
 
+describe("Action.getRedirectAliases (#220)", () => {
+  // The `formatversion=1` shape dewiki's siteinfo answers with, cut down.
+  const dewikiMagicWords = {
+    query: {
+      magicwords: [
+        {
+          name: "notoc",
+          aliases: ["__KEIN_INHALTSVERZEICHNIS__", "__NOTOC__"],
+          "case-sensitive": "",
+        },
+        { name: "redirect", aliases: ["#WEITERLEITUNG", "#REDIRECT"] },
+      ],
+    },
+  };
+
+  it("collects the redirect magic word's spellings and asks only for magicwords", async () => {
+    const { urls, layer } = stubRouter({
+      "meta=siteinfo": { status: 200, body: dewikiMagicWords },
+    });
+    const aliases = await run(layer, Action.getRedirectAliases("de.wikipedia.org"));
+    expect(aliases).toEqual(["#WEITERLEITUNG", "#REDIRECT"]);
+    const url = new URL(urls[0]);
+    expect(url.host).toBe("de.wikipedia.org");
+    expect(url.searchParams.get("meta")).toBe("siteinfo");
+    expect(url.searchParams.get("siprop")).toBe("magicwords");
+  });
+
+  it("feeds Wikitext.redirectTarget so a localised redirect is recognised", async () => {
+    const { layer } = stubRouter({ "meta=siteinfo": { status: 200, body: dewikiMagicWords } });
+    const aliases = await run(layer, Action.getRedirectAliases("de.wikipedia.org"));
+    const doc = Wikitext.parse("#weiterleitung [[Berlin]]");
+    expect(Wikitext.redirectTarget(doc)).toBeNull();
+    expect(Wikitext.redirectTarget(doc, { aliases })).toBe("Berlin");
+  });
+
+  it("drops unusable values and returns nothing without a redirect entry", async () => {
+    const { layer } = stubRouter({
+      "meta=siteinfo": {
+        status: 200,
+        body: {
+          query: {
+            magicwords: [
+              {
+                name: "redirect",
+                aliases: ["  ", 7, " #UMLEITUNG ", "#UMLEITUNG", "#".repeat(256)],
+              },
+              { name: "redirect" },
+            ],
+          },
+        },
+      },
+    });
+    expect(await run(layer, Action.getRedirectAliases("de.wikipedia.org"))).toEqual(["#UMLEITUNG"]);
+    expect(Action.normaliseRedirectAliases({})).toEqual([]);
+    expect(
+      Action.normaliseRedirectAliases({
+        query: { magicwords: [{ name: "notoc", aliases: ["x"] }] },
+      }),
+    ).toEqual([]);
+  });
+
+  it("caps the list at MAX_REDIRECT_ALIASES", () => {
+    const aliases = Arr.makeBy(Action.MAX_REDIRECT_ALIASES + 10, (i) => `#R${i}`);
+    expect(
+      Action.normaliseRedirectAliases({ query: { magicwords: [{ name: "redirect", aliases }] } }),
+    ).toHaveLength(Action.MAX_REDIRECT_ALIASES);
+  });
+
+  it("fails with RequestFailed when the magic-word list is not an array", async () => {
+    const { layer } = stubRouter({
+      "meta=siteinfo": { status: 200, body: { query: { magicwords: { redirect: "#R" } } } },
+    });
+    await expectFailureInstanceOf(
+      toEffect(layer, Action.getRedirectAliases("de.wikipedia.org")),
+      Core.RequestFailed,
+    );
+  });
+
+  it("fails with InvalidRequest for a host outside the allowed set", async () => {
+    const { urls, layer } = stubRouter({});
+    await expectFailureInstanceOf(
+      toEffect(layer, Action.getRedirectAliases("evil.example.com")),
+      Core.InvalidRequest,
+    );
+    expect(urls).toEqual([]);
+  });
+});
+
 describe("Action.getHiddenLinkPrefixes (#208)", () => {
   // The `formatversion=1` shape dewiki's siteinfo answers with, cut down.
   const dewikiSiteinfo = {
