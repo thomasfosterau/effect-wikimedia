@@ -444,25 +444,20 @@ describe("a decompressor that is not a Node stream", () => {
     expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
   });
 
-  it("tears down decompressWith's upstream source when it rejects the stage", async () => {
-    // The upstream is already running by the time the stage is checked, so
-    // the rejection must cancel it, or the source (an HTTP body, a file)
-    // stays open. This source never pushes and never ends: only teardown
-    // closes it, and it must, even while stalled (#83).
+  it("rejects decompressWith's stage before it starts the upstream source", async () => {
+    // The stage is checked before the source is started, as `fromFile` checks
+    // it before opening its file, so a rejected stage opens nothing that
+    // teardown would have to close (an HTTP body, a file). Whether a source
+    // started and cancelled at once ever opens differs by Effect version
+    // (#235), so the check must come first for this to hold on every one.
     let opened = false;
-    const readable = new Readable({ read() {} });
-    const closed = new Promise<"closed">((resolve) =>
-      readable.once("close", () => resolve("closed")),
-    );
     const source = Dumps.fromNodeReadable(() => {
       opened = true;
-      return readable;
+      return new Readable({ read() {} });
     });
     await failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
-    const outcome = await orHung(closed);
-    expect(opened).toBe(true);
-    expect(outcome).toBe("closed");
-    expect(readable.destroyed).toBe(true);
+    await wait(20); // give a source started in the background time to open
+    expect(opened).toBe(false);
   });
 
   it("fails without an unhandled rejection when the upstream has already failed", async () => {
@@ -509,23 +504,21 @@ describe("a decompressor that returns a used stream", () => {
   ];
 
   it.each(usedStages)(
-    "fails decompressWith with a SourceError and releases the upstream when the stage is %s",
+    "fails decompressWith with a SourceError and opens no upstream when the stage is %s",
     async (_, used) => {
       const stage = await used();
-      // This source never pushes and never ends: only cancelling the bridged
-      // web stream closes it.
-      const readable = new Readable({ read() {} });
-      const closed = new Promise<"closed">((resolve) =>
-        readable.once("close", () => resolve("closed")),
-      );
-      const source = Dumps.fromNodeReadable(() => readable);
+      let opened = false;
+      const source = Dumps.fromNodeReadable(() => {
+        opened = true;
+        return new Readable({ read() {} });
+      });
       await withoutUncaught(async () => {
         const error = await failsPromptly(source.pipe(Dumps.decompressWith(() => stage)));
-        expect(await orHung(closed)).toBe("closed");
         expect(error).toMatchObject({
           description: expect.stringContaining("neither destroyed nor ended"),
         });
       });
+      expect(opened).toBe(false);
     },
   );
 

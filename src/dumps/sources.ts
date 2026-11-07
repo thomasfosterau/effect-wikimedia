@@ -340,31 +340,46 @@ const destroyReadable = (readable: NodeReadableLike): void => {
 const CLOSE_WAIT_MS = 1000;
 
 /**
- * Settles as `promise` does if it settles within `ms`, or with `fallback`
- * after that. The timer is cleared once the race settles. A rejection of
- * `promise` after the bound is swallowed rather than crashing the process as
- * an unhandled rejection: `Promise.race` has already subscribed to `promise`,
- * so that rejection is handled even though the race has settled.
+ * Destroys `readable` and waits for it to emit `close`, for at most
+ * `CLOSE_WAIT_MS` (#94): the release of {@link fromNodeReadable}'s scope, so
+ * teardown waits for a well-behaved Readable to finish releasing what it
+ * holds, and carries on without it once the bound passes. It listens for
+ * `close` before destroying, so no `close` is missed, and doesn't wait for a
+ * Readable that has already closed, or for a hand-built
+ * {@link NodeReadableLike} with no `once` to listen on.
  */
-const settleWithin = <A>(promise: Promise<A>, ms: number, fallback: A): Promise<A> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const elapsed = new Promise<A>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
-  });
-  return Promise.race([promise, elapsed]).finally(() => clearTimeout(timer));
-};
+const destroyAndAwaitClose = (readable: NodeReadableLike): Effect.Effect<void> =>
+  Effect.callback<void>((resume) => {
+    const closed = Predicate.hasProperty(readable, "closed") && readable.closed === true;
+    if (
+      closed ||
+      !Predicate.hasProperty(readable, "once") ||
+      !Predicate.isFunction(readable.once)
+    ) {
+      destroyReadable(readable);
+      return resume(Effect.void);
+    }
+    const onClose = (): void => resume(Effect.void);
+    readable.once("close", onClose);
+    destroyReadable(readable);
+    return Effect.sync(() => {
+      if (Predicate.hasProperty(readable, "off") && Predicate.isFunction(readable.off)) {
+        readable.off("close", onClose);
+      }
+    });
+  }).pipe(Effect.timeoutOption(CLOSE_WAIT_MS), Effect.asVoid);
 
 /**
  * Iterates `readable` through an iterator whose `return()` destroys the
- * Readable before delegating. `Stream.fromAsyncIterable` awaits `return()` on
- * teardown, and a Node Readable's iterator queues `return()` behind a pending
- * `next()`; while the Readable is stalled that `next()` never settles, so
- * teardown would hang (#83). Destroying first settles the pending `next()`
- * once the Readable emits `close`, and the queued `return()` then completes.
- * A Readable that never emits `close` (`emitClose: false`, or a file read
- * blocked on a FIFO whose writer is idle) would still hang it, so the wait
- * for the delegated `return()` is bounded by `CLOSE_WAIT_MS`, after
- * which teardown carries on without it (#94).
+ * Readable, delegates to its own `return()` without waiting for it, and
+ * settles at once. A Node Readable's iterator queues `return()` behind a
+ * pending `next()`, which a stalled Readable never settles, so awaiting it
+ * would hang teardown (#83); and whether `Stream.fromAsyncIterable` awaits
+ * `return()` at all differs by Effect version (4.1 stopped awaiting it while
+ * a `next()` is pending, #235). So the wait for the Readable to close lives
+ * in {@link fromNodeReadable}'s scope finalizer instead, bounded there. A
+ * rejection of the delegated `return()` is swallowed: teardown has already
+ * moved on, and it would otherwise escape as an unhandled rejection.
  */
 const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> => ({
   [Symbol.asyncIterator]: () => {
@@ -373,10 +388,8 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
       next: () => iterator.next(),
       return: (value?: unknown) => {
         destroyReadable(readable);
-        const done: IteratorReturnResult<unknown> = { done: true, value };
-        return iterator.return !== undefined
-          ? settleWithin(iterator.return(value), CLOSE_WAIT_MS, done)
-          : Promise.resolve(done);
+        iterator.return?.(value).catch(() => undefined);
+        return Promise.resolve({ done: true, value });
       },
     };
   },
@@ -397,7 +410,8 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
  * so no decompression work is orphaned. Two mechanisms make it hold: the
  * wrapping iterator's `return()` destroys it once the stream has been pulled,
  * and a scope finalizer, registered in the same uninterruptible step that
- * opens it, destroys it if teardown comes before that. It holds while the
+ * opens it, destroys it if teardown comes before that and then waits for it
+ * to close. It holds while the
  * Readable is stalled waiting for data, too: the interruption completes once
  * the Readable's own `destroy()` does (it emits `close`), without waiting for
  * that data. That wait is bounded at one second: if the Readable hasn't
@@ -427,11 +441,10 @@ const openNodeReadable = (
       // between them and leave it open (#95); opening is synchronous, so
       // that costs nothing. The finalizer covers teardown that lands before
       // `Stream.fromAsyncIterable` has created the iterator and registered its
-      // `return()` as a finalizer: an interruption the fiber observes between
-      // this step and that one.
-      const readable = yield* Effect.acquireRelease(open, (opened) =>
-        Effect.sync(() => destroyReadable(opened)),
-      );
+      // `return()` as a finalizer (an interruption the fiber observes between
+      // this step and that one), and it is where teardown waits, bounded, for
+      // the Readable to close (#94, #235).
+      const readable = yield* Effect.acquireRelease(open, (opened) => destroyAndAwaitClose(opened));
       return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
     }),
   );
@@ -497,27 +510,31 @@ export const decompressWith =
       Effect.map(Effect.context<R>(), (context) =>
         openNodeReadable(
           Effect.gen(function* () {
+            // Check the stage before starting the source, as `fromFile` does
+            // before opening its file, so a rejected one opens nothing.
             // Building `web` starts the source on a fiber of its own that only
             // `web.cancel()` stops, so build it here, inside the uninterruptible
             // open: an interruption can't then land between starting the
-            // source and registering the teardown that cancels it (#109). A
-            // rejected stage must cancel it too, or the upstream (an HTTP
-            // body, a file) stays open.
-            const web = yield* tryNode(() => Stream.toReadableStreamWith(source, context));
-            // Cancel only here: once `webToNode` has run, `web` is locked, and
-            // destroying the Node Readable it returns is what cancels it. If
-            // the source has already failed, `web` is errored and `cancel()`
-            // rejects with that error; swallow it, since the stage rejection
+            // source and registering the teardown that cancels it (#109).
+            const stage = yield* openStage(transform);
+            const web = yield* tryNode(() => Stream.toReadableStreamWith(source, context)).pipe(
+              Effect.tapError(() => Effect.sync(() => destroyReadable(stage))),
+            );
+            // Once `webToNode` has run, `web` is locked, and destroying the
+            // Node Readable it returns is what cancels it; if it throws, cancel
+            // `web` here, or the upstream (an HTTP body, a file) stays open.
+            // If the source has already failed, `web` is errored and `cancel()`
+            // rejects with that error; swallow it, since the failure to open
             // is what this stream reports, and an unhandled rejection would
             // crash the process.
-            const stage = yield* openStage(transform).pipe(
+            const head = yield* tryNode(() => webToNode(web)).pipe(
               Effect.tapError(() =>
                 Effect.sync(() => {
                   web.cancel().catch(() => undefined);
+                  destroyReadable(stage);
                 }),
               ),
             );
-            const head = yield* tryNode(() => webToNode(web));
             return yield* composeOrDestroy(head, stage);
           }),
         ),
