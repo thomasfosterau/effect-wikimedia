@@ -80,6 +80,21 @@ const itemCount = Dumps.fromFile("latest-all.json.bz2", { decompressor: () => un
 
 `Dumps.decompressWith(() => unbzip2())` decompresses any other byte stream, such as a `Dumps.fromHttpRange` download. Return a new decoder from each call. `unbzip2-stream` returns a classic (pre-streams2) Node stream, which `Dumps` adapts for `stream.compose`; a `Transform` from another library works as is. `unbzip2-stream` is pure JavaScript and decodes on the event loop, so where both are published the `.json.gz` dump avoids that cost.
 
+Wikipedia's `pages-articles-multistream.xml.bz2` dumps are a run of independent bzip2 streams of 100 pages each, listed by `pages-articles-multistream-index.txt.bz2`. `Dumps.multistreamIndexRecords` and `Dumps.multistreamRanges` turn the index into byte ranges, and `Dumps.fromMultistreamRange` reads one range straight from the compressed file, so a page can be read without decompressing everything before it:
+
+```ts
+const ranges = Dumps.fromFile("enwiki-pages-articles-multistream-index.txt.bz2", {
+  decompressor: () => unbzip2(),
+}).pipe(Dumps.multistreamIndexRecords, Dumps.multistreamRanges());
+
+const pagesOf = (range: Dumps.MultistreamRange) =>
+  Dumps.fromMultistreamRange("enwiki-pages-articles-multistream.xml.bz2", range, () =>
+    unbzip2(),
+  ).pipe(Dumps.pageRecords);
+```
+
+`Dumps.fromFile` takes `start` / `end` for any byte range of a file, and `Dumps.fromHttpRange` takes `startByte` / `endByte` to download one range (`end` and `endByte` are exclusive, as a range's `end` is).
+
 ## API
 
 - **`Core`** — the shared `HttpClient`-based service (`WikimediaClient`), per-wiki host validation (`normaliseWikimediaHost`, which accepts Wikipedia, Wikidata, `*.wikimedia.org`, the sister projects — Wiktionary, Wikivoyage, Wikisource, Wikiquote, Wikibooks, Wikinews, Wikiversity — mediawiki.org and Wikifunctions, and no other host), the typed error family (`InvalidRequest` / `RequestFailed` / `RateLimited`), the configurable `User-Agent` and `Api-User-Agent` (`UserAgent`, defaulting to `USER_AGENT`), the Action API's `origin=*`, and the `maxlag` / retry-after etiquette every other module builds on.

@@ -915,6 +915,73 @@ describe("interruption teardown", () => {
   });
 });
 
+// ── Byte ranges of a file ────────────────────────────────────────────────
+
+describe("fromFile with a byte range", () => {
+  const path = (): string => {
+    const file = join(tmp, "alphabet.txt");
+    writeFileSync(file, "abcdefghijklmnopqrstuvwxyz");
+    return file;
+  };
+  const read = async (options: Dumps.FromFileOptions): Promise<string> =>
+    decodeUtf8(await runTest(Stream.runCollect(Dumps.fromFile(path(), options))));
+
+  it("reads [start, end) with end exclusive", async () => {
+    expect(await read({ start: 3, end: 6 })).toBe("def");
+    expect(await read({ start: 0, end: 1 })).toBe("a");
+  });
+
+  it("reads from start to the end of the file, or from the start to end", async () => {
+    expect(await read({ start: 23 })).toBe("xyz");
+    expect(await read({ end: 3 })).toBe("abc");
+  });
+
+  it("reads to the end of the file for an end past it", async () => {
+    expect(await read({ start: 24, end: 1000 })).toBe("yz");
+  });
+
+  it("decompresses one member of a concatenated gzip file on its own", async () => {
+    const first = gzipSync(Buffer.from("first member"));
+    const second = gzipSync(Buffer.from("second member"));
+    const file = join(tmp, "members.gz");
+    writeFileSync(file, Buffer.concat([first, second]));
+    const bytes = await runTest(
+      Stream.runCollect(
+        Dumps.fromFile(file, { start: first.length, end: first.length + second.length }),
+      ),
+    );
+    expect(decodeUtf8(bytes)).toBe("second member");
+  });
+
+  it("closes the ranged file read when the stream is torn down early", async () => {
+    const file = join(tmp, "large.bin");
+    writeFileSync(file, Buffer.alloc(1 << 20, 1));
+    const reads = vi.spyOn(ReadStream.prototype, "_read");
+    onTestFinished(() => reads.mockRestore());
+    const first = await runTest(
+      Stream.runCollect(Dumps.fromFile(file, { start: 1024, end: 1 << 19 }).pipe(Stream.take(1))),
+    );
+    expect(first).toHaveLength(1);
+    const stream = reads.mock.contexts[0];
+    expect(stream).toBeInstanceOf(ReadStream);
+    expect(stream instanceof ReadStream && stream.destroyed).toBe(true);
+  });
+
+  it.each([
+    ["a negative start", { start: -1 }],
+    ["a fractional start", { start: 1.5 }],
+    ["an end equal to start", { start: 4, end: 4 }],
+    ["an end before start", { start: 4, end: 2 }],
+    ["a fractional end", { end: 2.5 }],
+  ])("fails with a SourceError for %s, before opening the file", async (_, options) => {
+    const error = await expectFailureInstanceOf(
+      Stream.runDrain(Dumps.fromFile(join(tmp, "does-not-exist.txt"), options)),
+      Dumps.SourceError,
+    );
+    expect(error.description).toContain("dumps/invalid-byte-range");
+  });
+});
+
 // ── Resumable HTTP range download ────────────────────────────────────────
 
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
@@ -979,6 +1046,69 @@ describe("fromHttpRange", () => {
     const bytes = await collectRange(layer);
     expect(decodeUtf8(bytes)).toBe(ALPHABET);
     expect(ranges).toEqual(["bytes=0-", "bytes=10-"]);
+  });
+
+  it("asks for bytes=start-(endByte - 1) and resumes inside the range", async () => {
+    const encoder = new TextEncoder();
+    const { ranges, layer } = stubFetch((call, start) => {
+      if (call === 1) {
+        let pulls = 0;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulls += 1;
+            if (pulls === 1) controller.enqueue(encoder.encode(ALPHABET.slice(5, 8)));
+            else controller.error(new FakeFailure({ message: "connection reset" }));
+          },
+        });
+        return new Response(body, { status: 206 });
+      }
+      return new Response(encoder.encode(ALPHABET.slice(start, 12)), { status: 206 });
+    });
+    const bytes = await runTest(
+      Stream.runCollect(
+        Dumps.fromHttpRange("https://dumps.example.org/x.bz2", { startByte: 5, endByte: 12 }),
+      ).pipe(Effect.provide(layer)),
+    );
+    expect(decodeUtf8(bytes)).toBe("fghijkl");
+    expect(ranges).toEqual(["bytes=5-11", "bytes=8-11"]);
+  });
+
+  it("ends without a resume when the connection drops after the range's last byte", async () => {
+    const encoder = new TextEncoder();
+    const { ranges, layer } = stubFetch(() => {
+      let pulls = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1;
+          if (pulls === 1) controller.enqueue(encoder.encode("abc"));
+          else controller.error(new FakeFailure({ message: "connection reset" }));
+        },
+      });
+      return new Response(body, { status: 206 });
+    });
+    const bytes = await runTest(
+      Stream.runCollect(Dumps.fromHttpRange("https://dumps.example.org/x", { endByte: 3 })).pipe(
+        Effect.provide(layer),
+      ),
+    );
+    expect(decodeUtf8(bytes)).toBe("abc");
+    expect(ranges).toEqual(["bytes=0-2"]);
+  });
+
+  it.each([
+    ["a negative startByte", { startByte: -1 }],
+    ["an endByte equal to startByte", { startByte: 3, endByte: 3 }],
+    ["a fractional endByte", { endByte: 2.5 }],
+  ])("fails with a SourceError for %s, before any request", async (_, options) => {
+    const { ranges, layer } = stubFetch(() => new Response("abc", { status: 206 }));
+    const error = await expectFailureInstanceOf(
+      Stream.runDrain(Dumps.fromHttpRange("https://dumps.example.org/x", options)).pipe(
+        Effect.provide(layer),
+      ),
+      Dumps.SourceError,
+    );
+    expect(error.description).toContain("dumps/invalid-byte-range");
+    expect(ranges).toEqual([]);
   });
 
   it("sends the package's default User-Agent when the caller sets none", async () => {

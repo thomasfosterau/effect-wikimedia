@@ -122,6 +122,7 @@ export {
   type FromHttpRangeOptions,
   fromFile,
   fromHttpRange,
+  fromMultistreamRange,
   fromNodeReadable,
   gunzip,
   gunzipTransform,

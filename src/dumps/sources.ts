@@ -44,6 +44,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { UserAgent } from "../core.ts";
+import type { MultistreamRange } from "./multistream.ts";
 
 // ── Error & etiquette ────────────────────────────────────────────────────
 
@@ -557,7 +558,62 @@ export interface FromFileOptions {
    * decoder, as the {@link Decompressor} docs show) or to force a codec.
    */
   readonly decompressor?: Decompressor;
+  /**
+   * The byte offset to start reading at, inclusive, in the file as stored
+   * (before any decompression). Defaults to `0`. A non-negative safe integer,
+   * or the stream fails with a {@link SourceError}.
+   */
+  readonly start?: number | undefined;
+  /**
+   * The byte offset to stop reading at, **exclusive**, in the file as stored,
+   * so `{ start, end }` reads `end - start` bytes, as a
+   * {@link MultistreamRange} gives them. Defaults to the end of the file. A
+   * safe integer above `start`, or the stream fails with a
+   * {@link SourceError}. A range past the end of the file reads to the end.
+   */
+  readonly end?: number | undefined;
 }
+
+/** A byte range checked for {@link fromFile} and {@link fromHttpRange}: `end` exclusive, `undefined` for open-ended. */
+interface ByteRange {
+  readonly start: number;
+  readonly end: number | undefined;
+}
+
+/**
+ * Checks a byte range: `start` a non-negative safe integer, `end` (when
+ * given) a safe integer above it. Fails with a {@link SourceError} naming
+ * the offending bound otherwise.
+ */
+const byteRange = (
+  start: number | undefined,
+  end: number | undefined,
+): Effect.Effect<ByteRange, SourceError> => {
+  const from = start ?? 0;
+  if (!Number.isSafeInteger(from) || from < 0) {
+    return Effect.fail(
+      new SourceError({ description: `dumps/invalid-byte-range: start ${String(start)}` }),
+    );
+  }
+  if (end !== undefined && (!Number.isSafeInteger(end) || end <= from)) {
+    return Effect.fail(
+      new SourceError({
+        description: `dumps/invalid-byte-range: end ${String(end)} for start ${String(from)}`,
+      }),
+    );
+  }
+  return Effect.succeed({ start: from, end });
+};
+
+/**
+ * Opens `path` for reading over `range`. Node's `end` is inclusive, so it is
+ * one less; `Infinity`, Node's own default, reads to the end of the file.
+ */
+const readRange = (path: string, range: ByteRange) =>
+  createReadStream(path, {
+    start: range.start,
+    end: range.end === undefined ? Number.POSITIVE_INFINITY : range.end - 1,
+  });
 
 /** Chooses a decompressor for a path when the caller did not pin one. */
 function decompressorFor(path: string, override: Decompressor | undefined): Decompressor | null {
@@ -573,35 +629,79 @@ function decompressorFor(path: string, override: Decompressor | undefined): Deco
  * tears the whole chain down (see {@link fromNodeReadable}). A `.json.gz`
  * dump needs no options; a `.json.bz2` dump needs an injected bzip2
  * {@link Decompressor} (its docs show one).
+ *
+ * `start` / `end` read one byte range of the file as stored, before
+ * decompression, which is how one stream of a multistream dump is read
+ * (see {@link fromMultistreamRange}): the decompressor then sees only those
+ * bytes, so they must form whole compressed streams. An invalid range fails
+ * the stream with a {@link SourceError} before the file is opened.
  */
 export const fromFile = (
   path: string,
   options?: FromFileOptions,
 ): Stream.Stream<Uint8Array, SourceError> => {
   const decompressor = decompressorFor(path, options?.decompressor);
-  const open = (): Effect.Effect<NodeReadableLike, SourceError> =>
+  const open = (range: ByteRange): Effect.Effect<NodeReadableLike, SourceError> =>
     decompressor === null
-      ? tryNode(() => createReadStream(path))
+      ? tryNode(() => readRange(path, range))
       : Effect.gen(function* () {
           // Check the stage before opening the file, so a rejected one leaks no fd.
           const stage = yield* openStage(decompressor);
           // `compose` so destroying the decompressor also destroys the file
           // read — the fd is closed on interruption, not orphaned. If opening
           // the file throws, destroy the stage, which nothing else owns yet.
-          const file = yield* tryNode(() => createReadStream(path)).pipe(
+          const file = yield* tryNode(() => readRange(path, range)).pipe(
             Effect.tapError(() => Effect.sync(() => stage.destroy())),
           );
           return yield* composeOrDestroy(file, stage);
         });
-  return openNodeReadable(Effect.suspend(open));
+  return openNodeReadable(Effect.flatMap(byteRange(options?.start, options?.end), open));
 };
+
+/**
+ * Reads one stream of a `pages-articles-multistream.xml.bz2` dump: the bytes
+ * of `range` (a {@link MultistreamRange} from {@link multistreamRanges}) in
+ * the file at `path`, through a fresh stage from `decompressor`. Each range
+ * is a whole bzip2 stream, so it decodes on its own, and its pages feed
+ * {@link pageRecords} as they are, with no `<mediawiki>` wrapper needed. A
+ * last range with `end: null` reads to the end of the file. The package
+ * ships no bzip2 decoder, so pass one, as the {@link Decompressor} docs show:
+ *
+ * ```ts
+ * const pages = Dumps.fromMultistreamRange(path, range, () => unbzip2()).pipe(
+ *   Stream.decodeText(),
+ *   Dumps.pageRecords,
+ * );
+ * ```
+ *
+ * {@link fromFile} with `start`, `end` and `decompressor`, so it fails, and
+ * tears down, as that does.
+ */
+export const fromMultistreamRange = (
+  path: string,
+  range: MultistreamRange,
+  decompressor: Decompressor,
+): Stream.Stream<Uint8Array, SourceError> =>
+  fromFile(path, { start: range.start, end: range.end ?? undefined, decompressor });
 
 // ── HTTP range source (resumable) ────────────────────────────────────────
 
 /** Options for {@link fromHttpRange}. */
 export interface FromHttpRangeOptions {
-  /** Byte offset to start from (for an explicit resume). Defaults to `0`. */
+  /**
+   * Byte offset to start from, inclusive (for an explicit resume, or one
+   * range of a file). Defaults to `0`. A non-negative safe integer, or the
+   * stream fails with a {@link SourceError} before any request is sent.
+   */
   readonly startByte?: number;
+  /**
+   * Byte offset to stop at, **exclusive**, for one range of a file, such as
+   * a {@link MultistreamRange}'s `end`; each request then asks for
+   * `bytes=<from>-<endByte - 1>`, and a resume stays inside the range.
+   * Defaults to the end of the file. A safe integer above `startByte`, or
+   * the stream fails with a {@link SourceError} before any request is sent.
+   */
+  readonly endByte?: number | undefined;
   /** Extra attempts after a mid-stream transport failure, each resuming from the last received byte. Defaults to `3`. */
   readonly maxResumes?: number;
   /**
@@ -619,10 +719,15 @@ export interface FromHttpRangeOptions {
 
 const DEFAULT_MAX_RESUMES = 3;
 
-/** Issues a ranged GET from `offset` and returns its body byte stream. */
+/** The `Range` header value for bytes `offset` up to `end` (exclusive), or to the end of the file. */
+const rangeHeader = (offset: number, end: number | undefined): string =>
+  end === undefined ? `bytes=${offset}-` : `bytes=${offset}-${end - 1}`;
+
+/** Issues a ranged GET from `offset` (up to `end`, exclusive) and returns its body byte stream. */
 const rangeRequest = (
   url: string,
   offset: number,
+  end: number | undefined,
   userAgent: string | undefined,
 ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> =>
   Stream.unwrap(
@@ -630,7 +735,7 @@ const rangeRequest = (
       const client = yield* HttpClient.HttpClient;
       const ua = userAgent ?? (yield* UserAgent);
       const request = HttpClientRequest.get(url).pipe(
-        HttpClientRequest.setHeaders({ range: `bytes=${offset}-`, "user-agent": ua }),
+        HttpClientRequest.setHeaders({ range: rangeHeader(offset, end), "user-agent": ua }),
       );
       const response = yield* client
         .execute(request)
@@ -661,6 +766,12 @@ const rangeRequest = (
  * downstream to decompress. Requires an {@link HttpClient.HttpClient} in
  * context. Sends the `userAgent` option, else the `Core.UserAgent` reference
  * (see {@link FromHttpRangeOptions.userAgent}).
+ *
+ * `startByte` / `endByte` download one range of the file, such as one
+ * stream of a multistream dump ({@link MultistreamRange}): a page is then a
+ * ranged GET of a few hundred kilobytes rather than the whole dump. A
+ * failure after the range's last byte has arrived needs no resume, so the
+ * stream just ends.
  */
 export const fromHttpRange = (
   url: string,
@@ -669,17 +780,23 @@ export const fromHttpRange = (
   const maxResumes = options?.maxResumes ?? DEFAULT_MAX_RESUMES;
   const download = (
     offset: number,
+    end: number | undefined,
     resumesLeft: number,
   ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> => {
+    if (end !== undefined && offset >= end) return Stream.empty;
     let received = offset;
-    return rangeRequest(url, offset, options?.userAgent).pipe(
+    return rangeRequest(url, offset, end, options?.userAgent).pipe(
       Stream.tap((chunk) => Effect.sync(() => (received += chunk.length))),
       // Resume only on a transport SourceError — never on interruption, which
       // must propagate and tear the download down (see the interruption test).
       Stream.catchTag("SourceError", (error) =>
-        resumesLeft > 0 ? download(received, resumesLeft - 1) : Stream.fail(error),
+        resumesLeft > 0 ? download(received, end, resumesLeft - 1) : Stream.fail(error),
       ),
     );
   };
-  return download(options?.startByte ?? 0, maxResumes);
+  return Stream.unwrap(
+    Effect.map(byteRange(options?.startByte, options?.endByte), (range) =>
+      download(range.start, range.end, maxResumes),
+    ),
+  );
 };
