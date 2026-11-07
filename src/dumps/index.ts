@@ -107,12 +107,18 @@ export {
   XmlPageReader,
 } from "./xml.ts";
 export {
+  byPageId,
+  byTitle,
   decodeIndexLine,
+  findMultistreamRange,
+  fromCheckpoint,
   type MultistreamIndexEntry,
   MultistreamIndexError,
+  type MultistreamPageRecordsOptions,
   type MultistreamRange,
   type MultistreamRangesOptions,
   multistreamIndexRecords,
+  multistreamPageRecords,
   multistreamRanges,
 } from "./multistream.ts";
 export {
