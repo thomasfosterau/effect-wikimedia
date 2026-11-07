@@ -170,8 +170,6 @@ export default defineConfig({
       // a caught failure turned into an error's `description`, and the raw
       // JSON a Wikimedia API returns before its schema decodes it.
       "effect/no-unknown-parameters": "warn",
-      "effect/no-unsafe-dictionary-type": "warn",
-      "effect/no-runtime-typeof": "warn",
       "vite-plus/prefer-vite-plus-imports": "error",
       // ---- Oxlint categories: rules this package's conventions cut across --
       // `_tag` is Effect's discriminator, on every tagged error and union this
@@ -193,23 +191,17 @@ export default defineConfig({
       ],
     },
     overrides: [
-      // Build configs and the TypeDoc plugin are evaluated by Vite, Vitest and
-      // TypeDoc in bare Node, before any Effect runtime exists: there is no
-      // `FileSystem` service to call, so `node:*` and native loops are the
-      // idiom there.
+      // The TypeDoc plugin (`scripts/typedoc-effect-bases.mjs`) is plain
+      // JavaScript that TypeDoc loads in bare Node and calls back with its
+      // own mutable reflection tree, before any Effect runtime exists: it
+      // walks that tree with native loops and collects names in a native
+      // `Set`, with no `effect` import to reach for. (`vite.config.ts` needs
+      // no override: it trips none of the Effect rules, #224.)
       {
-        files: ["vite.config.ts", "scripts/**"],
+        files: ["scripts/**"],
         rules: {
-          "effect/avoid-node-imports": "off",
-          "effect/avoid-sync-fs": "off",
-          "effect/avoid-process-env": "off",
           "effect/imperative-loops": "off",
-          "effect/no-length-comparison": "off",
-          "effect/prefer-arr-match": "off",
           "effect/avoid-native-object-helpers": "off",
-          "effect/use-console-service": "off",
-          "effect/use-filesystem-service": "off",
-          "effect/use-path-service": "off",
         },
       },
       // The one Node-only module (AGENTS.md: "Node imports stay in
@@ -268,11 +260,6 @@ export default defineConfig({
           "effect/use-path-service": "off",
           "effect/use-temp-file-scoped": "off",
           "effect/use-command-executor-service": "off",
-          // Test fixtures are the seams under test, not domain code: a
-          // recorded payload narrowed to the shape a test asserts against.
-          // Stays visible as a warning, because a fixture cannot be written
-          // another way.
-          "effect/require-safety-comment-for-type-assertion": "warn",
           // Each test is an entry point: it provides its stubbed layers once,
           // at the edge, which is what this diagnostic asks for.
           "effecttsgo/strict-effect-provide": "off",

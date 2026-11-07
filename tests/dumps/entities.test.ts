@@ -279,6 +279,7 @@ async function writeBigDump(path: string, n: number): Promise<number> {
  */
 const collectGarbage = (() => {
   setFlagsFromString("--expose-gc");
+  // SAFETY: with `--expose-gc` set, a new context's global `gc` is V8's `() => void` collector.
   const gc = runInNewContext("gc") as () => void;
   // The captured `gc` keeps working with the flag off, and a context created
   // later (another file sharing this worker, under `isolate: false` or

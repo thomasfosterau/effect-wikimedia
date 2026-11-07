@@ -271,10 +271,14 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
       { length: Math.ceil(compressed.length / 4096) },
       (_, i) => new Uint8Array(compressed.subarray(i * 4096, (i + 1) * 4096)),
     );
+    // SAFETY: unbzip2-stream's `through` stream carries a `paused` flag its type declarations
+    // omit.
     const stage = unbzip2() as ReturnType<typeof unbzip2> & { paused: boolean };
     const write = stage.write.bind(stage);
     let refused = 0;
     let writesWhilePaused = 0;
+    // SAFETY: the wrapper takes the chunk and returns what the original `write` returns, so it
+    // keeps `write`'s contract.
     stage.write = ((chunk: Uint8Array) => {
       if (stage.paused) writesWhilePaused++;
       const accepted = write(chunk);
@@ -331,6 +335,8 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
         stream.emit("close");
       },
     });
+    // SAFETY: the stream has `write`, `end`, `destroy`, `destroyed` and is async-iterable,
+    // every member `NodeDuplexLike` names.
     return stream as typeof stream & Dumps.NodeDuplexLike;
   };
 

@@ -36,6 +36,8 @@ class FixtureEntityMissing extends Schema.TaggedError<FixtureEntityMissing>()(
 const decodeQ42 = (): Wikidata.WikidataItem => {
   // The response schema is Unknown-heavy, so a structural view of the parsed
   // fixture is faithful — `normaliseEntities` does the real validation.
+  // SAFETY: the recorded wbgetentities fixture is that response's JSON; the schema is all
+  // optional `Unknown` leaves, and `normaliseEntities` validates every value it reads.
   const entities = Wikidata.normaliseEntities(fixture as Wikidata.WbGetEntitiesResponse);
   const item = entities.Q42;
   if (item === undefined) throw new FixtureEntityMissing({ id: "Q42" });

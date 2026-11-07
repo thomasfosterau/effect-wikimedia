@@ -81,8 +81,12 @@ function stubClient(routes: Record<string, StubRoute>) {
   const requests: Core.WikimediaRequest[] = [];
   const getJson = <A>(request: Core.WikimediaRequest): Effect.Effect<A, Core.WikimediaError> => {
     requests.push(request);
+    // SAFETY: the conditional has just checked that `routeKeyFor(request)` is a non-empty
+    // string.
     const route = routeKeyFor(request) ? routes[routeKeyFor(request) as string] : undefined;
     if (route?.fail) return Effect.fail(route.fail);
+    // SAFETY: each route's `body` is written to the shape its request decodes to, which is the
+    // `A` the caller asks for.
     return Effect.succeed((route?.body ?? {}) as A);
   };
   const layer = Layer.succeed(Core.WikimediaClient, {
