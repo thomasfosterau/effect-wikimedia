@@ -93,6 +93,17 @@ const pagesOf = (range: Dumps.MultistreamRange) =>
   ).pipe(Dumps.pageRecords);
 ```
 
+To read one page without scanning the dump, `Dumps.findMultistreamRange(Dumps.byTitle("Ada Lovelace"))` (or `Dumps.byPageId`) scans the index for the range that holds it. To process the whole dump, `Dumps.multistreamPageRecords(open, { concurrency })` decodes each range in turn, or several at once. To resume an interrupted run, `Dumps.fromCheckpoint(offset)` skips the ranges before the `end` of the last range you finished:
+
+```ts
+const pages = ranges.pipe(
+  Dumps.fromCheckpoint(savedOffset),
+  Dumps.multistreamPageRecords((range) =>
+    Dumps.fromMultistreamRange("enwiki-pages-articles-multistream.xml.bz2", range, () => unbzip2()),
+  ),
+);
+```
+
 `Dumps.fromFile` takes `start` / `end` for any byte range of a file, and `Dumps.fromHttpRange` takes `startByte` / `endByte` to download one range (`end` and `endByte` are exclusive, as a range's `end` is).
 
 ## API
