@@ -30,6 +30,7 @@ vi.mock(import("../../src/reconciliation/candidate.ts"), async (importOriginal) 
 
 /** A Q42-shaped item with one P18 (image) claim and nothing else. */
 const item: Wikidata.WikidataItem = {
+  // SAFETY: `Q42` is a well-formed item ID, the brand's only invariant.
   id: "Q42" as Wikidata.WikidataItem["id"],
   type: "item",
   labels: {},
@@ -43,6 +44,7 @@ const item: Wikidata.WikidataItem = {
         rank: "normal",
         mainsnak: {
           _tag: "value",
+          // SAFETY: `P18` is a well-formed property ID, the brand's only invariant.
           property: "P18" as Wikidata.ValueSnak["property"],
           datatype: "commonsMedia",
           value: { _tag: "string", value: "Douglas adams portrait.jpg" },
