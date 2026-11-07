@@ -12,7 +12,7 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 3. **Publish (automatic on merge).** Merging that PR triggers the workflow's publish step, `pnpm run release` (`vp run build && changeset publish`). `changeset publish` runs `pnpm publish`, which rewrites the `catalog:peers` peer range into the real one and, under pnpm 11, authenticates via npm trusted publishing (OIDC) itself (the job's `id-token: write` permission plus the trusted publisher below). Nothing requests provenance: an explicit request fails from a private repository. The action then pushes the `v*` tag and creates the GitHub release.
 
-The job runs in the protected `release` environment, so every run on `trunk` — the version PR and the publish alike — pauses for the environment's required reviewer to approve it.
+Only the publish job runs in the protected `release` environment, so a publish pauses for the environment's required reviewer to approve it; refreshing the version PR does not.
 
 ## Versioning
 
@@ -22,7 +22,7 @@ The package stays on 0.x for now. A breaking change takes a `minor` changeset; `
 
 **Going stable means 2.0.0.** When the package is ready for a stable release, it goes straight from 0.x to 2.0.0 with a one-off manual bump in the Version Packages PR, the only planned manual version change (commit `5cb985c`, which reset `package.json` from 1.0.0 to 0.2.0 after the withdrawal, was an earlier one-off correction): on the `changeset-release/trunk` branch, change `version` in `package.json` and the new heading in `CHANGELOG.md` to `2.0.0`, commit, and merge. After 2.0.0, breaking changes take `major` changesets as usual.
 
-- **The edit is fragile until the PR merges.** Whenever the Release workflow runs in version mode (a push to `trunk` while changesets are pending, once its `release` approval is granted), changesets/action resets `changeset-release/trunk` to the pushed `trunk` commit, re-runs `pnpm run version` and force-pushes, discarding the edit. So make the edit last, after everything meant for 2.0.0 has landed and while no Release run is waiting for approval, and merge the Version Packages PR before approving any further Release run; after the merge, approve only the merge commit's run, which finds no changesets and publishes 2.0.0.
+- **The edit is fragile until the PR merges.** Whenever the Release workflow runs in version mode (any push to `trunk` while changesets are pending), changesets/action resets `changeset-release/trunk` to the pushed `trunk` commit, re-runs `pnpm run version` and force-pushes, discarding the edit. So make the edit last, after everything meant for 2.0.0 has landed, and merge the Version Packages PR before anything else lands on `trunk`; the merge commit's run finds no changesets, and its publish job, once approved, publishes 2.0.0.
 - **Cosmetic leftovers.** `changeset version` files the breaking entries under `### Minor Changes` (they were `minor` changesets), now inside the `## 2.0.0` section, and the bot-written PR body still names the 0.x version it computed (`## @thomasfosterau/effect-wikimedia@0.x.0`); the PR title, `chore: version packages`, names no version. Edit the changelog subheading or the PR body by hand if wanted.
 
 ## One-time repository setup

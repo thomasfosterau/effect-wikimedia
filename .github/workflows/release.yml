@@ -1,44 +1,104 @@
 name: Release
 
-# Changesets release flow (copied from `thomasfosterau/effect-jsonapi`, the
-# release-pipeline standard): on every push to `trunk`, changesets/action
-# either opens/updates the "Version Packages" PR (while unreleased changesets
-# exist) or, once that PR has merged and no changesets remain, publishes to
-# npm and tags the release. See PUBLISHING.md.
+# Changesets release flow, split so that only publishing waits for approval.
+# On every push to `trunk`:
+#
+# - `select` (read-only) asks changesets/action/select-mode what the repo state
+#   calls for: `version` while unreleased changesets exist, `publish` once none
+#   remain and some package version is not on npm yet (`changeset
+#   publish-plan`), else `none`.
+# - `version` opens/updates the "chore: version packages" PR. It holds a
+#   write-scoped token but no `id-token`, so it cannot publish, and runs outside
+#   the `release` environment, so it needs no approval.
+# - `publish` is the only job in the protected `release` environment and the
+#   only one with `id-token: write`: it publishes to npm via OIDC trusted
+#   publishing and tags the release, after the owner approves it (once per
+#   release). See PUBLISHING.md.
+#
+# changesets/action's README recommends its sub-actions over the combined
+# action for trusted publishing, "to tighten publish permissions"; they need
+# Changesets CLI v3. The version and publish sub-actions push through the
+# GitHub API, so no checkout keeps git credentials.
 
 on:
   push:
     branches: [trunk]
 
-concurrency:
-  group: release-${{ github.ref }}
-
-# No permissions by default; the release job opts into exactly what it needs.
+# No permissions by default; each job opts into exactly what it needs.
 permissions: {}
 
 jobs:
-  release:
-    name: Version or publish
+  # Same setup as `publish` (see the comments there), minus the build.
+  select:
+    name: Select mode
+    if: github.repository == 'thomasfosterau/effect-wikimedia' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Select mode
+        id: mode
+        uses: changesets/action/select-mode@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+
+  version:
+    name: Version packages
+    needs: select
+    if: needs.select.outputs.mode == 'version'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-version-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Create or update the version PR
+        uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          script: pnpm run version
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
+
+  publish:
+    name: Publish to npm
     # Never run on forks (they have neither the environment nor the trusted
     # publisher binding, so a fork cannot publish on your behalf).
     # Nor for Dependabot (it cannot push to `trunk`, but the guard keeps the
     # release environment and its OIDC token out of its reach regardless).
-    if: github.repository == 'thomasfosterau/effect-wikimedia' && github.actor != 'dependabot[bot]'
+    # That guard is on `select` now: this job needs it, so it is skipped with it.
+    needs: select
+    if: needs.select.outputs.mode == 'publish'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # One publish at a time; never cancel one that has started.
+    concurrency:
+      group: release-publish-${{ github.ref }}
+      cancel-in-progress: false
     # Requires manual approval via a protected GitHub Environment named
     # "release". See PUBLISHING.md for the one-time setup.
     environment: release
     permissions:
-      contents: write # push the version branch, the release tag and the GitHub release
-      pull-requests: write # open/update the "Version Packages" PR
+      contents: write # push the release tags and create the GitHub releases
       id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
     steps:
-      - name: Checkout # zizmor: ignore[artipacked]
-        # The Changesets action pushes the version branch, so it needs the
-        # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN),
-        # hence no `persist-credentials: false`; the job uploads no artifacts.
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -53,10 +113,9 @@ jobs:
       # devDependencies) and renamed its inputs from v1's `version` / `publish`
       # / `commit` / `title`. The action parses the "New tag:" output of
       # `changeset publish`, pushes the tag and creates the GitHub release.
-      - name: Create release PR or publish to npm
-        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+      - name: Publish to npm
+        uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          version-script: pnpm run version
           # `pnpm run`, NOT `vp run`: pnpm forwards the ambient environment to
           # child processes, whereas `vp run` filters it and drops
           # `ACTIONS_ID_TOKEN_REQUEST_URL`, which `pnpm publish` needs to fetch
@@ -65,9 +124,7 @@ jobs:
           # publishes unauthenticated, and the registry rejects the upload
           # with an HTTP error (E401 / E403 / E404). The `release` script
           # still builds with `vp` internally.
-          publish-script: pnpm run release
-          commit-message: "chore: version packages"
-          pr-title: "chore: version packages"
+          script: pnpm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NPM_TOKEN: publishing authenticates via OIDC trusted publishing
