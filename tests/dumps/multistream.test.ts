@@ -29,7 +29,8 @@ import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
 const fixturePath = (name: string): string =>
   fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
 
-const DUMP_BZ2 = readFileSync(fixturePath("multistream.xml.bz2"));
+const DUMP_PATH = fixturePath("multistream.xml.bz2");
+const DUMP_BZ2 = readFileSync(DUMP_PATH);
 const INDEX_BZ2 = fixturePath("multistream-index.txt.bz2");
 
 const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
@@ -298,6 +299,35 @@ describe("a multistream range decoded on its own", () => {
       ),
     );
     expect(whole.map((r) => r.page?.title)).toEqual([
+      "Ada Lovelace",
+      "AT&T",
+      "Category:Writers",
+      "Talk:Foo:Bar",
+      "Zebra",
+    ]);
+  });
+});
+
+// ── fromMultistreamRange: one range read straight from the file ──────────
+
+describe("fromMultistreamRange", () => {
+  it("reads each range of the dump file to the same pages as its sliced bytes", async () => {
+    const entries = await collect(
+      Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
+        Dumps.multistreamIndexRecords,
+      ),
+    );
+    const ranges = await collect(Stream.fromIterable(entries).pipe(Dumps.multistreamRanges()));
+    expect(ranges).toHaveLength(3);
+    const fromFile = await Promise.all(
+      ranges.map((range) =>
+        collect(
+          Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2()).pipe(Dumps.pageRecords),
+        ),
+      ),
+    );
+    expect(fromFile).toEqual(await Promise.all(ranges.map(pagesInRange)));
+    expect(fromFile.flat().map((r) => r.page?.title)).toEqual([
       "Ada Lovelace",
       "AT&T",
       "Category:Writers",
