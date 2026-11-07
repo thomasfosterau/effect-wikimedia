@@ -132,7 +132,7 @@ export function paramValue(param: Param): string {
  * take 1-based indices and later duplicates win, so `1=` overrides the first
  * positional value (both MediaWiki behaviours).
  */
-function effectiveParams(template: Template): HashMap.HashMap<string, Param> {
+export function effectiveParams(template: Template): HashMap.HashMap<string, Param> {
   const [, entries] = Arr.mapAccum(template.params, 0, (positional, p) => {
     const name = paramName(p);
     return name === null

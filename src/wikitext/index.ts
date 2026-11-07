@@ -23,6 +23,7 @@
  */
 
 export * from "./ast.ts";
+export { type Infobox, type InfoboxesOptions, type InfoboxField, infoboxes } from "./infobox.ts";
 export { parse } from "./parse.ts";
 export { type Section, sections } from "./sections.ts";
 export { serialize, serializeNode, serializeNodes } from "./serialize.ts";
