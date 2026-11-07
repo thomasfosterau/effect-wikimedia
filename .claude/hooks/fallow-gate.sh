@@ -18,7 +18,8 @@ set -euo pipefail
 #
 # Local deviations, re-apply after `fallow hooks install` regenerates this
 # file: the trusted-checkout block that replaces the generated fallow lookup
-# arms, and `--base origin/trunk` on the audit call, both marked below.
+# arms, the coverage regeneration before the audit, and `--base origin/trunk`
+# on the audit call, all marked below.
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "fallow-gate: jq not on PATH, skipping audit." >&2
@@ -120,6 +121,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Local deviation: regenerate a missing coverage map (#230). The audit reads
+# coverage/coverage-final.json for its CRAP scores and returns a runtime
+# error without it, which this gate treats as a skip, so a fresh worktree's
+# commit would go through unaudited. Only a missing map is regenerated; a
+# stale one is used as it is, so run `vp run test:coverage` after changing
+# code. If regeneration fails (a failing test), the audit's runtime error
+# below still skips with a notice, as before.
+if [ ! -f coverage/coverage-final.json ]; then
+  echo "fallow-gate: no coverage/coverage-final.json in $PWD; running vp run test:coverage first." >&2
+  if command -v vp >/dev/null 2>&1; then
+    vp run test:coverage >/dev/null 2>&1 \
+      || echo "fallow-gate: vp run test:coverage failed; the audit will report the missing map." >&2
+  else
+    echo "fallow-gate: vp not on PATH, cannot regenerate coverage." >&2
+  fi
+fi
 # Local deviation: the audit base is pinned to origin/trunk.
 if "${RUNNER[@]}" audit --format json --quiet --explain --gate-marker agent --base origin/trunk >"$TMP_JSON" 2>"$TMP_ERR"; then
   STATUS=0

@@ -161,10 +161,14 @@ fi
 
 # Where the harness persists session environment (Claude Code on the web),
 # put ~/.local/bin on PATH for every later tool call as well. Harmless where
-# the variable is unset.
+# the variable is unset. The line is written once: the file outlives a
+# resume, so appending on every run would stack copies of it (#230).
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-  printf 'export PATH="%s:$PATH"\n' "$LOCAL_BIN" >>"$CLAUDE_ENV_FILE" 2>/dev/null \
-    || log "could not append to CLAUDE_ENV_FILE"
+  ENV_LINE="$(printf 'export PATH="%s:$PATH"' "$LOCAL_BIN")"
+  if ! grep -qxF "$ENV_LINE" "$CLAUDE_ENV_FILE" 2>/dev/null; then
+    printf '%s\n' "$ENV_LINE" >>"$CLAUDE_ENV_FILE" 2>/dev/null \
+      || log "could not append to CLAUDE_ENV_FILE"
+  fi
 fi
 
 # ── 2. Bare `node` (gardeneria #1462) ────────────────────────────────────────
