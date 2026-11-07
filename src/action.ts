@@ -835,3 +835,98 @@ export const getHiddenLinkPrefixes = Effect.fn("Action.getHiddenLinkPrefixes")(f
   );
   return normaliseHiddenLinkPrefixes(response);
 });
+
+// ── Redirect magic words (action=query&meta=siteinfo&siprop=magicwords) ──
+
+const SiteMagicWord = Schema.Struct({
+  /** The magic word's internal name, such as `redirect`. */
+  name: Schema.optional(Schema.Unknown),
+  /** The magic word's spellings on this wiki, localised ones first. */
+  aliases: Schema.optional(Schema.Array(Schema.Unknown)),
+});
+
+/**
+ * Lenient schema for the `action=query&meta=siteinfo&siprop=magicwords`
+ * response envelope: the decode step {@link getRedirectAliases} runs before
+ * {@link normaliseRedirectAliases}. Every field is optional and every leaf
+ * `Unknown`, so a partial or extended response decodes, but a container of
+ * the wrong kind (such as a magic-word list that is not an array) fails the
+ * decode, which {@link getRedirectAliases} reports as a `RequestFailed`.
+ */
+export const MagicWordsResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
+  query: Schema.optional(
+    Schema.Struct({
+      /** The wiki's magic words, each with its spellings. */
+      magicwords: Schema.optional(Schema.Array(SiteMagicWord)),
+    }),
+  ),
+});
+export type MagicWordsResponse = typeof MagicWordsResponse.Type;
+
+/** Cap on how many spellings {@link normaliseRedirectAliases} keeps. */
+export const MAX_REDIRECT_ALIASES = 100;
+
+/** A spelling from the response, or `None` when it is not a usable redirect word. */
+function redirectAlias(value: unknown): Option.Option<string> {
+  return Option.filter(Option.fromNullOr(sanitiseText(value)), (alias) => alias.length <= 255);
+}
+
+/**
+ * Normalises a `MagicWordsResponse` to the spellings of the `redirect` magic
+ * word, for {@link Wikitext.RedirectTargetOptions.aliases}: trimmed,
+ * deduplicated, in response order (a wiki lists its localised spellings
+ * before `#REDIRECT`, which stays in the list), and capped at
+ * {@link MAX_REDIRECT_ALIASES}; a value that is not a string, is empty, or is
+ * longer than 255 characters is dropped. A response with no `redirect`
+ * entry gives `[]`.
+ */
+export function normaliseRedirectAliases(response: MagicWordsResponse): readonly string[] {
+  const redirect = (response.query?.magicwords ?? []).filter((word) => word.name === "redirect");
+  return Arr.take(
+    Arr.dedupe(
+      Arr.getSomes(
+        Arr.map(
+          Arr.flatMap(redirect, (word) => word.aliases ?? []),
+          redirectAlias,
+        ),
+      ),
+    ),
+    MAX_REDIRECT_ALIASES,
+  );
+}
+
+/**
+ * Fetches the spellings of the redirect magic word on `host` (such as
+ * `#WEITERLEITUNG` and `#REDIRECT` on the German Wikipedia) from the Action
+ * API's `meta=siteinfo&siprop=magicwords`, for
+ * {@link Wikitext.RedirectTargetOptions.aliases}:
+ *
+ * ```ts
+ * const aliases = yield* Action.getRedirectAliases("de.wikipedia.org");
+ * Wikitext.redirectTarget(doc, { aliases });
+ * ```
+ *
+ * `redirectTarget` matches them case-insensitively, as MediaWiki does for
+ * its English `redirect` magic word; the response's `case-sensitive` flag is
+ * not read, so on a wiki whose localised word is case-sensitive a
+ * differently cased spelling is accepted too. A wiki's set changes rarely,
+ * so fetch it once per wiki and reuse it.
+ * Fails with {@link InvalidRequest}, before any request is sent, for an
+ * invalid host; {@link Core.RateLimited} for a `429` / `503` or a `maxlag`
+ * error once `retry` (default {@link Core.DEFAULT_RETRY_OPTIONS}) is
+ * exhausted; and {@link Core.RequestFailed} for any other non-2xx status, a
+ * transport error or a response that does not decode.
+ */
+export const getRedirectAliases = Effect.fn("Action.getRedirectAliases")(function* (
+  host: string,
+  retry?: RetryOptions,
+) {
+  const client = yield* WikimediaClient;
+  const response = yield* client.getJson(
+    actionRequest(host, "query", { meta: "siteinfo", siprop: "magicwords" }),
+    MagicWordsResponse,
+    retry ?? DEFAULT_RETRY_OPTIONS,
+  );
+  return normaliseRedirectAliases(response);
+});
