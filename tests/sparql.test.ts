@@ -19,11 +19,11 @@ import { FetchHttpClient } from "effect/http";
 import { Core, Sparql } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
-const fixture = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+const fixture = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
   readFileSync(fileURLToPath(new URL("./fixtures/wdqs-results.json", import.meta.url)), "utf8"),
 );
 
-const stubWdqs = (body: unknown) => {
+const stubWdqs = (body: Schema.Json) => {
   const requests: Request[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
@@ -207,7 +207,11 @@ describe("Sparql.normaliseTerm", () => {
       type: Option.some("z".repeat(200)),
       value: Option.none(),
     });
-    expect(Sparql.normaliseTerm({ type: 5 })).toEqual({
+    // A non-string `type` is dropped by the response schema's lenient leaf.
+    const response = Schema.decodeUnknownSync(Sparql.SparqlResultsResponse)({
+      results: { bindings: [{ x: { type: 5, value: 6 } }] },
+    });
+    expect(Sparql.normaliseResults(response).bindings[0]?.["x"]).toEqual({
       _tag: "unknown",
       type: Option.none(),
       value: Option.none(),

@@ -42,6 +42,7 @@ import * as Str from "effect/String";
 import {
   DEFAULT_RETRY_OPTIONS,
   InvalidRequest,
+  lenientField,
   type RetryOptions,
   WikimediaClient,
 } from "./core.ts";
@@ -227,13 +228,13 @@ const RawTerm = Schema.Struct({
    * The term's kind: `"uri"`, `"literal"` (or `"typed-literal"`, read the same
    * way) or `"bnode"`.
    */
-  type: Schema.optional(Schema.Unknown),
+  type: lenientField(Schema.String),
   /** The term's value: the IRI, the literal's lexical form or the blank node's label. */
-  value: Schema.optional(Schema.Unknown),
+  value: lenientField(Schema.String),
   /** A datatyped literal's datatype IRI. */
-  datatype: Schema.optional(Schema.Unknown),
+  datatype: lenientField(Schema.String),
   /** A language-tagged literal's language tag. */
-  "xml:lang": Schema.optional(Schema.Unknown),
+  "xml:lang": lenientField(Schema.String),
 });
 type RawTerm = typeof RawTerm.Type;
 
@@ -308,24 +309,20 @@ const MAX_TERM_LENGTH = 10_000;
 /** Upper bound on an unrecognised term's `type` ({@link UnknownTerm.type}). */
 const MAX_UNKNOWN_TYPE_LENGTH = 200;
 
-/** The raw `value` cut at `MAX_TERM_LENGTH`, or `None` when it isn't a string. */
-const boundedValue = (value: unknown): Option.Option<string> =>
-  P.isString(value) ? Option.some(value.slice(0, MAX_TERM_LENGTH)) : Option.none();
+/** The raw `value` cut at `MAX_TERM_LENGTH`, or `None` when it is absent. */
+const boundedValue = (value: string | undefined): Option.Option<string> =>
+  Option.map(Option.fromUndefinedOr(value), (v) => v.slice(0, MAX_TERM_LENGTH));
 
 /** Normalises one raw term into the typed {@link SparqlTerm} union; never throws. */
 export function normaliseTerm(raw: RawTerm): SparqlTerm {
-  const type = P.isString(raw.type) ? raw.type : undefined;
+  const type = raw.type;
   const value = boundedValue(raw.value);
   const lexical = Option.getOrElse(value, () => "");
   if (type === "uri") return { _tag: "uri", value: lexical };
   if (type === "bnode") return { _tag: "bnode", value: lexical };
   if (type === "literal" || type === "typed-literal") {
-    const datatype = P.isString(raw.datatype)
-      ? Option.some(raw.datatype.slice(0, 2000))
-      : Option.none();
-    const language = P.isString(raw["xml:lang"])
-      ? Option.some(raw["xml:lang"].slice(0, 40))
-      : Option.none();
+    const datatype = Option.map(Option.fromUndefinedOr(raw.datatype), (iri) => iri.slice(0, 2000));
+    const language = Option.map(Option.fromUndefinedOr(raw["xml:lang"]), (tag) => tag.slice(0, 40));
     return {
       _tag: "literal",
       value: lexical,
