@@ -31,7 +31,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup
+      # Vite+ at the catalog pin, Node.js `lts`, the `packageManager` pnpm, the
+      # pnpm store cache, and `vp install` (#254). pnpm installs with a frozen
+      # lockfile by default in CI, so a manifest/lockfile drift fails here.
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version: "lts"
+          cache: true
 
       # `vp run` tasks (`check`, `fallow`, `test:unit`, `fallow:health`,
       # `build`, `check:dist`, `docgen`) are content-addressed (`run.cache`

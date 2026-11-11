@@ -1,10 +1,12 @@
-# Composite setup shared by every job that needs the toolchain (copied in
-# shape from `thomasfosterau/effect-drizzle-ext`, the Vite+ library standard).
+# Composite setup kept only for release.yml, which this sweep doesn't edit (it
+# belongs to the release session): ci.yml and devcontainer.yml call
+# `voidzero-dev/setup-vp` directly. Delete this directory, and its entry in
+# .github/dependabot.yml, once release.yml does the same.
 # One action, `voidzero-dev/setup-vp` (#254), replaces pnpm/action-setup and
 # actions/setup-node: it installs the Vite+ CLI at the catalog's `vite-plus`
 # pin (`version-file`), a managed Node.js, and the pnpm `packageManager`
 # names, restores the pnpm store cache keyed on pnpm-lock.yaml, and installs
-# dependencies with a FROZEN lockfile, so a manifest/lockfile drift fails
+# dependencies (`vp install`; pnpm freezes the lockfile by default in CI), so a drift fails
 # here rather than shipping. Later steps keep calling `pnpm exec vp …` and
 # `pnpm run …`: the managed pnpm is on PATH.
 #
@@ -25,9 +27,3 @@ runs:
         # once resolved to `v27.0.0-alpha`, #225, effect-svelte#214.)
         node-version: "lts"
         cache: true
-        # `--frozen-lockfile`: the committed pnpm-lock.yaml is the dependency
-        # tree CI verifies; an out-of-sync lockfile fails the install instead
-        # of being silently re-resolved. Dependency build scripts are already
-        # gated by `allowBuilds` in pnpm-workspace.yaml.
-        run-install: |
-          args: ['--frozen-lockfile']
