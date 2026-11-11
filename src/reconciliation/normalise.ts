@@ -56,8 +56,8 @@ export function hitToCandidate(hit: Wikidata.SearchHit): readonly WikidataCandid
   return Option.toArray(
     Option.map(normaliseQid(hit.id), (qid) => ({
       qid,
-      label: sanitiseCandidateText(hit.label),
-      description: sanitiseCandidateText(hit.description),
+      label: Option.flatMap(hit.label, sanitiseCandidateText),
+      description: Option.flatMap(hit.description, sanitiseCandidateText),
       instanceOf: [],
     })),
   );
@@ -157,26 +157,26 @@ function identifierFacts(item: Wikidata.WikidataItem): IdentifierFact[] {
   return Arr.take(facts, MAX_SAME_AS);
 }
 
-/** Wikibase's precision code when it is an integer in its 0–14 range, else `null`. */
-function timePrecision(precision: number | null): number | null {
-  return precision !== null && Number.isInteger(precision) && precision >= 0 && precision <= 14
-    ? precision
-    : null;
+/** Wikibase's precision code when it is an integer in its 0–14 range. */
+function timePrecision(precision: Option.Option<number>): Option.Option<number> {
+  return Option.filter(precision, (code) => Number.isInteger(code) && code >= 0 && code <= 14);
 }
 
 /**
  * The {@link DateFact} `calendar` for a time value's calendar model: the
  * entity IRI of proleptic Gregorian (`Q1985727`) or proleptic Julian
  * (`Q1985786`), as `http` (Wikibase's concept URI, what the JSON carries)
- * or `https`. Anything else, including a missing model, is `null`.
+ * or `https`. Anything else, including a missing model, is `None`.
  */
-function timeCalendar(calendarModel: string | null): DateFact["calendar"] {
-  const match =
-    calendarModel === null
-      ? null
-      : /^https?:\/\/www\.wikidata\.org\/entity\/(Q1985727|Q1985786)$/.exec(calendarModel);
-  if (match === null) return null;
-  return match[1] === "Q1985727" ? "gregorian" : "julian";
+function timeCalendar(
+  calendarModel: Option.Option<string>,
+): Option.Option<NonNullable<DateFact["calendar"]>> {
+  return Option.flatMap(calendarModel, (model) =>
+    Option.map(
+      Option.fromNullOr(/^https?:\/\/www\.wikidata\.org\/entity\/(Q1985727|Q1985786)$/.exec(model)),
+      (match) => (match[1] === "Q1985727" ? "gregorian" : "julian"),
+    ),
+  );
 }
 
 /**
@@ -194,8 +194,9 @@ function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
           property,
           label,
           time,
-          precision: timePrecision(value.precision),
-          calendar: timeCalendar(value.calendarModel),
+          // `DateFact` is a stored wire schema, so its absences stay `null`.
+          precision: Option.getOrNull(timePrecision(value.precision)),
+          calendar: Option.getOrNull(timeCalendar(value.calendarModel)),
         })),
       );
     }),

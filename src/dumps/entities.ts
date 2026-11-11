@@ -83,7 +83,7 @@ export interface DumpLineError {
   /**
    * Why the line yielded no entity: `"dumps/invalid-json"` when `JSON.parse`
    * rejects it, and `"dumps/not-an-entity"` when it parses but
-   * {@link Wikidata.decodeEntity} returns `null` (no valid entity id, where
+   * {@link Wikidata.decodeEntity} returns `None` (no valid entity id, where
    * only `Q`, `P` and `L` ids count; flagged `missing`; or not an object at
    * all).
    */
@@ -147,16 +147,15 @@ export function decodeEntityLine(line: string, lineNumber: number): Option.Optio
     if (Option.isNone(parsed)) {
       return { _tag: "error", line: lineNumber, reason: "dumps/invalid-json", raw: boundRaw(body) };
     }
-    const item = decodeEntity(parsed.value);
-    if (item === null) {
-      return {
+    return Option.match(decodeEntity(parsed.value), {
+      onNone: (): EntityRecord => ({
         _tag: "error",
         line: lineNumber,
         reason: "dumps/not-an-entity",
         raw: boundRaw(body),
-      };
-    }
-    return { _tag: "entity", line: lineNumber, item };
+      }),
+      onSome: (item): EntityRecord => ({ _tag: "entity", line: lineNumber, item }),
+    });
   });
 }
 
@@ -206,15 +205,15 @@ export const onlyEntities = <E, R>(
 
 /** Whether an item's entity kind matches `type` (`"item"`, `"property"`, `"lexeme"`). */
 export function hasType(item: WikidataItem, type: string): boolean {
-  return item.type === type;
+  return Option.contains(item.type, type);
 }
 
 /** Whether an item carries at least one statement for the given property (`"P569"`). */
 export function hasClaim(item: WikidataItem, property: string): boolean {
-  const validated = parsePropertyId(property);
-  if (validated === null) return false;
-  const statements = item.claims[validated];
-  return statements !== undefined && Arr.isReadonlyArrayNonEmpty(statements);
+  return Option.exists(parsePropertyId(property), (validated) => {
+    const statements = item.claims[validated];
+    return statements !== undefined && Arr.isReadonlyArrayNonEmpty(statements);
+  });
 }
 
 /**

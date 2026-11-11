@@ -86,7 +86,7 @@ assert<
 
 // --- Wikidata ---------------------------------------------------------------
 
-const qid: Wikidata.ItemId | null = Wikidata.parseItemId("Q42");
+const qid: Option.Option<Wikidata.ItemId> = Wikidata.parseItemId("Q42");
 // @ts-expect-error -- `ItemId` is branded: a bare string is not one.
 const unbranded: Wikidata.ItemId = "Q42";
 assert<

@@ -18,6 +18,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
@@ -211,8 +212,8 @@ describe("reconciliation label search, expressed over the typed surface", () => 
     };
     const candidates: NeutralCandidate[] = Wikidata.normaliseSearch(response).map((hit) => ({
       qid: hit.id,
-      label: hit.label,
-      description: hit.description,
+      label: Option.getOrNull(hit.label),
+      description: Option.getOrNull(hit.description),
     }));
     expect(candidates).toEqual([
       { qid: "Q42", label: "Douglas Adams", description: "English writer" },
