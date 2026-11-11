@@ -68,10 +68,10 @@ const dataValueOfKind = <K extends Wikidata.DataValue["_tag"]>(
   value: Wikidata.DataValue,
   tag: K,
 ): Extract<Wikidata.DataValue, { _tag: K }> => {
-  if (value._tag !== tag) return expect.unreachable(`expected ${tag}, got ${value._tag}`);
-  // SAFETY: the guard above has checked that `value._tag` is `tag`, which selects exactly this
-  // member.
-  return value as Extract<Wikidata.DataValue, { _tag: K }>;
+  const isKind = (v: Wikidata.DataValue): v is Extract<Wikidata.DataValue, { _tag: K }> =>
+    v._tag === tag;
+  if (!isKind(value)) return expect.unreachable(`expected ${tag}, got ${value._tag}`);
+  return value;
 };
 
 /** The main snak's value of a given kind, for the first statement on a property. */
