@@ -89,7 +89,7 @@ describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
     expect(html).toContain("<b>Douglas Noel Adams</b>");
     expect(html).toContain('<h2 id="Life">Life</h2>');
     // The REST metadata's latest revision matches the Action wikitext's revision — one consistent page.
-    expect(metadata.latestRevisionId).toBe(wikitext?.revisionId);
+    expect(metadata.latestRevisionId).toEqual(Option.fromNullOr(wikitext?.revisionId));
   });
 
   it("builds Douglas Adams's Commons portrait file URL and fetches its file info", async () => {

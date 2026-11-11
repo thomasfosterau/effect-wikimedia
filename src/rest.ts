@@ -17,6 +17,7 @@
  */
 
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import {
@@ -120,18 +121,18 @@ export type RevisionMetadataResponse = typeof RevisionMetadataResponse.Type;
 /** A page's REST-surface identity metadata. */
 export interface PageMetadata {
   /**
-   * MediaWiki's page id; `null` when the response has none, or it is negative,
+   * MediaWiki's page id; `None` when the response has none, or it is negative,
    * not a finite number or above `Number.MAX_SAFE_INTEGER`. A fractional value
    * is truncated.
    */
-  readonly pageId: number | null;
+  readonly pageId: Option.Option<number>;
   /**
    * The title in database-key form, with underscores for spaces and any
    * namespace prefix (`"Douglas_Adams"`, `"Talk:Douglas_Adams"`), trimmed and
-   * cut at {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units; `null` when
+   * cut at {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units; `None` when
    * absent or empty.
    */
-  readonly key: string | null;
+  readonly key: Option.Option<string>;
   /**
    * The title in display form, with spaces and any namespace prefix
    * (`"Douglas Adams"`), trimmed and cut at {@link Core.MAX_TEXT_FIELD_LENGTH}
@@ -144,31 +145,31 @@ export interface PageMetadata {
   readonly title: string;
   /**
    * The content model of the page's latest revision, such as `"wikitext"`,
-   * `"json"`, `"javascript"`, `"css"` or `"Scribunto"`, trimmed; `null` when
+   * `"json"`, `"javascript"`, `"css"` or `"Scribunto"`, trimmed; `None` when
    * absent or empty.
    */
-  readonly contentModel: string | null;
+  readonly contentModel: Option.Option<string>;
   /**
-   * The id of the page's latest revision; `null` when the response has none, or
+   * The id of the page's latest revision; `None` when the response has none, or
    * it is negative, not a finite number or above `Number.MAX_SAFE_INTEGER`. A
    * fractional value is truncated.
    */
-  readonly latestRevisionId: number | null;
+  readonly latestRevisionId: Option.Option<number>;
   /**
    * When the page's latest revision was saved, as MediaWiki's ISO 8601 UTC
    * timestamp (`"2024-01-01T00:00:00Z"`), cut at 40 characters but not
-   * trimmed, parsed or validated. `null` when absent or not a string.
+   * trimmed, parsed or validated. `None` when absent or not a string.
    */
-  readonly latestTimestamp: string | null;
+  readonly latestTimestamp: Option.Option<string>;
   /**
    * The URL of the wiki's content license (on most Wikimedia wikis a CC BY-SA
    * 4.0 URL such as `"https://creativecommons.org/licenses/by-sa/4.0/deed.en"`;
    * Wikinews uses CC BY), trimmed but not validated as a URL or checked for its
-   * scheme, so check that it is `https:` before using it as a link; `null` when
+   * scheme, so check that it is `https:` before using it as a link; `None` when
    * absent or empty. The license is the wiki's site-wide one, not specific to
    * the page.
    */
-  readonly licenseUrl: string | null;
+  readonly licenseUrl: Option.Option<string>;
 }
 
 /** A revision's REST-surface identity metadata. */
@@ -181,65 +182,65 @@ export interface RevisionMetadata {
    */
   readonly revisionId: number;
   /**
-   * The id of the page the revision belongs to; `null` when the response has
+   * The id of the page the revision belongs to; `None` when the response has
    * none, or it is negative, not a finite number or above
    * `Number.MAX_SAFE_INTEGER`. A fractional value is truncated.
    */
-  readonly pageId: number | null;
+  readonly pageId: Option.Option<number>;
   /**
    * The title of the page the revision belongs to, in display form with spaces
    * and any namespace prefix (`"Douglas Adams"`), trimmed and cut at
-   * {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units; `null` when absent or
+   * {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units; `None` when absent or
    * empty. It is the page's current title, which differs from its title at the
    * time of the edit if the page has since been moved.
    */
-  readonly pageTitle: string | null;
+  readonly pageTitle: Option.Option<string>;
   /**
-   * The size of the revision's content, in bytes; `null` when absent,
+   * The size of the revision's content, in bytes; `None` when absent,
    * negative, not a finite number or over 100,000,000. A fractional value
    * is truncated.
    */
-  readonly size: number | null;
+  readonly size: Option.Option<number>;
   /**
    * `true` when the editor marked the edit as minor, `false` when not;
-   * `null` when absent or not a boolean.
+   * `None` when absent or not a boolean.
    */
-  readonly minor: boolean | null;
+  readonly minor: Option.Option<boolean>;
   /**
    * When the revision was saved, as MediaWiki's ISO 8601 UTC timestamp
    * (`"2024-01-01T00:00:00Z"`), cut at 40 characters but not trimmed,
-   * parsed or validated. `null` when absent or not a string.
+   * parsed or validated. `None` when absent or not a string.
    */
-  readonly timestamp: string | null;
+  readonly timestamp: Option.Option<string>;
   /**
    * The revision's content model, such as `"wikitext"`, `"json"`,
-   * `"javascript"`, `"css"` or `"Scribunto"`, trimmed; `null` when absent or
+   * `"javascript"`, `"css"` or `"Scribunto"`, trimmed; `None` when absent or
    * empty.
    */
-  readonly contentModel: string | null;
+  readonly contentModel: Option.Option<string>;
   /**
    * The URL of the wiki's content license (on most Wikimedia wikis a CC BY-SA
    * 4.0 URL such as `"https://creativecommons.org/licenses/by-sa/4.0/deed.en"`;
    * Wikinews uses CC BY), trimmed but not validated as a URL or checked for its
-   * scheme, so check that it is `https:` before using it as a link; `null` when
+   * scheme, so check that it is `https:` before using it as a link; `None` when
    * absent or empty. The license is the wiki's site-wide one, not specific to
    * the revision.
    */
-  readonly licenseUrl: string | null;
+  readonly licenseUrl: Option.Option<string>;
 }
 
 /** Normalises a `PageMetadataResponse`. Never `null` — a REST 404 surfaces as `RequestFailed` before decoding gets here. */
 export function normalisePageMetadata(response: PageMetadataResponse, title: string): PageMetadata {
   return {
-    pageId: toNonNegativeInt(response.id),
-    key: sanitiseText(response.key),
+    pageId: Option.fromNullOr(toNonNegativeInt(response.id)),
+    key: Option.fromNullOr(sanitiseText(response.key)),
     title: sanitiseText(response.title) ?? title,
-    contentModel: sanitiseText(response.content_model),
-    latestRevisionId: toNonNegativeInt(response.latest?.id),
+    contentModel: Option.fromNullOr(sanitiseText(response.content_model)),
+    latestRevisionId: Option.fromNullOr(toNonNegativeInt(response.latest?.id)),
     latestTimestamp: P.isString(response.latest?.timestamp)
-      ? response.latest.timestamp.slice(0, 40)
-      : null,
-    licenseUrl: sanitiseText(response.license?.url),
+      ? Option.some(response.latest.timestamp.slice(0, 40))
+      : Option.none(),
+    licenseUrl: Option.fromNullOr(sanitiseText(response.license?.url)),
   };
 }
 
@@ -250,13 +251,15 @@ export function normaliseRevisionMetadata(
 ): RevisionMetadata {
   return {
     revisionId: toNonNegativeInt(response.id) ?? revisionId,
-    pageId: toNonNegativeInt(response.page?.id),
-    pageTitle: sanitiseText(response.page?.title),
-    size: toNonNegativeInt(response.size, 100_000_000),
-    minor: P.isBoolean(response.minor) ? response.minor : null,
-    timestamp: P.isString(response.timestamp) ? response.timestamp.slice(0, 40) : null,
-    contentModel: sanitiseText(response.content_model),
-    licenseUrl: sanitiseText(response.license?.url),
+    pageId: Option.fromNullOr(toNonNegativeInt(response.page?.id)),
+    pageTitle: Option.fromNullOr(sanitiseText(response.page?.title)),
+    size: Option.fromNullOr(toNonNegativeInt(response.size, 100_000_000)),
+    minor: P.isBoolean(response.minor) ? Option.some(response.minor) : Option.none(),
+    timestamp: P.isString(response.timestamp)
+      ? Option.some(response.timestamp.slice(0, 40))
+      : Option.none(),
+    contentModel: Option.fromNullOr(sanitiseText(response.content_model)),
+    licenseUrl: Option.fromNullOr(sanitiseText(response.license?.url)),
   };
 }
 

@@ -107,13 +107,13 @@ describe("Rest.getPageMetadata", () => {
     });
     const result = await run(layer, Rest.getPageMetadata("en.wikipedia.org", "Douglas Adams"));
     expect(result).toEqual({
-      pageId: 42,
-      key: "Douglas_Adams",
+      pageId: Option.some(42),
+      key: Option.some("Douglas_Adams"),
       title: "Douglas Adams",
-      contentModel: "wikitext",
-      latestRevisionId: 987654,
-      latestTimestamp: "2024-01-01T00:00:00Z",
-      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+      contentModel: Option.some("wikitext"),
+      latestRevisionId: Option.some(987654),
+      latestTimestamp: Option.some("2024-01-01T00:00:00Z"),
+      licenseUrl: Option.some("https://creativecommons.org/licenses/by-sa/4.0/"),
     });
     expect(new URL(urls[0] ?? "").pathname).toBe("/w/rest.php/v1/page/Douglas_Adams/bare");
   });
@@ -234,13 +234,13 @@ describe("Rest.getRevisionMetadata", () => {
     const result = await run(layer, Rest.getRevisionMetadata("en.wikipedia.org", 987654));
     expect(result).toEqual({
       revisionId: 987654,
-      pageId: 42,
-      pageTitle: "Douglas Adams",
-      size: 54321,
-      minor: false,
-      timestamp: "2024-01-01T00:00:00Z",
-      contentModel: "wikitext",
-      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+      pageId: Option.some(42),
+      pageTitle: Option.some("Douglas Adams"),
+      size: Option.some(54321),
+      minor: Option.some(false),
+      timestamp: Option.some("2024-01-01T00:00:00Z"),
+      contentModel: Option.some("wikitext"),
+      licenseUrl: Option.some("https://creativecommons.org/licenses/by-sa/4.0/"),
     });
     // The metadata-only variant, without the revision's wikitext (#148).
     expect(new URL(urls[0] ?? "").pathname).toBe("/w/rest.php/v1/revision/987654/bare");
