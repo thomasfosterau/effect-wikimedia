@@ -36,8 +36,8 @@
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
-import * as Predicate from "effect/Predicate";
-import * as Record from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import {
@@ -72,7 +72,7 @@ export type EntityId = ItemId | PropertyId | LexemeId;
  * `Q` plus digits — never a slash, dot, or path-escaping byte.
  */
 export function parseItemId(raw: unknown): ItemId | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `Q` + digits form the brand names.
   return /^Q[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as ItemId) : null;
@@ -80,7 +80,7 @@ export function parseItemId(raw: unknown): ItemId | null {
 
 /** Validates a Wikidata **property** id (`P` + digits); returns the branded id or `null`. */
 export function parsePropertyId(raw: unknown): PropertyId | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `P` + digits form the brand names.
   return /^P[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as PropertyId) : null;
@@ -88,7 +88,7 @@ export function parsePropertyId(raw: unknown): PropertyId | null {
 
 /** Validates a Wikidata **lexeme** id (`L` + digits); returns the branded id or `null`. */
 export function parseLexemeId(raw: unknown): LexemeId | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `L` + digits form the brand names.
   return /^L[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as LexemeId) : null;
@@ -101,7 +101,7 @@ export function parseLexemeId(raw: unknown): LexemeId | null {
  * of scope and degrade to `null`).
  */
 export function parseEntityId(raw: unknown): EntityId | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const head = raw.trim().charAt(0).toUpperCase();
   if (head === "Q") return parseItemId(raw);
   if (head === "P") return parsePropertyId(raw);
@@ -137,19 +137,19 @@ export const MAX_IDS_PER_REQUEST = 50;
 
 /** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
 function sanitiseText(value: unknown): string | null {
-  if (!Predicate.isString(value)) return null;
+  if (!P.isString(value)) return null;
   const trimmed = value.trim();
   return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
 }
 
 /** A finite number passed through untouched, or `null`. */
 function toFiniteNumber(value: unknown): number | null {
-  return Predicate.isNumber(value) && Number.isFinite(value) ? value : null;
+  return P.isNumber(value) && Number.isFinite(value) ? value : null;
 }
 
 /** A short raw string (calendar / globe / unit IRI, amount), trimmed and bounded, or `null`. */
 function toBoundedString(value: unknown, max = 2000): string | null {
-  if (!Predicate.isString(value)) return null;
+  if (!P.isString(value)) return null;
   const trimmed = value.trim();
   return Str.isEmpty(trimmed) ? null : trimmed.slice(0, max);
 }
@@ -677,12 +677,19 @@ export type WbGetEntitiesResponse = typeof WbGetEntitiesResponse.Type;
 
 // ── Normalisers: lenient wire shape → honest typed model ─────────────────
 
+/**
+ * A JSON object's fields before any is decoded: a datavalue payload as the
+ * wire carries it. Each field is read through a guard or a sanitiser.
+ */
+const RawFields = Schema.Record(Schema.String, Schema.Unknown);
+type RawFields = typeof RawFields.Type;
+
 /** The fields of a datavalue payload that is not an object: none. */
-const NO_FIELDS: Readonly<Record<string, unknown>> = {};
+const NO_FIELDS: RawFields = {};
 
 /** Reads a datavalue payload's fields defensively: none unless it is an object. */
-function fieldsOf(value: unknown): Readonly<Record<string, unknown>> {
-  return Predicate.isObject(value) ? value : NO_FIELDS;
+function fieldsOf(value: unknown): RawFields {
+  return P.isObject(value) ? value : NO_FIELDS;
 }
 
 /**
@@ -694,7 +701,7 @@ function objectsIn<A>(raw: unknown): readonly A[] {
   if (!Array.isArray(raw)) return [];
   // Only objects pass, read as `A`: every raw wire type is a struct of
   // optional fields its normaliser reads defensively.
-  return Arr.filter(raw, (entry: unknown): entry is A => Predicate.isObject(entry));
+  return Arr.filter(raw, (entry: unknown): entry is A => P.isObject(entry));
 }
 
 /**
@@ -704,15 +711,15 @@ function objectsIn<A>(raw: unknown): readonly A[] {
  * no language code, site id, property id or entity id is spelled so (#164).
  */
 function entriesOf(raw: unknown): ReadonlyArray<readonly [string, unknown]> {
-  if (!Predicate.isObject(raw)) return [];
-  return Arr.filter(Record.toEntries(raw), ([key]) => key !== "__proto__");
+  if (!P.isObject(raw)) return [];
+  return Arr.filter(R.toEntries(raw), ([key]) => key !== "__proto__");
 }
 
 /** What {@link normaliseDataValue} dispatches on: the datavalue's own `type`, plus its payload. */
 interface DataValueInput {
   readonly type: string | null;
   readonly value: unknown;
-  readonly fields: Readonly<Record<string, unknown>>;
+  readonly fields: RawFields;
   readonly datatype: string | null;
   readonly unknown: UnknownValue;
 }
@@ -784,7 +791,7 @@ const matchDataValue = Match.type<DataValueInput>().pipe(
  * {@link UnknownValue}; this function never returns `null` and never throws.
  */
 export function normaliseDataValue(raw: RawDataValue, datatype: string | null): DataValue {
-  const type = Predicate.isString(raw.type) ? raw.type : null;
+  const type = P.isString(raw.type) ? raw.type : null;
   const value = raw.value;
   return matchDataValue({
     type,
@@ -807,7 +814,7 @@ export function normaliseSnak(raw: RawSnak): Snak | null {
   // explicitly, but if a datavalue is somehow absent (or, in an unvalidated
   // dump line, not an object) we fall back to "somevalue" rather than
   // inventing an empty value.
-  if (!Predicate.isObject(raw.datavalue)) return { _tag: "somevalue", property, datatype };
+  if (!P.isObject(raw.datavalue)) return { _tag: "somevalue", property, datatype };
   return { _tag: "value", property, datatype, value: normaliseDataValue(raw.datavalue, datatype) };
 }
 
@@ -829,24 +836,22 @@ function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => B | n
 /**
  * Builds a record from the entries of `raw` (see `entriesOf`: none unless it
  * is an object, and never a `__proto__` key) that `f` maps to a non-`null`
- * `[key, value]`, keeping at most `max` of them, in order. Keys are written
- * by plain assignment.
+ * `[key, value]`, keeping at most `max` of them, in order; `f` is not called
+ * once `max` are kept. The record is built with `R.fromEntries`, so every
+ * key is an own property.
  */
 function keepUsableEntries<B>(
   raw: unknown,
   max: number,
   f: (key: string, value: unknown) => readonly [string, B] | null,
-): Record<string, B> {
-  const out: Record<string, B> = {};
-  let kept = 0;
+) {
+  const kept: (readonly [string, B])[] = [];
   Arr.forEach(entriesOf(raw), ([key, value]) => {
-    if (kept >= max) return;
+    if (kept.length >= max) return;
     const entry = f(key, value);
-    if (entry === null) return;
-    out[entry[0]] = entry[1];
-    kept++;
+    if (entry !== null) kept.push(entry);
   });
-  return out;
+  return R.fromEntries(kept);
 }
 
 /** Normalises a `{ property: snak[] }` block (qualifiers / reference snaks), dropping unusable snaks. */
@@ -865,7 +870,7 @@ function normaliseRank(raw: unknown): StatementRank {
 
 /** Normalises one raw statement; `null` when its main snak carries no valid property. */
 export function normaliseStatement(raw: RawStatement): Statement | null {
-  if (!Predicate.isObject(raw.mainsnak)) return null;
+  if (!P.isObject(raw.mainsnak)) return null;
   const mainsnak = normaliseSnak(raw.mainsnak);
   if (mainsnak === null) return null;
   const references = keepUsable(
@@ -967,7 +972,7 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
  * dump line through.
  */
 export function decodeEntity(raw: unknown): WikidataItem | null {
-  if (!Predicate.isObjectOrArray(raw)) return null;
+  if (!P.isObjectOrArray(raw)) return null;
   // SAFETY: every `RawEntity` field is optional and read defensively by
   // `normaliseItem`, so any non-null object (an array included) is a valid
   // input; a field of the wrong shape degrades rather than throws.
@@ -1059,7 +1064,7 @@ export const getEntities = Effect.fn("Wikidata.getEntities")(function* (
       ),
     { concurrency: 1 },
   );
-  return Arr.reduce(responses, Record.empty<string, WikidataItem>(), (merged, response) =>
+  return Arr.reduce(responses, R.empty<string, WikidataItem>(), (merged, response) =>
     Object.assign(merged, normaliseEntities(response)),
   );
 });

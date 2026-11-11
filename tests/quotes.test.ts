@@ -7,11 +7,11 @@
  */
 
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import { type Formatting, type Node, parse } from "../src/wikitext/index.ts";
 
-const isFormatting = (n: Node): n is Formatting => Predicate.isTagged(n, "Formatting");
+const isFormatting = (n: Node): n is Formatting => P.isTagged(n, "Formatting");
 
 function formatting(src: string): Formatting[] {
   return Arr.filter(parse(src).children, isFormatting);

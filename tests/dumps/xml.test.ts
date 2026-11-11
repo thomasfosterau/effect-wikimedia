@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
 import { runTest } from "../helpers/effect.ts";
@@ -214,8 +214,8 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))));
     expect(records.length).toBe(3);
 
-    const hits = records.filter(Predicate.isTagged("revision"));
-    const errors = records.filter(Predicate.isTagged("error"));
+    const hits = records.filter(P.isTagged("revision"));
+    const errors = records.filter(P.isTagged("error"));
     expect(hits.length).toBe(2);
     expect(errors.length).toBe(1);
 

@@ -8,7 +8,7 @@
  */
 
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Str from "effect/String";
 import type { Node, Wikilink } from "./ast.ts";
 import { type Fragment, stripToText } from "./query.ts";
@@ -39,12 +39,12 @@ function prefixPattern(aliases: readonly string[]): RegExp {
 const DEFAULT_PREFIX = prefixPattern([]);
 
 const nodesOf = (input: Fragment): readonly Node[] =>
-  Predicate.isTagged(input, "Document") ? input.children : input;
+  P.isTagged(input, "Document") ? input.children : input;
 
 // A target is a title only when it is plain text and entities; a template,
 // comment, tag or other markup in it makes the title invalid to MediaWiki.
 const isTitleNode = (node: Node): boolean =>
-  Predicate.isTagged(node, "Text") || Predicate.isTagged(node, "HtmlEntity");
+  P.isTagged(node, "Text") || P.isTagged(node, "HtmlEntity");
 
 /** The link's target as a title string; `null` when it is not one. */
 function linkTitle(link: Wikilink): string | null {
@@ -72,9 +72,9 @@ function linkTitle(link: Wikilink): string | null {
  */
 export function redirectTarget(input: Fragment, options?: RedirectTargetOptions): string | null {
   const nodes = nodesOf(input);
-  const linkAt = nodes.findIndex((node) => !Predicate.isTagged(node, "Text"));
+  const linkAt = nodes.findIndex((node) => !P.isTagged(node, "Text"));
   const link = linkAt === -1 ? undefined : nodes[linkAt];
-  if (link === undefined || !Predicate.isTagged(link, "Wikilink")) return null;
+  if (link === undefined || !P.isTagged(link, "Wikilink")) return null;
   const aliases = options?.aliases ?? [];
   const pattern = Arr.isReadonlyArrayNonEmpty(aliases) ? prefixPattern(aliases) : DEFAULT_PREFIX;
   return pattern.test(stripToText(nodes.slice(0, linkAt))) ? linkTitle(link) : null;

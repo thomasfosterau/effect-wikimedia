@@ -18,7 +18,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import * as Record from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import { Wikidata } from "../src/index.ts";
@@ -59,12 +59,12 @@ interface NeutralFact {
 const EXTERNAL_ID_AUTHORITIES = {
   P214: { authority: "viaf", iri: (v: string) => `https://viaf.org/viaf/${v}` },
   P496: { authority: "orcid", iri: (v: string) => `https://orcid.org/${v}` },
-} satisfies Record.ReadonlyRecord<string, { authority: string; iri: (v: string) => string }>;
+} satisfies R.ReadonlyRecord<string, { authority: string; iri: (v: string) => string }>;
 
 const DATE_PROPERTIES = {
   P569: "date of birth",
   P570: "date of death",
-} satisfies Record.ReadonlyRecord<string, string>;
+} satisfies R.ReadonlyRecord<string, string>;
 
 const IMAGE_PROPERTIES = ["P18"];
 
@@ -89,7 +89,7 @@ function qidSelfLink(item: Wikidata.WikidataItem): NeutralFact {
 
 /** `sameAs` facts — one per allowlisted external-id statement. */
 function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
-  return Record.toEntries(EXTERNAL_ID_AUTHORITIES).flatMap(([property, scheme]) => {
+  return R.toEntries(EXTERNAL_ID_AUTHORITIES).flatMap(([property, scheme]) => {
     const value = firstValue(item, property);
     if (value?._tag !== "external-id") return [];
     return [
@@ -106,7 +106,7 @@ function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
 
 /** Date facts — the time member, `+`-stripped like the reconciliation normaliser. */
 function dateFacts(item: Wikidata.WikidataItem): NeutralFact[] {
-  return Record.toEntries(DATE_PROPERTIES).flatMap(([property, label]) => {
+  return R.toEntries(DATE_PROPERTIES).flatMap(([property, label]) => {
     const value = firstValue(item, property);
     if (value?._tag !== "time") return [];
     return [

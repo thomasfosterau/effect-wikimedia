@@ -58,7 +58,7 @@
  */
 
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import * as Str from "effect/String";
 
@@ -811,7 +811,7 @@ export const incrementalRecords = <E, R>(
 
 /** Refines a {@link PageRevisionRecord} to a successful {@link PageRevisionHit}. */
 const isRevisionHit = (record: PageRevisionRecord): record is PageRevisionHit =>
-  Predicate.isTagged(record, "revision");
+  P.isTagged(record, "revision");
 
 /**
  * Projects a {@link PageRevisionRecord} stream down to just the successfully

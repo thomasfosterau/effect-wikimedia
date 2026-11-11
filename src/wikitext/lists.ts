@@ -12,7 +12,7 @@
 
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Str from "effect/String";
 import type { Node, Span, Text } from "./ast.ts";
 import type { Fragment } from "./query.ts";
@@ -64,7 +64,7 @@ interface Line {
   readonly pieces: readonly Node[];
 }
 
-const isText = (node: Node): node is Text => Predicate.isTagged(node, "Text");
+const isText = (node: Node): node is Text => P.isTagged(node, "Text");
 
 const textAt = (start: number, text: string): Text => ({
   _tag: "Text",
@@ -212,7 +212,7 @@ function itemsOf(line: Line, previous: Option.Option<ListItem>): readonly ListIt
  * template doesn't count). Pure and total.
  */
 export function lists(input: Fragment): readonly List[] {
-  const nodes = Predicate.isTagged(input, "Document") ? input.children : input;
+  const nodes = P.isTagged(input, "Document") ? input.children : input;
   const groups: ListItem[][] = [];
   Arr.forEach(linesOf(nodes), (line) => {
     const current = Option.filter(Arr.last(groups), Arr.isReadonlyArrayNonEmpty);

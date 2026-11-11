@@ -17,7 +17,7 @@
  */
 
 import * as Effect from "effect/Effect";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import {
   DEFAULT_RETRY_OPTIONS,
@@ -236,7 +236,7 @@ export function normalisePageMetadata(response: PageMetadataResponse, title: str
     title: sanitiseText(response.title) ?? title,
     contentModel: sanitiseText(response.content_model),
     latestRevisionId: toNonNegativeInt(response.latest?.id),
-    latestTimestamp: Predicate.isString(response.latest?.timestamp)
+    latestTimestamp: P.isString(response.latest?.timestamp)
       ? response.latest.timestamp.slice(0, 40)
       : null,
     licenseUrl: sanitiseText(response.license?.url),
@@ -253,8 +253,8 @@ export function normaliseRevisionMetadata(
     pageId: toNonNegativeInt(response.page?.id),
     pageTitle: sanitiseText(response.page?.title),
     size: toNonNegativeInt(response.size, 100_000_000),
-    minor: Predicate.isBoolean(response.minor) ? response.minor : null,
-    timestamp: Predicate.isString(response.timestamp) ? response.timestamp.slice(0, 40) : null,
+    minor: P.isBoolean(response.minor) ? response.minor : null,
+    timestamp: P.isString(response.timestamp) ? response.timestamp.slice(0, 40) : null,
     contentModel: sanitiseText(response.content_model),
     licenseUrl: sanitiseText(response.license?.url),
   };

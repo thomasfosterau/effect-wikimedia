@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import {
   filter,
@@ -49,12 +49,10 @@ describe("infoboxes", () => {
     const place = field(box, "birth_place");
     expect(serializeNodes(place.value)).toBe("[[London]], England");
     expect(place.text).toBe("London, England");
-    expect(filter(place.value, (node) => Predicate.isTagged(node, "Wikilink"))).toHaveLength(1);
+    expect(filter(place.value, (node) => P.isTagged(node, "Wikilink"))).toHaveLength(1);
     const born = field(box, "birth_date");
     const date = some(Arr.head(born.value), "birth date value");
-    expect(Predicate.isTagged(date, "Template") ? templateName(date) : "not a template").toBe(
-      "birth date",
-    );
+    expect(P.isTagged(date, "Template") ? templateName(date) : "not a template").toBe("birth date");
   });
 
   it("keeps the template's own nodes, narrowing only the text at a value's edges", () => {

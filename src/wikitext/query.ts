@@ -14,8 +14,8 @@ import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Str from "effect/String";
 import type { Document, Node, Param, Template } from "./ast.ts";
 import { NAMED_ENTITIES } from "./entities.ts";
@@ -108,7 +108,7 @@ export function findTemplates(input: Fragment, name?: string): Template[] {
   const out: Template[] = [];
   walk(input, (node) => {
     if (
-      Predicate.isTagged(node, "Template") &&
+      P.isTagged(node, "Template") &&
       (want === undefined || normaliseTemplateName(templateName(node)) === want)
     ) {
       out.push(node);
@@ -382,7 +382,7 @@ function makeStripper(
   const stripNodes = (nodes: readonly Node[]): string => nodes.map(stripNode).join("");
   const strip: Strip = (input) => {
     if (isNodeArray(input)) return stripNodes(input);
-    return Predicate.isTagged(input, "Document") ? stripNodes(input.children) : stripNode(input);
+    return P.isTagged(input, "Document") ? stripNodes(input.children) : stripNode(input);
   };
   const stripNode: (node: Node) => string = Match.type<Node>().pipe(
     Match.tagsExhaustive({
@@ -454,7 +454,7 @@ function hiddenPrefixes(extra: Iterable<string> | undefined): HashSet.HashSet<st
  */
 function makeStrip(options: StripToTextOptions): Strip {
   const renderers = HashMap.fromIterable(
-    Arr.map(Rec.toEntries(options.templates ?? {}), ([name, render]) => [
+    Arr.map(R.toEntries(options.templates ?? {}), ([name, render]) => [
       normaliseTemplateName(name),
       render,
     ]),

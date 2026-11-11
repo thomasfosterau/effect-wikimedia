@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import {
   type Document,
@@ -48,7 +48,7 @@ function expectLossless(doc: Document): readonly Section[] {
     });
   });
   // The numbering counts every heading the parser built, at any depth.
-  const headings = filter(doc, (node) => Predicate.isTagged(node, "Heading"));
+  const headings = filter(doc, (node) => P.isTagged(node, "Heading"));
   expect(all.slice(1).map((s) => Option.getOrUndefined(s.heading))).toEqual(headings);
   expect(all[0].span.start).toBe(0);
   expect(topLevel[topLevel.length - 1].span.end).toBe(doc.source.length);
@@ -184,7 +184,7 @@ describe("sections", () => {
       "b",
     ].join("\n");
     const doc = parse(source);
-    const table = doc.children.find((node) => Predicate.isTagged(node, "Table"));
+    const table = doc.children.find((node) => P.isTagged(node, "Table"));
 
     it("counts them in MediaWiki's numbering and nesting", () => {
       expect(outline(expectLossless(doc))).toEqual([

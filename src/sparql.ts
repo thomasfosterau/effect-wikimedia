@@ -35,8 +35,8 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import {
@@ -62,7 +62,7 @@ export const WDQS_PATH = "/sparql";
  * caller determined to write one.
  */
 export function hasLimitClause(sparql: string): boolean {
-  if (!Predicate.isString(sparql)) return false;
+  if (!P.isString(sparql)) return false;
   // Strip line comments (`#...` to end of line) before scanning.
   const withoutComments = sparql.replace(/#[^\n\r]*/g, "");
   return /\blimit\s+\d+/i.test(withoutComments);
@@ -302,19 +302,19 @@ const MAX_TERM_LENGTH = 10_000;
 const MAX_UNKNOWN_TYPE_LENGTH = 200;
 
 function boundedValue(value: unknown): string | null {
-  if (!Predicate.isString(value)) return null;
+  if (!P.isString(value)) return null;
   return value.length > MAX_TERM_LENGTH ? value.slice(0, MAX_TERM_LENGTH) : value;
 }
 
 /** Normalises one raw term into the typed {@link SparqlTerm} union; never throws. */
 export function normaliseTerm(raw: RawTerm): SparqlTerm {
-  const type = Predicate.isString(raw.type) ? raw.type : null;
+  const type = P.isString(raw.type) ? raw.type : null;
   const value = boundedValue(raw.value);
   if (type === "uri") return { _tag: "uri", value: value ?? "" };
   if (type === "bnode") return { _tag: "bnode", value: value ?? "" };
   if (type === "literal" || type === "typed-literal") {
-    const datatype = Predicate.isString(raw.datatype) ? raw.datatype.slice(0, 2000) : null;
-    const language = Predicate.isString(raw["xml:lang"]) ? raw["xml:lang"].slice(0, 40) : null;
+    const datatype = P.isString(raw.datatype) ? raw.datatype.slice(0, 2000) : null;
+    const language = P.isString(raw["xml:lang"]) ? raw["xml:lang"].slice(0, 40) : null;
     return {
       _tag: "literal",
       value: value ?? "",
@@ -330,13 +330,13 @@ export function normaliseTerm(raw: RawTerm): SparqlTerm {
 export function normaliseResults(response: SparqlResultsResponse): SparqlResults {
   const vars = Arr.getSomes(
     Arr.map(response.head?.vars ?? [], (v) =>
-      Predicate.isString(v) ? Option.some(v.slice(0, 200)) : Option.none(),
+      P.isString(v) ? Option.some(v.slice(0, 200)) : Option.none(),
     ),
   );
   const bindings = Arr.map(response.results?.bindings ?? [], (row): SparqlBinding =>
-    Rec.map(row, normaliseTerm),
+    R.map(row, normaliseTerm),
   );
-  const answer = Predicate.isBoolean(response.boolean) ? response.boolean : null;
+  const answer = P.isBoolean(response.boolean) ? response.boolean : null;
   return { vars, bindings, boolean: answer };
 }
 
@@ -373,7 +373,7 @@ export const query = Effect.fn("Sparql.query")(function* (
   retry?: RetryOptions,
 ) {
   // A JavaScript caller can pass a non-string, which the error reports as given.
-  if (!Predicate.isString(sparql)) {
+  if (!P.isString(sparql)) {
     return yield* new InvalidRequest({ kind: "query", value: String(sparql) });
   }
   if (Str.isEmpty(sparql.trim())) {

@@ -17,8 +17,8 @@
 
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Str from "effect/String";
 import * as Schema from "effect/Schema";
 import {
@@ -141,7 +141,7 @@ function isMediaUrl(url: URL): boolean {
 /** A URL string re-validated against a fixed allowed-host set, or `null`. */
 function toWikimediaMediaUrl(value: unknown): string | null {
   const candidate =
-    Predicate.isString(value) && Str.isNonEmpty(value) && value.length <= 2000
+    P.isString(value) && Str.isNonEmpty(value) && value.length <= 2000
       ? parseUrl(value)
       : Option.none();
   return Option.match(Option.filter(candidate, isMediaUrl), {
@@ -152,20 +152,20 @@ function toWikimediaMediaUrl(value: unknown): string | null {
 
 /** A `FileInfoPage` carrying a real title that Wikimedia didn't flag as missing. */
 function isUsableFilePage(page: FileInfoPage): boolean {
-  return Predicate.isString(page.title) && page.missing === undefined;
+  return P.isString(page.title) && page.missing === undefined;
 }
 
 function normaliseFileInfo(response: FileInfoResponse, title: string): FileInfo | null {
-  const page = Rec.values(response.query?.pages ?? {}).find(isUsableFilePage);
+  const page = R.values(response.query?.pages ?? {}).find(isUsableFilePage);
   if (page === undefined) return null;
   const entry: ImageInfoEntry = page.imageinfo?.[0] ?? {};
   return {
-    title: Predicate.isString(page.title) ? page.title : title,
+    title: P.isString(page.title) ? page.title : title,
     url: toWikimediaMediaUrl(entry.url),
     descriptionUrl: toWikimediaMediaUrl(entry.descriptionurl),
     width: toNonNegativeInt(entry.width, 100_000),
     height: toNonNegativeInt(entry.height, 100_000),
-    mime: Predicate.isString(entry.mime) ? entry.mime.slice(0, 100) : null,
+    mime: P.isString(entry.mime) ? entry.mime.slice(0, 100) : null,
     size: toNonNegativeInt(entry.size, 10_000_000_000),
   };
 }

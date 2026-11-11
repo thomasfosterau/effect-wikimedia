@@ -39,7 +39,7 @@ import { compose, Duplex, isReadable, isWritable, Readable } from "node:stream";
 import { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { createGunzip } from "node:zlib";
 import * as Effect from "effect/Effect";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/http";
@@ -61,8 +61,7 @@ export class SourceError extends Schema.TaggedError<SourceError>()("SourceError"
   description: Schema.String,
 }) {}
 
-const describe = (reason: unknown): string =>
-  Predicate.isError(reason) ? reason.message : String(reason);
+const describe = (reason: unknown): string => (P.isError(reason) ? reason.message : String(reason));
 
 /**
  * Turns an effect-produced web stream back into a Node `Readable`, for a Node
@@ -179,10 +178,10 @@ const openStage = (decompressor: Decompressor): Effect.Effect<Duplex, SourceErro
  * both sides, as it reads the stage with `read()` and waits for its `finish`.
  */
 const hasStreamState = (stream: Duplex): boolean =>
-  Predicate.hasProperty(stream, "_readableState") &&
-  Predicate.isObjectOrArray(stream._readableState) &&
-  Predicate.hasProperty(stream, "_writableState") &&
-  Predicate.isObjectOrArray(stream._writableState);
+  P.hasProperty(stream, "_readableState") &&
+  P.isObjectOrArray(stream._readableState) &&
+  P.hasProperty(stream, "_writableState") &&
+  P.isObjectOrArray(stream._writableState);
 
 /**
  * A failure inside a classic-stream adapter, raised in Node land where an
@@ -202,7 +201,7 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefi
   try {
     return step();
   } catch (error) {
-    callback(Predicate.isError(error) ? error : new StageError({ message: describe(error) }));
+    callback(P.isError(error) ? error : new StageError({ message: describe(error) }));
     return undefined;
   }
 };
@@ -322,7 +321,7 @@ const ignoreLateErrors = (stream: Duplex): void => {
  */
 const destroyReadable = (readable: NodeReadableLike): void => {
   if (readable.destroyed) return;
-  if (Predicate.hasProperty(readable, "on") && Predicate.isFunction(readable.on)) {
+  if (P.hasProperty(readable, "on") && P.isFunction(readable.on)) {
     readable.on("error", () => undefined);
   }
   readable.destroy();
@@ -351,12 +350,8 @@ const CLOSE_WAIT_MS = 1000;
  */
 const destroyAndAwaitClose = (readable: NodeReadableLike): Effect.Effect<void> =>
   Effect.callback<void>((resume) => {
-    const closed = Predicate.hasProperty(readable, "closed") && readable.closed === true;
-    if (
-      closed ||
-      !Predicate.hasProperty(readable, "once") ||
-      !Predicate.isFunction(readable.once)
-    ) {
+    const closed = P.hasProperty(readable, "closed") && readable.closed === true;
+    if (closed || !P.hasProperty(readable, "once") || !P.isFunction(readable.once)) {
       destroyReadable(readable);
       return resume(Effect.void);
     }
@@ -364,7 +359,7 @@ const destroyAndAwaitClose = (readable: NodeReadableLike): Effect.Effect<void> =
     readable.once("close", onClose);
     destroyReadable(readable);
     return Effect.sync(() => {
-      if (Predicate.hasProperty(readable, "off") && Predicate.isFunction(readable.off)) {
+      if (P.hasProperty(readable, "off") && P.isFunction(readable.off)) {
         readable.off("close", onClose);
       }
     });

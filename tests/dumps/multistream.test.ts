@@ -21,7 +21,7 @@ import unbzip2 from "unbzip2-stream";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
@@ -271,7 +271,7 @@ describe("a multistream range decoded on its own", () => {
     const decoded = await Promise.all(ranges.map(pagesInRange));
     Arr.forEach(Arr.zip(ranges, decoded), ([range, records]) => {
       const listed = entries.filter((e) => e.offset === range.start);
-      expect(records.every((r) => Predicate.isTagged(r, "revision"))).toBe(true);
+      expect(records.every((r) => P.isTagged(r, "revision"))).toBe(true);
       expect(records.map((r) => [r.page?.id, r.page?.title])).toEqual(
         listed.map((e) => [e.pageId, e.title]),
       );

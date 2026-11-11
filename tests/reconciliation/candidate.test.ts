@@ -9,8 +9,8 @@
  */
 
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
-import * as Record from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Str from "effect/String";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import {
@@ -119,8 +119,8 @@ describe("candidate text names on the barrel", () => {
     // gone from the namespace's type and from its runtime value.
     expectTypeOf(Reconciliation).not.toHaveProperty("MAX_TEXT_FIELD_LENGTH");
     expectTypeOf(Reconciliation).not.toHaveProperty("sanitiseText");
-    expect(Predicate.hasProperty(Reconciliation, "MAX_TEXT_FIELD_LENGTH")).toBe(false);
-    expect(Predicate.hasProperty(Reconciliation, "sanitiseText")).toBe(false);
+    expect(P.hasProperty(Reconciliation, "MAX_TEXT_FIELD_LENGTH")).toBe(false);
+    expect(P.hasProperty(Reconciliation, "sanitiseText")).toBe(false);
     expect(Reconciliation.MAX_CANDIDATE_TEXT_LENGTH).toBe(2000);
     expect(Reconciliation.sanitiseCandidateText).toBe(sanitiseCandidateText);
   });
@@ -216,7 +216,7 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     "../119008064",
   ];
 
-  it.each(Record.toEntries(EXTERNAL_ID_AUTHORITIES))(
+  it.each(R.toEntries(EXTERNAL_ID_AUTHORITIES))(
     "%s refuses every relative-path value",
     (_property, scheme) => {
       expect(Arr.map(relativePathValues, scheme.iri)).toEqual(
@@ -243,7 +243,7 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
   });
 
   it("keeps every built IRI inside the authority's identifier path", () => {
-    const valid = Record.fromEntries([
+    const valid = R.fromEntries([
       ["P214", "113230702"],
       ["P213", "0000 0001 2103 2683"],
       ["P496", "0000-0002-1825-0097"],
@@ -251,8 +251,8 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
       ["P227", "4015701-7"],
       ["P268", "119008064"],
     ]);
-    expect(Record.keys(valid)).toEqual(Record.keys(EXTERNAL_ID_AUTHORITIES));
-    Arr.forEach(Record.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) => {
+    expect(R.keys(valid)).toEqual(R.keys(EXTERNAL_ID_AUTHORITIES));
+    Arr.forEach(R.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) => {
       const iri = scheme.iri(valid[property] ?? "");
       expect(iri, property).toEqual(expect.any(String));
       // Resolving the IRI must not move it: no dot segment, no extra `/`.
@@ -261,13 +261,11 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
   });
 
   it("names every curated property with its authority", () => {
-    expect(Record.keys(EXTERNAL_ID_AUTHORITIES)).toEqual(
+    expect(R.keys(EXTERNAL_ID_AUTHORITIES)).toEqual(
       expect.arrayContaining(["P214", "P213", "P496", "P244", "P227", "P268"]),
     );
     expect(
-      Arr.every(Record.values(EXTERNAL_ID_AUTHORITIES), ({ authority }) =>
-        Str.isNonEmpty(authority),
-      ),
+      Arr.every(R.values(EXTERNAL_ID_AUTHORITIES), ({ authority }) => Str.isNonEmpty(authority)),
     ).toBe(true);
   });
 });

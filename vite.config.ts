@@ -154,10 +154,6 @@ export default defineConfig({
       // fires on every `as`, including the narrowings the Fetch types
       // structurally require. Stays visible as a warning.
       "effect/casting-awareness": "warn",
-      // Hard-codes abbreviations (`Arr`, `P`, `R`, …) with no options, so it is
-      // unsatisfiable under the full-name convention (`import * as Option from
-      // "effect/Option"`) this family shares with its consumers.
-      "effect/prefer-namespace-imports": "off",
       // ---- Effect preset: rules this package's conventions cut across ------
       // `prefer-option-over-null` also fires on `?: T | undefined`, which is
       // the ONLY spelling of an optional member `exactOptionalPropertyTypes`

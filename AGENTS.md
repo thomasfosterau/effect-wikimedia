@@ -15,6 +15,7 @@ Toolchain differences from the other library repos: single package, so the tasks
 
 ## Conventions
 
+- Effect modules are namespace imports. The helper modules take the aliases `effect/prefer-namespace-imports` enforces: `Arr` (`effect/Array`), `P` (`effect/Predicate`), `R` (`effect/Record`), `Str` (`effect/String`), `Eq` (`effect/Equal`) and `Bool` (`effect/Boolean`). Every other module keeps its own name (`import * as Option from "effect/Option"`, `Schema`, `Effect`) (#224).
 - Relative imports carry their `.ts` extension (`allowImportingTsExtensions` + `rewriteRelativeImportExtensions`).
 - `exactOptionalPropertyTypes` is on: spell an optional a caller may pass `undefined` for as `?: T | undefined`.
 - Tests import from `vite-plus/test`, never `vitest` or `@effect/vitest`.
