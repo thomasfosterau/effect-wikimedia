@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
@@ -88,7 +89,7 @@ describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
     expect(html).toContain("<b>Douglas Noel Adams</b>");
     expect(html).toContain('<h2 id="Life">Life</h2>');
     // The REST metadata's latest revision matches the Action wikitext's revision — one consistent page.
-    expect(metadata.latestRevisionId).toBe(wikitext?.revisionId);
+    expect(metadata.latestRevisionId).toEqual(Option.fromNullOr(wikitext?.revisionId));
   });
 
   it("builds Douglas Adams's Commons portrait file URL and fetches its file info", async () => {
