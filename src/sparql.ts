@@ -105,22 +105,22 @@ export interface LiteralTerm {
   /**
    * The literal's datatype IRI as the server sent it, such as
    * `"http://www.w3.org/2001/XMLSchema#dateTime"`, cut at 2,000 UTF-16 code
-   * units but not trimmed or validated. `null` when the raw term has no string
+   * units but not trimmed or validated. `None` when the raw term has no string
    * `datatype`. The SPARQL 1.1 JSON results format writes no `datatype` key for
    * a simple or a language-tagged literal, though RDF 1.1 types them
    * `xsd:string` and `rdf:langString`.
    */
-  readonly datatype: string | null;
+  readonly datatype: Option.Option<string>;
   /**
    * The literal's language tag (the raw term's `xml:lang`), such as `"en"`, as
    * the server sent it: cut at 40 UTF-16 code units but not trimmed,
-   * case-normalised or validated. `null` when the raw term has no string
-   * `xml:lang`; an empty `xml:lang` gives `""`, not `null`.
+   * case-normalised or validated. `None` when the raw term has no string
+   * `xml:lang`; an empty `xml:lang` gives `Some("")`, not `None`.
    */
-  readonly language: string | null;
+  readonly language: Option.Option<string>;
   /**
    * The {@link literalKind} of this term's `datatype` and `language`: any
-   * non-`null` `language` (`""` included) makes it `"monolingualtext"`,
+   * `Some` `language` (`""` included) makes it `"monolingualtext"`,
    * whatever the datatype; {@link LiteralKind} lists the rest of the mapping.
    */
   readonly kind: LiteralKind;
@@ -153,14 +153,14 @@ export interface UnknownTerm {
   readonly _tag: "unknown";
   /**
    * The raw term's `type`, cut at 200 UTF-16 code units but not trimmed;
-   * `null` when it is absent or not a string.
+   * `None` when it is absent or not a string.
    */
-  readonly type: string | null;
+  readonly type: Option.Option<string>;
   /**
    * The raw term's `value`, cut at 10,000 UTF-16 code units but not trimmed;
-   * `null` when it is absent or not a string (an object or array included).
+   * `None` when it is absent or not a string (an object or array included).
    */
-  readonly value: string | null;
+  readonly value: Option.Option<string>;
 }
 
 /** A single RDF term in a SPARQL result binding. */
@@ -205,12 +205,19 @@ const XSD_NUMERIC = HashSet.fromIterable(
  * `xsd:` numeric family is `"quantity"`; `xsd:string` or no datatype is
  * `"string"`; anything else is `"other"`.
  */
-export function literalKind(datatype: string | null, language: string | null): LiteralKind {
-  if (language !== null) return "monolingualtext";
-  if (datatype === null || datatype === `${XSD}string`) return "string";
-  if (datatype === `${XSD}dateTime` || datatype === `${XSD}date`) return "time";
-  if (HashSet.has(XSD_NUMERIC, datatype)) return "quantity";
-  return "other";
+export function literalKind(
+  datatype: Option.Option<string>,
+  language: Option.Option<string>,
+): LiteralKind {
+  if (Option.isSome(language)) return "monolingualtext";
+  return Option.match(datatype, {
+    onNone: () => "string",
+    onSome: (iri): LiteralKind => {
+      if (iri === `${XSD}string`) return "string";
+      if (iri === `${XSD}dateTime` || iri === `${XSD}date`) return "time";
+      return HashSet.has(XSD_NUMERIC, iri) ? "quantity" : "other";
+    },
+  });
 }
 
 // ── Lenient wire schema (Unknown-heavy) ──────────────────────────────────
@@ -288,10 +295,10 @@ export interface SparqlResults {
    */
   readonly bindings: readonly SparqlBinding[];
   /**
-   * An `ASK` query's answer; `null` for any other query, that is, when the
+   * An `ASK` query's answer; `None` for any other query, that is, when the
    * response's top-level `boolean` is absent or not a boolean.
    */
-  readonly boolean: boolean | null;
+  readonly boolean: Option.Option<boolean>;
 }
 
 // ── Normalisers ──────────────────────────────────────────────────────────
@@ -301,29 +308,37 @@ const MAX_TERM_LENGTH = 10_000;
 /** Upper bound on an unrecognised term's `type` ({@link UnknownTerm.type}). */
 const MAX_UNKNOWN_TYPE_LENGTH = 200;
 
-function boundedValue(value: unknown): string | null {
-  if (!P.isString(value)) return null;
-  return value.length > MAX_TERM_LENGTH ? value.slice(0, MAX_TERM_LENGTH) : value;
-}
+/** The raw `value` cut at `MAX_TERM_LENGTH`, or `None` when it isn't a string. */
+const boundedValue = (value: unknown): Option.Option<string> =>
+  P.isString(value) ? Option.some(value.slice(0, MAX_TERM_LENGTH)) : Option.none();
 
 /** Normalises one raw term into the typed {@link SparqlTerm} union; never throws. */
 export function normaliseTerm(raw: RawTerm): SparqlTerm {
-  const type = P.isString(raw.type) ? raw.type : null;
+  const type = P.isString(raw.type) ? raw.type : undefined;
   const value = boundedValue(raw.value);
-  if (type === "uri") return { _tag: "uri", value: value ?? "" };
-  if (type === "bnode") return { _tag: "bnode", value: value ?? "" };
+  const lexical = Option.getOrElse(value, () => "");
+  if (type === "uri") return { _tag: "uri", value: lexical };
+  if (type === "bnode") return { _tag: "bnode", value: lexical };
   if (type === "literal" || type === "typed-literal") {
-    const datatype = P.isString(raw.datatype) ? raw.datatype.slice(0, 2000) : null;
-    const language = P.isString(raw["xml:lang"]) ? raw["xml:lang"].slice(0, 40) : null;
+    const datatype = P.isString(raw.datatype)
+      ? Option.some(raw.datatype.slice(0, 2000))
+      : Option.none();
+    const language = P.isString(raw["xml:lang"])
+      ? Option.some(raw["xml:lang"].slice(0, 40))
+      : Option.none();
     return {
       _tag: "literal",
-      value: value ?? "",
+      value: lexical,
       datatype,
       language,
       kind: literalKind(datatype, language),
     };
   }
-  return { _tag: "unknown", type: type?.slice(0, MAX_UNKNOWN_TYPE_LENGTH) ?? null, value };
+  return {
+    _tag: "unknown",
+    type: Option.map(Option.fromUndefinedOr(type), (t) => t.slice(0, MAX_UNKNOWN_TYPE_LENGTH)),
+    value,
+  };
 }
 
 /** Normalises a SPARQL JSON results envelope into typed {@link SparqlResults}. */
@@ -336,7 +351,7 @@ export function normaliseResults(response: SparqlResultsResponse): SparqlResults
   const bindings = Arr.map(response.results?.bindings ?? [], (row): SparqlBinding =>
     R.map(row, normaliseTerm),
   );
-  const answer = P.isBoolean(response.boolean) ? response.boolean : null;
+  const answer = P.isBoolean(response.boolean) ? Option.some(response.boolean) : Option.none();
   return { vars, bindings, boolean: answer };
 }
 

@@ -11,6 +11,7 @@
 
 import type * as Effect from "effect/Effect";
 import type * as Layer from "effect/Layer";
+import type * as Option from "effect/Option";
 import type * as Stream from "effect/Stream";
 import type { HttpClient } from "effect/http";
 
@@ -98,7 +99,7 @@ assert<
 // --- Sparql -----------------------------------------------------------------
 
 assert<Equals<Sparql.SparqlTerm["_tag"], "uri" | "literal" | "bnode" | "unknown">>();
-assert<Equals<Sparql.SparqlResults["boolean"], boolean | null>>();
+assert<Equals<Sparql.SparqlResults["boolean"], Option.Option<boolean>>>();
 assert<
   Equals<
     ReturnType<typeof Sparql.query>,
