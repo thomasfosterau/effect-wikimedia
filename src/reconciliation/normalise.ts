@@ -14,8 +14,8 @@
  */
 
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
-import * as Record from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import type * as Action from "../action.ts";
 import type * as Wikidata from "../wikidata.ts";
@@ -88,9 +88,7 @@ function present<A>(value: A | null): Result.Result<A, void> {
 function instanceOfQids(item: Wikidata.WikidataItem): readonly string[] {
   return Arr.take(
     Arr.filterMap(statementValues(item, "P31"), (value) =>
-      Predicate.isTagged(value, "wikibase-entityid")
-        ? present(normaliseQid(value.id))
-        : Result.failVoid,
+      P.isTagged(value, "wikibase-entityid") ? present(normaliseQid(value.id)) : Result.failVoid,
     ),
     MAX_INSTANCE_OF,
   );
@@ -127,7 +125,7 @@ function statementValues(
   property: string,
 ): readonly Wikidata.DataValue[] {
   return Arr.filterMap(item.claims[property] ?? [], ({ mainsnak }) =>
-    Predicate.isTagged(mainsnak, "value") ? Result.succeed(mainsnak.value) : Result.failVoid,
+    P.isTagged(mainsnak, "value") ? Result.succeed(mainsnak.value) : Result.failVoid,
   );
 }
 
@@ -141,9 +139,9 @@ function statementValues(
  * the format yields no fact.
  */
 function identifierFacts(item: Wikidata.WikidataItem): IdentifierFact[] {
-  const facts = Arr.flatMap(Record.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) =>
+  const facts = Arr.flatMap(R.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) =>
     Arr.filterMap(statementValues(item, property), (value): Result.Result<IdentifierFact, void> => {
-      if (!Predicate.isTagged(value, "external-id")) return Result.failVoid;
+      if (!P.isTagged(value, "external-id")) return Result.failVoid;
       const validated = normaliseExternalIdValue(value.value);
       const iri = validated === null ? null : scheme.iri(validated);
       return validated === null || iri === null
@@ -188,9 +186,9 @@ function timeCalendar(calendarModel: string | null): DateFact["calendar"] {
  * its calendar model mapped to a calendar, and the property's English label.
  */
 function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
-  const facts = Arr.flatMap(Record.toEntries(DATE_PROPERTIES), ([property, label]) =>
+  const facts = Arr.flatMap(R.toEntries(DATE_PROPERTIES), ([property, label]) =>
     Arr.filterMap(statementValues(item, property), (value): Result.Result<DateFact, void> => {
-      if (!Predicate.isTagged(value, "time")) return Result.failVoid;
+      if (!P.isTagged(value, "time")) return Result.failVoid;
       const time = normaliseTimeValue(value.time);
       return time === null
         ? Result.failVoid
@@ -218,7 +216,7 @@ function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
 function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
   const facts = Arr.flatMap(IMAGE_PROPERTIES, (property) =>
     Arr.filterMap(statementValues(item, property), (value): Result.Result<ImageFact, void> => {
-      if (!Predicate.isTagged(value, "string")) return Result.failVoid;
+      if (!P.isTagged(value, "string")) return Result.failVoid;
       const image = normaliseCommonsImage(value.value);
       // Fields spelled out, not spread: a field the helper gains must not
       // reach `ImageFact` at runtime, where no type check would see it.

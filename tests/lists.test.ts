@@ -7,7 +7,7 @@
 
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import {
   type Document,
@@ -73,10 +73,10 @@ describe("lists", () => {
     const doc = parse("* see [[Berlin]] and {{lang|de|Stadt}}\n* two");
     const list = some(Arr.head(lists(doc)), "list");
     const first = some(Arr.head(list.items), "item");
-    const link = first.nodes.find(Predicate.isTagged("Wikilink"));
+    const link = first.nodes.find(P.isTagged("Wikilink"));
     expect(link).toBeDefined();
     expect(doc.children).toContain(link);
-    const template = first.nodes.find(Predicate.isTagged("Template"));
+    const template = first.nodes.find(P.isTagged("Template"));
     expect(doc.children).toContain(template);
     expectExactSpans(doc, [list]);
   });
@@ -114,7 +114,7 @@ describe("lists", () => {
 
   it("reads a fragment, such as a table cell's content", () => {
     const doc = parse("{|\n|\n* in a cell\n* two\n|}");
-    const isTable = (node: Node): node is Table => Predicate.isTagged(node, "Table");
+    const isTable = (node: Node): node is Table => P.isTagged(node, "Table");
     const table = some(Arr.findFirst(doc.children, isTable), "table");
     const cell = some(Arr.head(some(Arr.head(table.rows), "row").cells), "cell");
     const content: readonly Node[] = cell.content;

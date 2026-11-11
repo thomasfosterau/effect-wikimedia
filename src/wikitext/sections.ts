@@ -11,7 +11,7 @@
 
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import type { Document, Heading, Node, Span, Table } from "./ast.ts";
 import { filter, type StripToTextOptions, stripToText } from "./query.ts";
 
@@ -127,12 +127,12 @@ const titleOf = (heading: Heading, options: StripToTextOptions | undefined): str
     heading.rightEquals.slice(heading.level)
   ).trim();
 
-const isHeading = (node: Node): node is Heading => Predicate.isTagged(node, "Heading");
+const isHeading = (node: Node): node is Heading => P.isTagged(node, "Heading");
 
 /** The openings a top-level node contributes: itself, or a table's headings. */
 function openingsOf(node: Node, at: number): Opening[] {
   if (isHeading(node)) return [{ at, heading: Option.some(node), table: Option.none() }];
-  if (!Predicate.isTagged(node, "Table")) return [];
+  if (!P.isTagged(node, "Table")) return [];
   return Arr.map(Arr.filter(filter([node], isHeading), isHeading), (heading) => ({
     at: -1,
     heading: Option.some(heading),

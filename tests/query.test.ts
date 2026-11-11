@@ -12,7 +12,7 @@ import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Order from "effect/Order";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -110,7 +110,7 @@ describe("normaliseTemplateName", () => {
 describe("filter / walk", () => {
   it("collects every wikilink at any depth", () => {
     const doc = parse(ada);
-    const links = filter(doc, Predicate.isTagged("Wikilink"));
+    const links = filter(doc, P.isTagged("Wikilink"));
     expect(links.length).toBeGreaterThan(3);
   });
 
@@ -119,7 +119,7 @@ describe("filter / walk", () => {
     const seen: string[] = [];
     walk(doc, (n) => {
       seen.push(n._tag);
-      if (Predicate.isTagged(n, "Template")) return false; // don't descend
+      if (P.isTagged(n, "Template")) return false; // don't descend
     });
     expect(seen).toContain("Template");
     expect(seen).not.toContain("Wikilink");
@@ -506,7 +506,7 @@ describe("strip to plain text: entities (#107)", () => {
     "leaves %s, without the semicolon, as literal text",
     (src) => {
       const doc = parse(src);
-      expect(doc.children.some(Predicate.isTagged("HtmlEntity"))).toBe(false);
+      expect(doc.children.some(P.isTagged("HtmlEntity"))).toBe(false);
       expect(stripToText(doc)).toBe(src);
     },
   );
@@ -533,15 +533,15 @@ describe("strip to plain text: entities (#107)", () => {
 describe("tables and autolinks reachable via walk/filter (issue #1287)", () => {
   it("finds an AutoLink node at any depth", () => {
     const doc = parse("'''bold''' http://example.org more");
-    expect(filter(doc, Predicate.isTagged("AutoLink"))).toHaveLength(1);
+    expect(filter(doc, P.isTagged("AutoLink"))).toHaveLength(1);
   });
 
   it("descends into table captions and cell content", () => {
     const doc = parse(
       "{|\n|+ has a [[Caption Link]]\n| has [[Cell Link]] and http://example.org\n|}",
     );
-    const links = filter(doc, Predicate.isTagged("Wikilink"));
+    const links = filter(doc, P.isTagged("Wikilink"));
     expect(links).toHaveLength(2);
-    expect(filter(doc, Predicate.isTagged("AutoLink"))).toHaveLength(1);
+    expect(filter(doc, P.isTagged("AutoLink"))).toHaveLength(1);
   });
 });

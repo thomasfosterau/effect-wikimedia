@@ -38,8 +38,8 @@
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import {
@@ -164,17 +164,17 @@ export function normaliseWikitext(
   response: WikitextResponse,
   title: string,
 ): WikitextResult | null {
-  const pages = Rec.values(response.query?.pages ?? {});
+  const pages = R.values(response.query?.pages ?? {});
   const page = pages.find((p) => p.missing === undefined && p.revisions !== undefined);
   if (page === undefined) return null;
   const revision = page.revisions?.[0];
   const wikitext = revision?.slots?.main?.["*"];
-  if (!Predicate.isString(wikitext)) return null;
+  if (!P.isString(wikitext)) return null;
   return {
     pageId: toNonNegativeInt(page.pageid),
     title: sanitiseText(page.title) ?? title,
     revisionId: toNonNegativeInt(revision?.revid),
-    timestamp: Predicate.isString(revision?.timestamp) ? revision.timestamp.slice(0, 40) : null,
+    timestamp: P.isString(revision?.timestamp) ? revision.timestamp.slice(0, 40) : null,
     wikitext,
   };
 }
@@ -314,7 +314,7 @@ export interface PageMetadata {
 
 /** A URL string, re-validated as `https:` before being trusted, or `null`. */
 function toHttpsUrl(value: unknown): string | null {
-  if (!Predicate.isString(value) || Str.isEmpty(value) || value.length > 2000) return null;
+  if (!P.isString(value) || Str.isEmpty(value) || value.length > 2000) return null;
   return parseUrl(value).pipe(
     Option.filter((parsed) => parsed.protocol === "https:"),
     Option.map((parsed) => parsed.toString()),
@@ -335,7 +335,7 @@ export function normalisePageMetadata(
   response: PageMetadataResponse,
   title: string,
 ): PageMetadata | null {
-  const pages = Rec.values(response.query?.pages ?? {});
+  const pages = R.values(response.query?.pages ?? {});
   const page = pages.find(
     (p) => p.missing === undefined && p.invalid === undefined && p.special === undefined,
   );
@@ -345,7 +345,7 @@ export function normalisePageMetadata(
     title: sanitiseText(page.title) ?? title,
     contentModel: sanitiseText(page.contentmodel),
     language: sanitiseText(page.pagelanguage),
-    touched: Predicate.isString(page.touched) ? page.touched.slice(0, 40) : null,
+    touched: P.isString(page.touched) ? page.touched.slice(0, 40) : null,
     lastRevisionId: toNonNegativeInt(page.lastrevid),
     length: toNonNegativeInt(page.length, 100_000_000),
     fullUrl: toHttpsUrl(page.fullurl),
@@ -654,7 +654,7 @@ export function normaliseParse(response: ParseResponse, title: string): ParsedPa
           Option.fromNullOr(sanitiseText(section.line)),
           (sectionTitle): ParsedSection => ({
             level: toNonNegativeInt(
-              Predicate.isString(section.hLevel) ? Number(section.hLevel) : section.hLevel,
+              P.isString(section.hLevel) ? Number(section.hLevel) : section.hLevel,
               20,
             ),
             title: sectionTitle,
@@ -784,9 +784,7 @@ type SiteinfoInterwiki = typeof SiteInterwiki.Type;
  */
 export function normaliseHiddenLinkPrefixes(response: SiteinfoResponse): readonly string[] {
   const query = response.query;
-  const namespaces = Rec.values(query?.namespaces ?? {}).filter((ns) =>
-    isHiddenLinkNamespace(ns.id),
-  );
+  const namespaces = R.values(query?.namespaces ?? {}).filter((ns) => isHiddenLinkNamespace(ns.id));
   const aliases = (query?.namespacealiases ?? []).filter((alias) =>
     isHiddenLinkNamespace(alias.id),
   );

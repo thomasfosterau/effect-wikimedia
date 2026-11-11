@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Iterable from "effect/Iterable";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Dumps, Wikidata } from "../../src/index.ts";
@@ -41,7 +41,7 @@ const parseJson = Schema.decodeSync(Json);
 
 /** Refines an entity-dump record to its per-line error member. */
 const isLineError = (record: Dumps.EntityRecord | null): record is Dumps.DumpLineError =>
-  Predicate.isTagged(record, "error");
+  P.isTagged(record, "error");
 
 let tmp: string;
 let slicePath: string;
@@ -197,7 +197,7 @@ describe("entityRecords pipeline", () => {
 
   it("decodes the fixture: 5 entities + 2 error elements, in line order", async () => {
     const records = await collect(Dumps.entityRecords(Dumps.fromFile(slicePath)));
-    const entities = records.filter(Predicate.isTagged("entity"));
+    const entities = records.filter(P.isTagged("entity"));
     const errors = records.filter(isLineError);
     expect(entities.length).toBe(5);
     expect(errors.length).toBe(2);

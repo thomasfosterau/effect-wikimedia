@@ -14,7 +14,7 @@ import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Str from "effect/String";
 import type { Node, Param, Template, Text } from "./ast.ts";
 import {
@@ -102,7 +102,7 @@ function narrow(node: Text, start: number, end: number): Option.Option<Node> {
   });
 }
 
-const isText = (node: Node): node is Text => Predicate.isTagged(node, "Text");
+const isText = (node: Node): node is Text => P.isTagged(node, "Text");
 
 /** Drops the whitespace at the start of `nodes`, through whitespace-only text nodes. */
 function trimStart(nodes: readonly Node[]): readonly Node[] {

@@ -32,7 +32,7 @@
 
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import type { Formatting, Node } from "./ast.ts";
 
 const SPACE = " ";
@@ -55,7 +55,7 @@ function modeOf(markupLen: 2 | 3 | 5): Formatting["mode"] {
   return markupLen === 2 ? "italic" : markupLen === 3 ? "bold" : "bold-italic";
 }
 
-const isFormattingTag = Predicate.isTagged("Formatting");
+const isFormattingTag = P.isTagged("Formatting");
 const isFormatting = (node: Node): node is Formatting => isFormattingTag(node);
 
 /**

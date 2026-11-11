@@ -12,7 +12,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import { FetchHttpClient } from "effect/http";
 import { Core, Rest } from "../src/index.ts";
 import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
@@ -28,8 +28,8 @@ const stubRouter = (routes: Record<string, StubRoute>) => {
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     urls.push(request.url);
-    return Arr.findFirst(Rec.keys(routes), (k) => request.url.includes(k)).pipe(
-      Option.flatMap((key) => Rec.get(routes, key)),
+    return Arr.findFirst(R.keys(routes), (k) => request.url.includes(k)).pipe(
+      Option.flatMap((key) => R.get(routes, key)),
       Option.match({
         onNone: () => new Response("", { status: 404 }),
         onSome: (route) => {

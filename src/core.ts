@@ -43,7 +43,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as Layer from "effect/Layer";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpClientError } from "effect/http";
@@ -257,7 +257,7 @@ const MAX_HOST_LENGTH = 100;
  * to an arbitrary host. Returns `null` for anything else.
  */
 export function normaliseWikimediaHost(raw: string): string | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const cleaned = raw.trim().toLowerCase();
   if (Str.isEmpty(cleaned) || cleaned.length > MAX_HOST_LENGTH) return null;
   // Hostnames only: letters, digits, dot, hyphen. Rejects anything that
@@ -343,7 +343,7 @@ function hasSafeCodeUnits(title: string, index: number): boolean {
  * contain dots (`Mr._Smith`, `A.B`, `...`) stay valid.
  */
 export function normaliseTitle(raw: string): string | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const collapsed = raw.trim().replace(/\s+/g, "_");
   if (Str.isEmpty(collapsed) || collapsed.length > MAX_TITLE_LENGTH) return null;
   if (!hasSafeCodeUnits(collapsed, 0)) return null;
@@ -388,14 +388,14 @@ export const MAX_TEXT_FIELD_LENGTH = 4000;
 
 /** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
 export function sanitiseText(value: unknown): string | null {
-  if (!Predicate.isString(value)) return null;
+  if (!P.isString(value)) return null;
   const trimmed = value.trim();
   return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
 }
 
 /** A non-negative integer within a sane bound, or `null` for anything else. */
 export function toNonNegativeInt(value: unknown, max = Number.MAX_SAFE_INTEGER): number | null {
-  if (!Predicate.isNumber(value) || !Number.isFinite(value)) return null;
+  if (!P.isNumber(value) || !Number.isFinite(value)) return null;
   const int = Math.trunc(value);
   return int >= 0 && int <= max ? int : null;
 }
@@ -409,7 +409,7 @@ export function toNonNegativeInt(value: unknown, max = Number.MAX_SAFE_INTEGER):
  * header.
  */
 export function parseRetryAfterHeader(value: string | undefined | null): number | null {
-  if (!Predicate.isString(value)) return null;
+  if (!P.isString(value)) return null;
   const trimmed = value.trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
   const seconds = Number(trimmed);
@@ -430,9 +430,9 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * only when the header is absent or an HTTP date.
  */
 export function detectMaxlagSignal(body: unknown): number | null {
-  if (!Predicate.isObjectOrArray(body) || !Predicate.hasProperty(body, "error")) return null;
+  if (!P.isObjectOrArray(body) || !P.hasProperty(body, "error")) return null;
   const error = body.error;
-  if (!Predicate.isObjectOrArray(error) || !Predicate.hasProperty(error, "code")) return null;
+  if (!P.isObjectOrArray(error) || !P.hasProperty(error, "code")) return null;
   return error.code === "maxlag" ? DEFAULT_MAXLAG_SECONDS : null;
 }
 

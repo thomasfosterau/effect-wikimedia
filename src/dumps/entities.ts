@@ -35,7 +35,7 @@
 
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Str from "effect/String";
@@ -181,7 +181,7 @@ export const entityRecords = <E, R>(
   );
 
 /** Refines an {@link EntityRecord} to a successful {@link EntityHit}. */
-const isHit = (record: EntityRecord): record is EntityHit => Predicate.isTagged(record, "entity");
+const isHit = (record: EntityRecord): record is EntityHit => P.isTagged(record, "entity");
 
 /**
  * Projects an {@link EntityRecord} stream down to just the successfully

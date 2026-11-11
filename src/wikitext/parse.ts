@@ -50,7 +50,7 @@ import * as Match from "effect/Match";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
-import * as Record from "effect/Record";
+import * as R from "effect/Record";
 import {
   type Argument,
   type AutoLink,
@@ -1494,7 +1494,7 @@ const nextChar = Parser.peek(Token.any);
 
 const constructs = (cases: Readonly<Record<string, WikiParser<Node>>>): Constructs => ({
   construct: Parser.dispatch(nextChar, cases),
-  opens: asciiTable(Record.keys(cases)),
+  opens: asciiTable(R.keys(cases)),
 });
 
 /** The constructs that may open inside any fragment. */

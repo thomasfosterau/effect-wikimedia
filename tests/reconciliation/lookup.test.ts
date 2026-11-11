@@ -30,8 +30,8 @@ import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Predicate from "effect/Predicate";
-import * as Record from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Core from "../../src/core.ts";
 import {
@@ -622,9 +622,9 @@ describe("WikidataLookup.enrich", () => {
         datavalue: {
           type: "time",
           // `timeClaim(undefined)` omits the key rather than sending `undefined`.
-          value: Record.filter(
+          value: R.filter(
             { time: "+1452-04-15T00:00:00Z", precision: 11, calendarmodel },
-            Predicate.isNotUndefined,
+            P.isNotUndefined,
           ),
         },
       },
@@ -685,10 +685,7 @@ describe("WikidataLookup.enrich", () => {
         datavalue: {
           type: "time",
           // `timeClaim(undefined)` omits the key rather than sending `undefined`.
-          value: Record.filter(
-            { time: "+1952-00-00T00:00:00Z", precision },
-            Predicate.isNotUndefined,
-          ),
+          value: R.filter({ time: "+1952-00-00T00:00:00Z", precision }, P.isNotUndefined),
         },
       },
     });

@@ -13,8 +13,8 @@
  */
 
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
-import type * as Record from "effect/Record";
+import * as P from "effect/Predicate";
+import type * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { normaliseTitle } from "../core.ts";
@@ -84,7 +84,7 @@ export function sanitiseCandidateText(value: unknown): string | null {
  * nothing left.
  */
 function collapseAndClamp(value: unknown, max: number): string | null {
-  if (!Predicate.isString(value)) return null;
+  if (!P.isString(value)) return null;
   const collapsed = value.replace(/\s+/g, " ").trim();
   return Str.isEmpty(collapsed) ? null : collapsed.slice(0, max);
 }
@@ -97,7 +97,7 @@ function collapseAndClamp(value: unknown, max: number): string | null {
  * bytes.
  */
 function trimmedToken(raw: unknown): string | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const trimmed = raw.trim();
   if (Str.isEmpty(trimmed) || trimmed.length > 256) return null;
   const hasControl = Arr.some(Arr.fromIterable(trimmed), (char) => {
@@ -134,7 +134,7 @@ export function normaliseLabelQuery(raw: string): string | null {
  * intended position.
  */
 export function normaliseQid(raw: string): string | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   if (/^Q[1-9]\d{0,18}$/.test(cleaned)) return cleaned;
   return null;
@@ -150,7 +150,7 @@ export function normaliseQid(raw: string): string | null {
  * it must be exclusively `P` plus digits.
  */
 export function normalisePropertyId(raw: string): string | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const cleaned = raw.trim().toUpperCase();
   if (/^P[1-9]\d{0,18}$/.test(cleaned)) return cleaned;
   return null;
@@ -341,9 +341,7 @@ const externalIdAuthority = (
 ): ExternalIdAuthority => ({
   authority,
   iri: (value) =>
-    Predicate.isString(value) && format.test(value)
-      ? template(encodeURIComponent(canonical(value)))
-      : null,
+    P.isString(value) && format.test(value) ? template(encodeURIComponent(canonical(value))) : null,
 });
 
 /**
@@ -370,7 +368,7 @@ const externalIdAuthority = (
  * Wikidata's spaced form (`0000 0001 2103 2683`) and the compact form; its
  * IRI always uses the compact form.
  */
-export const EXTERNAL_ID_AUTHORITIES: Record.ReadonlyRecord<string, ExternalIdAuthority> = {
+export const EXTERNAL_ID_AUTHORITIES: R.ReadonlyRecord<string, ExternalIdAuthority> = {
   P214: externalIdAuthority(
     "viaf",
     /^[1-9]\d(?:\d{0,7}|\d{17,20})$/,
@@ -408,7 +406,7 @@ export const EXTERNAL_ID_AUTHORITIES: Record.ReadonlyRecord<string, ExternalIdAu
  * Wikidata properties whose value is a calendar date we lift as a
  * {@link DateFact}, mapped to the English label reported as its `label`.
  */
-export const DATE_PROPERTIES: Record.ReadonlyRecord<string, string> = {
+export const DATE_PROPERTIES: R.ReadonlyRecord<string, string> = {
   P569: "date of birth",
   P570: "date of death",
   P571: "inception",
@@ -426,7 +424,7 @@ export const IMAGE_PROPERTIES: readonly string[] = ["P18"];
  * so it must be exclusively a sign, digits, and the fixed separators.
  */
 export function normaliseTimeValue(raw: unknown): string | null {
-  if (!Predicate.isString(raw)) return null;
+  if (!P.isString(raw)) return null;
   const trimmed = raw.trim();
   // Wikidata times are `±YYYYYYYYYYY-MM-DDThh:mm:ssZ` (year up to 16 digits).
   if (!/^[+-]\d{1,16}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(trimmed)) return null;
