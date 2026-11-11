@@ -439,8 +439,8 @@ export function normaliseTimeValue(raw: unknown): string | null {
  * relative-path titles (`.`, `..`, a leading `./` or `../`, a `/./` or
  * `/../` anywhere, a trailing `/.` or `/..`), which `new URL` would resolve
  * into a different path; the filename is percent-encoded into the fixed
- * Commons host. Returns `null` for unusable input, as `Commons.filePathUrl`
- * does. The returned `filename` is the trimmed claim as spelled (the
+ * Commons host. Returns `null` for unusable input, where `Commons.filePathUrl`
+ * gives `None`. The returned `filename` is the trimmed claim as spelled (the
  * {@link ImageFact} `filename`) and `iri` is its `Special:FilePath` URL;
  * both are trusted.
  */
