@@ -381,6 +381,35 @@ export function requireRevisionId(revisionId: number): Effect.Effect<number, Inv
   return Effect.succeed(revisionId);
 }
 
+// ── Lenient response fields ──────────────────────────────────────────────
+
+/**
+ * `schema`, made lenient: a value that doesn't decode with it is dropped
+ * rather than failing the decode. Each surface's response schemas wrap their
+ * leaves in {@link lenientField} (and array elements in {@link lenientArray}), so one
+ * malformed leaf in a Wikimedia response degrades to absent while the rest
+ * of the response still decodes, and the normalisers read typed values
+ * (#224).
+ */
+export const lenient = <S extends Schema.Top>(schema: S) =>
+  schema.pipe(Schema.catchDecoding(() => Effect.succeedNone));
+
+/**
+ * An optional struct field of type `schema` that is absent, not a decode
+ * failure, when the response holds a value of the wrong kind there:
+ * {@link lenient} as an optional key.
+ */
+export const lenientField = <S extends Schema.Top>(schema: S) => Schema.optional(lenient(schema));
+
+/**
+ * An array of `schema` elements in which an element that doesn't decode is
+ * `undefined`, in place, while the others decode: {@link lenient} per
+ * element. Wrap it in {@link lenientField} for an array field whose value may
+ * itself be of the wrong kind.
+ */
+export const lenientArray = <S extends Schema.Top>(schema: S) =>
+  Schema.Array(Schema.optional(lenient(schema)));
+
 // ── Shared response-field sanitisers ─────────────────────────────────────
 
 /** Upper bound on a free-text field copied from an untrusted response body. */

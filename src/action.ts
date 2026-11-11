@@ -45,6 +45,8 @@ import * as Str from "effect/String";
 import {
   DEFAULT_RETRY_OPTIONS,
   InvalidRequest,
+  lenientArray,
+  lenientField,
   requireTitle,
   type RetryOptions,
   sanitiseText,
@@ -230,7 +232,7 @@ const MetadataPage = Schema.Struct({
    * The page's full URL (`fullurl`, requested with `inprop=url`); not
    * MediaWiki's separate `canonicalurl`.
    */
-  fullurl: Schema.optional(Schema.Unknown),
+  fullurl: lenientField(Schema.String),
 });
 
 /**
@@ -313,8 +315,8 @@ export interface PageMetadata {
 }
 
 /** A URL string, re-validated as `https:` before being trusted, or `null`. */
-function toHttpsUrl(value: unknown): string | null {
-  if (!P.isString(value) || Str.isEmpty(value) || value.length > 2000) return null;
+function toHttpsUrl(value: string | undefined): string | null {
+  if (value === undefined || Str.isEmpty(value) || value.length > 2000) return null;
   return parseUrl(value).pipe(
     Option.filter((parsed) => parsed.protocol === "https:"),
     Option.map((parsed) => parsed.toString()),
@@ -701,23 +703,23 @@ export const parsePage = Effect.fn("Action.parsePage")(function* (
 
 const SiteNamespace = Schema.Struct({
   /** The namespace number (6 is File, 14 is Category). */
-  id: Schema.optional(Schema.Unknown),
+  id: lenientField(Schema.Number),
   /** The namespace's canonical (English) name. */
-  canonical: Schema.optional(Schema.Unknown),
+  canonical: lenientField(Schema.String),
   /** The namespace's localised name (`formatversion=1` writes it under `*`). */
-  "*": Schema.optional(Schema.Unknown),
+  "*": lenientField(Schema.String),
 });
 
 const SiteNamespaceAlias = Schema.Struct({
   /** The number of the namespace the alias names. */
-  id: Schema.optional(Schema.Unknown),
+  id: lenientField(Schema.Number),
   /** The alias (`formatversion=1` writes it under `*`). */
-  "*": Schema.optional(Schema.Unknown),
+  "*": lenientField(Schema.String),
 });
 
 const SiteInterwiki = Schema.Struct({
   /** The interwiki prefix, such as `fr` or `wikt`. */
-  prefix: Schema.optional(Schema.Unknown),
+  prefix: lenientField(Schema.String),
   /** The language's name; present only when the prefix is a language code. */
   language: Schema.optional(Schema.Unknown),
   /** Present when the prefix is one of `$wgExtraInterlanguageLinkPrefixes`. */
@@ -754,10 +756,10 @@ export type SiteinfoResponse = typeof SiteinfoResponse.Type;
 export const MAX_HIDDEN_LINK_PREFIXES = 2000;
 
 /** Whether `id` is the File (6) or Category (14) namespace, whose links render outside the prose. */
-const isHiddenLinkNamespace = (id: unknown): boolean => id === 6 || id === 14;
+const isHiddenLinkNamespace = (id: number | undefined): boolean => id === 6 || id === 14;
 
 /** A prefix from the response, or `None` when it is not a usable namespace or interwiki name. */
-function linkPrefix(value: unknown): Option.Option<string> {
+function linkPrefix(value: string | undefined): Option.Option<string> {
   return Option.filter(
     Option.fromNullOr(sanitiseText(value)),
     (prefix) => prefix.length <= 255 && !/[:|[\]{}#<>]/.test(prefix),
@@ -838,9 +840,9 @@ export const getHiddenLinkPrefixes = Effect.fn("Action.getHiddenLinkPrefixes")(f
 
 const SiteMagicWord = Schema.Struct({
   /** The magic word's internal name, such as `redirect`. */
-  name: Schema.optional(Schema.Unknown),
+  name: lenientField(Schema.String),
   /** The magic word's spellings on this wiki, localised ones first. */
-  aliases: Schema.optional(Schema.Array(Schema.Unknown)),
+  aliases: lenientField(lenientArray(Schema.String)),
 });
 
 /**
@@ -866,7 +868,7 @@ export type MagicWordsResponse = typeof MagicWordsResponse.Type;
 export const MAX_REDIRECT_ALIASES = 100;
 
 /** A spelling from the response, or `None` when it is not a usable redirect word. */
-function redirectAlias(value: unknown): Option.Option<string> {
+function redirectAlias(value: string | undefined): Option.Option<string> {
   return Option.filter(Option.fromNullOr(sanitiseText(value)), (alias) => alias.length <= 255);
 }
 
