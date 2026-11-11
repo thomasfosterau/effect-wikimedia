@@ -31,7 +31,8 @@ import * as HashSet from "effect/HashSet";
 export interface Span {
   /**
    * Offset of the first code unit, inclusive, counted from the start of
-   * {@link Document.source} (not from the parent node).
+   * {@link Document.source} (not from the parent node), plus the `offset`
+   * given to {@link parse} when one was.
    */
   readonly start: number;
   /**
@@ -45,7 +46,10 @@ export interface Span {
 export interface Document {
   /** Tells a document apart from a node array (a {@link Fragment} is either). */
   readonly _tag: "Document";
-  /** The whole source: always `{ start: 0, end: source.length }`. */
+  /**
+   * The whole source: `{ start: 0, end: source.length }`, or shifted by the
+   * `offset` given to {@link parse}, which is then `span.start`.
+   */
   readonly span: Span;
   /**
    * The top-level nodes, in source order, tiling the whole source; empty
