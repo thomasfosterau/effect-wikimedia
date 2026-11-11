@@ -1,42 +1,33 @@
 # Composite setup shared by every job that needs the toolchain (copied in
 # shape from `thomasfosterau/effect-drizzle-ext`, the Vite+ library standard).
-# Sets up pnpm + Node.js, restores the pnpm store cache (keyed on
-# pnpm-lock.yaml by setup-node), and installs dependencies with a FROZEN
-# lockfile, so a manifest/lockfile drift fails here rather than shipping.
-# `vp` (vite-plus is a devDependency) lands in node_modules/.bin; later steps
-# call it as `pnpm exec vp …` rather than through a `GITHUB_PATH` write
-# (zizmor flags those) — no separate Vite+ installer action, and one fewer
-# third-party action to pin.
+# One action, `voidzero-dev/setup-vp` (#254), replaces pnpm/action-setup and
+# actions/setup-node: it installs the Vite+ CLI at the catalog's `vite-plus`
+# pin (`version-file`), a managed Node.js, and the pnpm `packageManager`
+# names, restores the pnpm store cache keyed on pnpm-lock.yaml, and installs
+# dependencies with a FROZEN lockfile, so a manifest/lockfile drift fails
+# here rather than shipping. Later steps keep calling `pnpm exec vp …` and
+# `pnpm run …`: the managed pnpm is on PATH.
 #
 # Callers must run `actions/checkout` BEFORE this (a local composite action
 # needs the repo on disk first).
 name: Setup toolchain
-description: Set up pnpm and Node.js, restore the package cache, and install dependencies from the frozen lockfile.
+description: Set up Vite+, Node.js and pnpm, restore the package cache, and install dependencies from the frozen lockfile.
 runs:
   using: composite
   steps:
-    # pnpm before Node so setup-node's `cache: pnpm` can resolve the store path.
-    # The pnpm version comes from the `packageManager` field in package.json.
-    - name: Setup pnpm
-      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-    - name: Setup Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+    - name: Setup Vite+
+      uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
       with:
-        # Never `latest`: setup-node resolves it to the first entry of the
-        # nodejs.org index, pre-releases included (since 2026-10-29 that is
-        # `v27.0.0-alpha.0.0.0`, which hangs some test suites, effect-svelte#214,
-        # and would let Release publish from an alpha). `"*"` with
-        # `check-latest` takes the newest stable release from setup-node's
-        # manifest instead (#225). The floor is package.json `engines` (>=22).
-        node-version: "*"
-        check-latest: true
-        cache: pnpm
-
-    # `--frozen-lockfile`: the committed pnpm-lock.yaml is the dependency tree
-    # CI verifies; an out-of-sync lockfile fails the install instead of being
-    # silently re-resolved. Dependency build scripts are already gated by
-    # `allowBuilds` in pnpm-workspace.yaml.
-    - name: Install dependencies
-      shell: bash
-      run: pnpm install --frozen-lockfile
+        # The catalog pin, so CI runs the same Vite+ the lockfile installs.
+        version-file: pnpm-workspace.yaml
+        # Never a moving pre-release: `lts` is the newest LTS release, which
+        # is inside package.json `engines` (>=22). (setup-node's `latest`
+        # once resolved to `v27.0.0-alpha`, #225, effect-svelte#214.)
+        node-version: "lts"
+        cache: true
+        # `--frozen-lockfile`: the committed pnpm-lock.yaml is the dependency
+        # tree CI verifies; an out-of-sync lockfile fails the install instead
+        # of being silently re-resolved. Dependency build scripts are already
+        # gated by `allowBuilds` in pnpm-workspace.yaml.
+        run-install: |
+          args: ['--frozen-lockfile']

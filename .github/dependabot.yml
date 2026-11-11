@@ -74,7 +74,11 @@ updates:
     assignees:
       - thomasfosterau
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # `/` covers .github/workflows/ only; the composite setup action is a
+    # directory of its own, or its pins never move (#254).
+    directories:
+      - "/"
+      - "/.github/actions/setup"
     schedule:
       interval: "weekly"
       day: "monday"
