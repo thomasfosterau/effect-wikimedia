@@ -11,6 +11,7 @@
 
 import type * as Effect from "effect/Effect";
 import type * as Layer from "effect/Layer";
+import type * as Option from "effect/Option";
 import type * as Stream from "effect/Stream";
 import type { HttpClient } from "effect/http";
 
@@ -75,11 +76,11 @@ assert<
 
 // --- Commons ----------------------------------------------------------------
 
-assert<Equals<ReturnType<typeof Commons.filePathUrl>, string | null>>();
+assert<Equals<ReturnType<typeof Commons.filePathUrl>, Option.Option<string>>>();
 assert<
   Equals<
     ReturnType<typeof Commons.getFileInfo>,
-    Effect.Effect<Commons.FileInfo | null, Core.WikimediaError, Core.WikimediaClient>
+    Effect.Effect<Option.Option<Commons.FileInfo>, Core.WikimediaError, Core.WikimediaClient>
   >
 >();
 

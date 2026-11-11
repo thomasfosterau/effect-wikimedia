@@ -20,65 +20,65 @@ import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 describe("filePathUrl", () => {
   it("builds the Special:FilePath URL for a bare filename, canonicalising spaces to underscores", () => {
-    expect(Commons.filePathUrl("Douglas adams portrait.jpg")).toBe(
+    expect(Option.getOrNull(Commons.filePathUrl("Douglas adams portrait.jpg"))).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas_adams_portrait.jpg",
     );
   });
 
   it("strips a leading File: prefix", () => {
-    expect(Commons.filePathUrl("File:Douglas adams portrait.jpg")).toBe(
+    expect(Option.getOrNull(Commons.filePathUrl("File:Douglas adams portrait.jpg"))).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas_adams_portrait.jpg",
     );
   });
 
   it("appends a validated width for a thumbnail request", () => {
-    const url = Commons.filePathUrl("Example.jpg", { width: 300 });
+    const url = Option.getOrNull(Commons.filePathUrl("Example.jpg", { width: 300 }));
     expect(url).toBe("https://commons.wikimedia.org/wiki/Special:FilePath/Example.jpg?width=300");
   });
 
   it("rejects a width outside sane bounds", () => {
-    expect(Commons.filePathUrl("Example.jpg", { width: 0 })).toBeNull();
-    expect(Commons.filePathUrl("Example.jpg", { width: 1.5 })).toBeNull();
-    expect(Commons.filePathUrl("Example.jpg", { width: 1_000_000 })).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl("Example.jpg", { width: 0 }))).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl("Example.jpg", { width: 1.5 }))).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl("Example.jpg", { width: 1_000_000 }))).toBeNull();
   });
 
   it("rejects a filename that would inject a query clause or fragment", () => {
-    expect(Commons.filePathUrl("Foo|Bar.jpg")).toBeNull();
-    expect(Commons.filePathUrl("Foo#Bar.jpg")).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl("Foo|Bar.jpg"))).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl("Foo#Bar.jpg"))).toBeNull();
   });
 
   it.each([".", "..", "File:..", "file:.", "./Foo.jpg", "Foo/../Bar.jpg", "Foo/.."])(
     "rejects the relative-path filename %j, with or without the File: prefix",
     (filename) => {
-      expect(Commons.filePathUrl(filename), filename).toBeNull();
+      expect(Option.getOrNull(Commons.filePathUrl(filename)), filename).toBeNull();
     },
   );
 
   it.each(["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg", "\uD83D.jpg"])(
     "rejects a filename with a lone UTF-16 surrogate (%j)",
     (filename) => {
-      expect(Commons.filePathUrl(filename)).toBeNull();
+      expect(Option.getOrNull(Commons.filePathUrl(filename))).toBeNull();
     },
   );
 
   it("keeps a filename with a valid surrogate pair", () => {
-    expect(Commons.filePathUrl("Smile \u{1F600}.jpg")).toBe(
+    expect(Option.getOrNull(Commons.filePathUrl("Smile \u{1F600}.jpg"))).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Smile_%F0%9F%98%80.jpg",
     );
   });
 
   it("keeps a filename that merely contains dots", () => {
-    expect(Commons.filePathUrl("Mr. Smith.jpg")).toBe(
+    expect(Option.getOrNull(Commons.filePathUrl("Mr. Smith.jpg"))).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Mr._Smith.jpg",
     );
-    expect(Commons.filePathUrl("...")).toBe(
+    expect(Option.getOrNull(Commons.filePathUrl("..."))).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/...",
     );
   });
 
   it("rejects blank input", () => {
-    expect(Commons.filePathUrl("")).toBeNull();
-    expect(Commons.filePathUrl("   ")).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl(""))).toBeNull();
+    expect(Option.getOrNull(Commons.filePathUrl("   "))).toBeNull();
   });
 });
 
@@ -151,15 +151,19 @@ describe("Commons.getFileInfo", () => {
       layer,
       Commons.getFileInfo("commons.wikimedia.org", "Douglas adams portrait.jpg"),
     );
-    expect(result).toEqual({
-      title: "File:Douglas adams portrait.jpg",
-      url: "https://upload.wikimedia.org/wikipedia/commons/d/douglas.jpg",
-      descriptionUrl: "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait.jpg",
-      width: 800,
-      height: 600,
-      mime: "image/jpeg",
-      size: 123456,
-    });
+    expect(result).toEqual(
+      Option.some({
+        title: "File:Douglas adams portrait.jpg",
+        url: Option.some("https://upload.wikimedia.org/wikipedia/commons/d/douglas.jpg"),
+        descriptionUrl: Option.some(
+          "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait.jpg",
+        ),
+        width: Option.some(800),
+        height: Option.some(600),
+        mime: Option.some("image/jpeg"),
+        size: Option.some(123456),
+      }),
+    );
     expect(urls[0]).toContain("titles=File%3ADouglas_adams_portrait.jpg");
   });
 
@@ -181,10 +185,11 @@ describe("Commons.getFileInfo", () => {
       },
     });
     const result = await run(layer, Commons.getFileInfo("commons.wikimedia.org", "Example.jpg"));
-    expect(result?.url).toBeNull();
+    expect(Option.flatMap(result, (info) => info.url)).toEqual(Option.none());
+    expect(Option.isSome(result)).toBe(true);
   });
 
-  it("returns null when the file does not exist upstream", async () => {
+  it("succeeds with None when the file does not exist upstream", async () => {
     const { layer } = stubRouter({
       "prop=imageinfo": {
         status: 200,
@@ -193,7 +198,7 @@ describe("Commons.getFileInfo", () => {
     });
     expect(
       await run(layer, Commons.getFileInfo("commons.wikimedia.org", "Nonexistent.jpg")),
-    ).toBeNull();
+    ).toEqual(Option.none());
   });
 
   it("rejects a blank filename before any request", async () => {

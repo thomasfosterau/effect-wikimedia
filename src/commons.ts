@@ -47,7 +47,7 @@ export interface FilePathOptions {
  * accepted and normalised away) and is validated by {@link normaliseTitle}
  * before being percent-encoded into the fixed `commons.wikimedia.org` host,
  * so a hostile filename can never redirect the URL elsewhere. Returns
- * `null` for unusable input, matching `Reconciliation.normaliseCommonsImage`,
+ * `None` for unusable input, matching `Reconciliation.normaliseCommonsImage`,
  * including a lone UTF-16 surrogate (which would make `encodeURIComponent`
  * throw) and a relative-path filename such as `..` (checked after the
  * `File:` prefix is removed) that would otherwise resolve to another path.
@@ -56,9 +56,9 @@ export interface FilePathOptions {
  * `?width=`, an integer bounded by {@link MAX_THUMBNAIL_WIDTH} — to a
  * generated thumbnail instead of the original.
  */
-export function filePathUrl(filename: string, options?: FilePathOptions): string | null {
+export function filePathUrl(filename: string, options?: FilePathOptions): Option.Option<string> {
   const title = normaliseTitle(filename.replace(/^File:/i, ""));
-  if (title === null) return null;
+  if (title === null) return Option.none();
   const url = new URL(
     `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(title)}`,
   );
@@ -68,11 +68,11 @@ export function filePathUrl(filename: string, options?: FilePathOptions): string
       options.width <= 0 ||
       options.width > MAX_THUMBNAIL_WIDTH
     ) {
-      return null;
+      return Option.none();
     }
     url.searchParams.set("width", String(options.width));
   }
-  return url.toString();
+  return Option.some(url.toString());
 }
 
 // ── File info (Action API imageinfo) ────────────────────────────────────
@@ -111,17 +111,17 @@ export interface FileInfo {
   /** The canonical `File:`-namespaced title. */
   readonly title: string;
   /** The direct media URL. */
-  readonly url: string | null;
+  readonly url: Option.Option<string>;
   /** The `File:` description page URL. */
-  readonly descriptionUrl: string | null;
+  readonly descriptionUrl: Option.Option<string>;
   /** Pixel width, when known. */
-  readonly width: number | null;
+  readonly width: Option.Option<number>;
   /** Pixel height, when known. */
-  readonly height: number | null;
+  readonly height: Option.Option<number>;
   /** The MIME type, e.g. `"image/jpeg"`. */
-  readonly mime: string | null;
+  readonly mime: Option.Option<string>;
   /** File size in bytes, when known. */
-  readonly size: number | null;
+  readonly size: Option.Option<number>;
 }
 
 /** `new URL(value)`, or `None` when it throws on an unparseable URL. */
@@ -138,16 +138,13 @@ function isMediaUrl(url: URL): boolean {
   );
 }
 
-/** A URL string re-validated against a fixed allowed-host set, or `null`. */
-function toWikimediaMediaUrl(value: unknown): string | null {
+/** A URL string re-validated against a fixed allowed-host set, or `None`. */
+function toWikimediaMediaUrl(value: unknown): Option.Option<string> {
   const candidate =
     P.isString(value) && Str.isNonEmpty(value) && value.length <= 2000
       ? parseUrl(value)
       : Option.none();
-  return Option.match(Option.filter(candidate, isMediaUrl), {
-    onNone: () => null,
-    onSome: (url) => url.toString(),
-  });
+  return Option.map(Option.filter(candidate, isMediaUrl), (url) => url.toString());
 }
 
 /** A `FileInfoPage` carrying a real title that Wikimedia didn't flag as missing. */
@@ -155,19 +152,19 @@ function isUsableFilePage(page: FileInfoPage): boolean {
   return P.isString(page.title) && page.missing === undefined;
 }
 
-function normaliseFileInfo(response: FileInfoResponse, title: string): FileInfo | null {
+function normaliseFileInfo(response: FileInfoResponse, title: string): Option.Option<FileInfo> {
   const page = R.values(response.query?.pages ?? {}).find(isUsableFilePage);
-  if (page === undefined) return null;
+  if (page === undefined) return Option.none();
   const entry: ImageInfoEntry = page.imageinfo?.[0] ?? {};
-  return {
+  return Option.some({
     title: P.isString(page.title) ? page.title : title,
     url: toWikimediaMediaUrl(entry.url),
     descriptionUrl: toWikimediaMediaUrl(entry.descriptionurl),
-    width: toNonNegativeInt(entry.width, 100_000),
-    height: toNonNegativeInt(entry.height, 100_000),
-    mime: P.isString(entry.mime) ? entry.mime.slice(0, 100) : null,
-    size: toNonNegativeInt(entry.size, 10_000_000_000),
-  };
+    width: Option.fromNullOr(toNonNegativeInt(entry.width, 100_000)),
+    height: Option.fromNullOr(toNonNegativeInt(entry.height, 100_000)),
+    mime: P.isString(entry.mime) ? Option.some(entry.mime.slice(0, 100)) : Option.none(),
+    size: Option.fromNullOr(toNonNegativeInt(entry.size, 10_000_000_000)),
+  });
 }
 
 /**
@@ -176,7 +173,7 @@ function normaliseFileInfo(response: FileInfoResponse, title: string): FileInfo 
  * Action API's `imageinfo` prop. `filename` accepts a bare filename or a
  * `File:`-prefixed title; `host` is typically `"commons.wikimedia.org"` but
  * any validated Wikimedia host works (files can be local to a wiki).
- * Returns `null` when no such file exists upstream. Fails with
+ * Succeeds with `None` when no such file exists upstream. Fails with
  * `InvalidRequest`, before any request is sent, for an invalid host or a
  * filename `normaliseTitle` rejects once the `File:` prefix is removed
  * (including a lone UTF-16 surrogate and the relative-path forms `.` and

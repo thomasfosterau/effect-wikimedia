@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
@@ -94,15 +95,17 @@ describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
   it("builds Douglas Adams's Commons portrait file URL and fetches its file info", async () => {
     const filename = "Douglas adams portrait cropped.jpg";
     const url = Commons.filePathUrl(filename);
-    expect(url).toBe(
+    expect(Option.getOrNull(url)).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas_adams_portrait_cropped.jpg",
     );
 
-    const info = await run(Commons.getFileInfo("commons.wikimedia.org", filename));
-    expect(info?.url).toBe(
+    const info = Option.getOrNull(
+      await run(Commons.getFileInfo("commons.wikimedia.org", filename)),
+    );
+    expect(info === null ? null : Option.getOrNull(info.url)).toBe(
       "https://upload.wikimedia.org/wikipedia/commons/d/d1/Douglas_adams_portrait_cropped.jpg",
     );
-    expect(info?.width).toBe(1200);
-    expect(info?.mime).toBe("image/jpeg");
+    expect(info?.width).toEqual(Option.some(1200));
+    expect(info?.mime).toEqual(Option.some("image/jpeg"));
   });
 });
