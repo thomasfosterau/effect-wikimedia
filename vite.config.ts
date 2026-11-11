@@ -256,6 +256,11 @@ export default defineConfig({
           "effect/use-path-service": "off",
           "effect/use-temp-file-scoped": "off",
           "effect/use-command-executor-service": "off",
+          // The suite has no type assertions left (#224): a node lookup goes
+          // through `tests/helpers/nodes.ts`'s refinements, a stub decodes
+          // with the caller's schema. Held at error so none comes back; the
+          // global `warn` stays for the `src/` sites still to go.
+          "effect/casting-awareness": "error",
           // Each test is an entry point: it provides its stubbed layers once,
           // at the edge, which is what this diagnostic asks for.
           "effecttsgo/strict-effect-provide": "off",

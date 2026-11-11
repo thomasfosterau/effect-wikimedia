@@ -16,7 +16,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { setFlagsFromString } from "node:v8";
-import { runInNewContext } from "node:vm";
+import { createContext, runInContext } from "node:vm";
 import { createGzip, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -274,19 +274,19 @@ async function writeBigDump(path: string, n: number): Promise<number> {
 /**
  * A full, synchronous garbage collection, for measuring *retained* memory.
  * The suite runs without `--expose-gc`, so this file turns the flag on,
- * fetches `gc` from a fresh context, which is created after the flag is set
- * and so has it as a global, and turns the flag off again (the technique
- * `jest-leak-detector` uses). No other file sees it.
+ * creates a context, which then has `gc` as a global, and turns the flag off
+ * again (the technique `jest-leak-detector` uses); each collection runs
+ * `gc()` in that context. No other file sees it.
  */
 const collectGarbage = (() => {
   setFlagsFromString("--expose-gc");
-  // SAFETY: with `--expose-gc` set, a new context's global `gc` is V8's `() => void` collector.
-  const gc = runInNewContext("gc") as () => void;
-  // The captured `gc` keeps working with the flag off, and a context created
-  // later (another file sharing this worker, under `isolate: false` or
-  // threads) gets no `gc` global.
+  // A context created while the flag is on has `gc` as a global, and keeps it
+  // with the flag off; running `gc()` inside it collects the whole heap.
+  const context = createContext();
+  // A context created later (another file sharing this worker, under
+  // `isolate: false` or threads) gets no `gc` global.
   setFlagsFromString("--no-expose-gc");
-  return gc;
+  return (): void => void runInContext("gc()", context);
 })();
 
 /** Retained heap and off-heap bytes, as {@link retained} reads them. */

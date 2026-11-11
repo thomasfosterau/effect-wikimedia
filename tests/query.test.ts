@@ -335,12 +335,11 @@ describe("strip to plain text: file, category and interlanguage links (#208)", (
   });
 
   it("hides the supplied prefixes inside a parameter a renderer strips", () => {
+    const templateFallback: TemplateRenderer = (_, { strip }) => strip(parse("[[Kategorie:Z]]f"));
     const options = {
       hiddenLinkPrefixes: ["Kategorie"],
       templates: { ...basicTemplateRenderers },
-      // SAFETY: the arrow takes the renderer's two parameters and returns the string `strip`
-      // gives, `TemplateRenderer`'s shape.
-      templateFallback: ((_, { strip }) => strip(parse("[[Kategorie:Z]]f"))) as TemplateRenderer,
+      templateFallback,
     };
     expect(
       stripToText(parse("{{nowrap|a[[Kategorie:Y]] [[:Kategorie:Y]]}}{{other}}"), options),

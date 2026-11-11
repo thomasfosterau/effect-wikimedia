@@ -14,7 +14,7 @@
 import * as P from "effect/Predicate";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vite-plus/test";
-import type * as Wikidata from "../../src/wikidata.ts";
+import * as Wikidata from "../../src/wikidata.ts";
 import { normaliseCommonsImage } from "../../src/reconciliation/candidate.ts";
 import { normaliseFacts } from "../../src/reconciliation/normalise.ts";
 
@@ -33,8 +33,7 @@ vi.mock(import("../../src/reconciliation/candidate.ts"), async (importOriginal) 
 
 /** A Q42-shaped item with one P18 (image) claim and nothing else. */
 const item: Wikidata.WikidataItem = {
-  // SAFETY: `Q42` is a well-formed item ID, the brand's only invariant.
-  id: "Q42" as Wikidata.WikidataItem["id"],
+  id: Wikidata.ItemId.make("Q42"),
   type: "item",
   labels: {},
   descriptions: {},
@@ -47,8 +46,7 @@ const item: Wikidata.WikidataItem = {
         rank: "normal",
         mainsnak: {
           _tag: "value",
-          // SAFETY: `P18` is a well-formed property ID, the brand's only invariant.
-          property: "P18" as Wikidata.ValueSnak["property"],
+          property: Wikidata.PropertyId.make("P18"),
           datatype: "commonsMedia",
           value: { _tag: "string", value: "Douglas adams portrait.jpg" },
         },

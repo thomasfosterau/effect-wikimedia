@@ -80,15 +80,18 @@ function routeKeyFor(request: Core.WikimediaRequest): string | undefined {
  */
 function stubClient(routes: Record<string, StubRoute>) {
   const requests: Core.WikimediaRequest[] = [];
-  const getJson = <A>(request: Core.WikimediaRequest): Effect.Effect<A, Core.WikimediaError> => {
+  const getJson = <S extends Schema.Top>(
+    request: Core.WikimediaRequest,
+    schema: S,
+  ): Effect.Effect<S["Type"], Core.WikimediaError, S["DecodingServices"]> => {
     requests.push(request);
-    // SAFETY: the conditional has just checked that `routeKeyFor(request)` is a non-empty
-    // string.
-    const route = routeKeyFor(request) ? routes[routeKeyFor(request) as string] : undefined;
+    const key = routeKeyFor(request);
+    const route = key === undefined ? undefined : routes[key];
     if (route?.fail) return Effect.fail(route.fail);
-    // SAFETY: each route's `body` is written to the shape its request decodes to, which is the
-    // `A` the caller asks for.
-    return Effect.succeed((route?.body ?? {}) as A);
+    // Decode the wire-shaped body with the caller's schema, as the real client does.
+    return Schema.decodeUnknownEffect(schema)(route?.body ?? {}).pipe(
+      Effect.mapError((error) => new Core.RequestFailed({ description: String(error) })),
+    );
   };
   const layer = Layer.succeed(Core.WikimediaClient, {
     getJson,

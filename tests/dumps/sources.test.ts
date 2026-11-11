@@ -48,6 +48,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/http";
@@ -271,20 +272,20 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
       { length: Math.ceil(compressed.length / 4096) },
       (_, i) => new Uint8Array(compressed.subarray(i * 4096, (i + 1) * 4096)),
     );
-    // SAFETY: unbzip2-stream's `through` stream carries a `paused` flag its type declarations
-    // omit.
-    const stage = unbzip2() as ReturnType<typeof unbzip2> & { paused: boolean };
+    const stage = unbzip2();
     const write = stage.write.bind(stage);
     let refused = 0;
     let writesWhilePaused = 0;
-    // SAFETY: the wrapper takes the chunk and returns what the original `write` returns, so it
-    // keeps `write`'s contract.
-    stage.write = ((chunk: Uint8Array) => {
-      if (stage.paused) writesWhilePaused++;
+    // unbzip2-stream's `through` stream carries a `paused` flag its type
+    // declarations omit, so it is read through a guard.
+    const through: unknown = stage;
+    const paused = (): boolean => P.hasProperty(through, "paused") && through.paused === true;
+    vi.spyOn(stage, "write").mockImplementation((chunk: Uint8Array) => {
+      if (paused()) writesWhilePaused++;
       const accepted = write(chunk);
       if (!accepted) refused++;
       return accepted;
-    }) as typeof stage.write;
+    });
     const bytes = await orHung(
       runTest(
         Stream.runCollect(
@@ -316,9 +317,11 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
   });
 
   /**
-   * A hand-built classic duplex: a legacy `Stream` with the given `write`. It
-   * has no `destroyed` or async iterator, as `unbzip2-stream`'s has none
-   * (its types claim a `Transform`), so it is cast to the decompressor type.
+   * A hand-built classic duplex: a legacy `Stream` with the given `write`,
+   * which keeps none of the streams2 state (`_readableState` /
+   * `_writableState`) the adapter checks for, as `unbzip2-stream`'s keeps
+   * none. Its `destroyed` flag and empty async iterator are only there to
+   * meet {@link Dumps.NodeDuplexLike}: nothing iterates a stage.
    */
   const classicStream = (
     write: (this: LegacyStream) => void,
@@ -326,18 +329,19 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
     const stream = Object.assign(new LegacyStream(), {
       readable: true,
       writable: true,
+      destroyed: false,
       write,
       end: () => undefined,
       pause: () => undefined,
       resume: () => undefined,
       destroy: () => {
         stream.readable = stream.writable = false;
+        stream.destroyed = true;
         stream.emit("close");
       },
+      [Symbol.asyncIterator]: () => Readable.from([])[Symbol.asyncIterator](),
     });
-    // SAFETY: the stream has `write`, `end`, `destroy`, `destroyed` and is async-iterable,
-    // every member `NodeDuplexLike` names.
-    return stream as typeof stream & Dumps.NodeDuplexLike;
+    return stream;
   };
 
   it("fails with a SourceError when a classic stage's write() throws", async () => {

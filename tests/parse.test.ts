@@ -12,9 +12,8 @@ import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
+import { firstNode, isNode } from "./helpers/nodes.ts";
 import {
-  type AutoLink,
-  type ExternalLink,
   filter,
   findTemplates,
   getParam,
@@ -24,10 +23,7 @@ import {
   serializeNode,
   stripToText,
   type Table,
-  type Tag,
-  type Template,
   walk,
-  type Wikilink,
 } from "../src/wikitext/index.ts";
 import { serializeNodes } from "../src/wikitext/index.ts";
 
@@ -37,9 +33,7 @@ function only<T extends Node["_tag"]>(src: string, tag: T): Extract<Node, { _tag
   const structural = doc.children.filter(P.not(P.isTagged("Text")));
   expect(structural.length, `expected one ${tag}`).toBe(1);
   expect(structural[0]._tag).toBe(tag);
-  // SAFETY: the expects above have checked that this is the one structural node and that its
-  // `_tag` is `tag`.
-  return structural[0] as Extract<Node, { _tag: T }>;
+  return firstNode(structural, tag);
 }
 
 const text = (nodes: readonly Node[]): string => serializeNodes(nodes);
@@ -71,9 +65,7 @@ describe("templates", () => {
 
   it("nests templates in a parameter value", () => {
     const t = only("{{outer|x={{inner|y}}}}", "Template");
-    // SAFETY: `isTagged("Template")` matched it, and every `Template`-tagged node is a
-    // `Template`.
-    const inner = t.params[0].value.find(P.isTagged("Template")) as Template;
+    const inner = firstNode(t.params[0].value, "Template");
     expect(inner).toBeDefined();
     expect(text(inner.name)).toBe("inner");
   });
@@ -229,13 +221,8 @@ describe("tags", () => {
 describe("html entities", () => {
   it("parses named, decimal, and hex entities", () => {
     const doc = parse("&nbsp;&#160;&#x1F600;");
-    const entities = doc.children.filter(P.isTagged("HtmlEntity"));
-    // SAFETY: every `HtmlEntity`-tagged node has a `raw` field.
-    expect(entities.map((e) => (e as { raw: string }).raw)).toEqual([
-      "&nbsp;",
-      "&#160;",
-      "&#x1F600;",
-    ]);
+    const entities = doc.children.filter(isNode("HtmlEntity"));
+    expect(entities.map((e) => e.raw)).toEqual(["&nbsp;", "&#160;", "&#x1F600;"]);
   });
 
   // MediaWiki's `CHAR_REFS_REGEX` reads a name as ASCII letters and digits or
@@ -291,18 +278,14 @@ describe("bare url autolinking (issue #1287)", () => {
     ["!?!.", "!?!."],
   ])("trims trailing terminal punctuation %s off the link", (trail, expected) => {
     const doc = parse(`See http://example.org${trail} end`);
-    // SAFETY: `isTagged("AutoLink")` selected it, and every `AutoLink`-tagged node is an
-    // `AutoLink`.
-    const link = filter(doc, P.isTagged("AutoLink"))[0] as AutoLink;
+    const link = firstNode(filter(doc, isNode("AutoLink")), "AutoLink");
     expect(link.url).toBe("http://example.org");
     expect(serialize(doc)).toBe(`See http://example.org${expected} end`);
   });
 
   it("trims a trailing ) when the url contains no (", () => {
     const doc = parse("(http://example.org)");
-    // SAFETY: `isTagged("AutoLink")` selected it, and every `AutoLink`-tagged node is an
-    // `AutoLink`.
-    const link = filter(doc, P.isTagged("AutoLink"))[0] as AutoLink;
+    const link = firstNode(filter(doc, isNode("AutoLink")), "AutoLink");
     expect(link.url).toBe("http://example.org");
   });
 
@@ -310,43 +293,33 @@ describe("bare url autolinking (issue #1287)", () => {
     // MediaWiki checks for presence of `(` anywhere in the match, not paren
     // balance — both closing parens stay part of the link.
     const doc = parse("(http://en.wikipedia.org/wiki/Foo_(bar))");
-    // SAFETY: `isTagged("AutoLink")` selected it, and every `AutoLink`-tagged node is an
-    // `AutoLink`.
-    const link = filter(doc, P.isTagged("AutoLink"))[0] as AutoLink;
+    const link = firstNode(filter(doc, isNode("AutoLink")), "AutoLink");
     expect(link.url).toBe("http://en.wikipedia.org/wiki/Foo_(bar))");
   });
 
   it("keeps a trailing entity reference whole instead of splitting off its ;", () => {
     const doc = parse("http://example.org?x=1&amp;");
-    // SAFETY: `isTagged("AutoLink")` selected it, and every `AutoLink`-tagged node is an
-    // `AutoLink`.
-    const link = filter(doc, P.isTagged("AutoLink"))[0] as AutoLink;
+    const link = firstNode(filter(doc, isNode("AutoLink")), "AutoLink");
     expect(link.url).toBe("http://example.org?x=1&amp;");
   });
 
   it('stops the url body at whitespace, ], <, > and "', () => {
     expect(only("http://example.org/a b", "AutoLink").url).toBe("http://example.org/a");
     const doc = parse("http://example.org]after");
-    // SAFETY: `isTagged("AutoLink")` selected it, and every `AutoLink`-tagged node is an
-    // `AutoLink`.
-    const link = filter(doc, P.isTagged("AutoLink"))[0] as AutoLink;
+    const link = firstNode(filter(doc, isNode("AutoLink")), "AutoLink");
     expect(link.url).toBe("http://example.org");
   });
 
   it("does not double-link a url already inside bracketed external link syntax", () => {
     const doc = parse("[http://example.org label]");
     expect(filter(doc, P.isTagged("AutoLink"))).toHaveLength(0);
-    // SAFETY: `isTagged("ExternalLink")` matched it, and every `ExternalLink`-tagged node is an
-    // `ExternalLink`.
-    const ext = doc.children.find(P.isTagged("ExternalLink")) as ExternalLink | undefined;
+    const ext = doc.children.find(isNode("ExternalLink"));
     expect(ext?.url).toBe("http://example.org");
   });
 
   it("autolinks a bare url immediately following a bracketed link, unaffected by it", () => {
     const doc = parse("[http://a.org A] http://b.org");
-    // SAFETY: `isTagged("AutoLink")` selected them, and every `AutoLink`-tagged node is an
-    // `AutoLink`.
-    const links = filter(doc, P.isTagged("AutoLink")) as AutoLink[];
+    const links = filter(doc, isNode("AutoLink")).filter(isNode("AutoLink"));
     expect(links.map((l) => l.url)).toEqual(["http://b.org"]);
   });
 
@@ -409,9 +382,7 @@ describe("wikitables (issue #1287)", () => {
     const t = only("{|\n| [[Foo|Bar]]\n|}", "Table");
     const cell = t.rows[0].cells[0];
     expect(cell.attrs).toBeUndefined();
-    // SAFETY: `isTagged("Wikilink")` matched it, and every `Wikilink`-tagged node is a
-    // `Wikilink`.
-    const link = cell.content.find(P.isTagged("Wikilink")) as Wikilink;
+    const link = firstNode(cell.content, "Wikilink");
     expect(text(link.target)).toBe("Foo");
     expect(link.segments.map(text)).toEqual(["Bar"]);
   });
@@ -439,8 +410,7 @@ describe("wikitables (issue #1287)", () => {
     const src = "{|\n| outer\n{|\n| inner\n|}\nmore\n|}";
     const t = only(src, "Table");
     expect(t.rows).toHaveLength(1);
-    // SAFETY: `isTagged("Table")` matched it, and every `Table`-tagged node is a `Table`.
-    const inner = t.rows[0].cells[0].content.find(P.isTagged("Table")) as Table;
+    const inner = firstNode(t.rows[0].cells[0].content, "Table");
     expect(inner).toBeDefined();
     expect(text(inner.rows[0].cells[0].content)).toBe(" inner\n");
   });
@@ -500,8 +470,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
   it("(A) keeps a citation in a cell whole, with and without attributes", () => {
     const bare = table("{|\n| Paris<ref>{{cite web|url=x}}</ref> {{efn|a=b}}\n|}").rows[0].cells[0];
     expect(bare.attrs).toBeUndefined();
-    // SAFETY: `isTagged("Tag")` matched it, and every `Tag`-tagged node is a `Tag`.
-    const ref = bare.content.find(P.isTagged("Tag")) as Tag;
+    const ref = firstNode(bare.content, "Tag");
     expect(ref).toMatchObject({ name: "ref", rawContent: "{{cite web|url=x}}" });
     expect(names(bare.content)).toEqual(["efn"]);
     expect(stripToText(bare.content)).toBe(" Paris \n");

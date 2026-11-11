@@ -38,7 +38,9 @@ const decodeQ42 = (): Wikidata.WikidataItem => {
   // fixture is faithful — `normaliseEntities` does the real validation.
   // SAFETY: the recorded wbgetentities fixture is that response's JSON; the schema is all
   // optional `Unknown` leaves, and `normaliseEntities` validates every value it reads.
-  const entities = Wikidata.normaliseEntities(fixture as Wikidata.WbGetEntitiesResponse);
+  const entities = Wikidata.normaliseEntities(
+    Schema.decodeUnknownSync(Wikidata.WbGetEntitiesResponse)(fixture),
+  );
   const item = entities.Q42;
   if (item === undefined) throw new FixtureEntityMissing({ id: "Q42" });
   return item;
