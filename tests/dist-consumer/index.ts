@@ -122,7 +122,7 @@ assert<
 >();
 const items: Stream.Stream<Wikidata.WikidataItem> = Dumps.onlyEntities(Dumps.entityRecords(bytes));
 assert<Equals<ReturnType<typeof Dumps.fromFile>, Stream.Stream<Uint8Array, Dumps.SourceError>>>();
-assert<Equals<Dumps.PageRef["redirect"], string | null>>();
+assert<Equals<Dumps.PageRef["redirect"], Option.Option<string>>>();
 const articles: Stream.Stream<Dumps.PageRevisionHit> = Dumps.onlyRevisions(
   Dumps.pageRecords(bytes),
 ).pipe(Dumps.skipRedirects);

@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
@@ -209,6 +210,19 @@ describe("tokenizeXml", () => {
 
 // ── The pipeline over the fixture ────────────────────────────────────────
 
+/** The {@link Dumps.PageRef} the reader gives for these values, `null` for an absent one. */
+const pageRef = (
+  title: string | null,
+  ns: number | null,
+  id: number | null,
+  redirect: string | null,
+): Dumps.PageRef => ({
+  title: Option.fromNullOr(title),
+  ns: Option.fromNullOr(ns),
+  id: Option.fromNullOr(id),
+  redirect: Option.fromNullOr(redirect),
+});
+
 describe("pageRecords pipeline", () => {
   it("round-trips page/revision metadata and degrades the malformed revision", async () => {
     const records = await collect(Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))));
@@ -221,24 +235,28 @@ describe("pageRecords pipeline", () => {
 
     const first = hits[0];
     if (first?._tag !== "revision") return expect.unreachable("expected revision");
-    expect(first.page).toEqual({ title: "Douglas Adams", ns: 0, id: 8091, redirect: null });
+    expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091, null));
     expect(first.revision.id).toBe(100);
     expect(first.revision.minor).toBe(true);
-    expect(first.revision.comment).toBe("first version");
-    expect(first.revision.contributor).toEqual({ username: "AxelBoldt", id: 2, ip: null });
-    expect(first.revision.text).toBe("'''Douglas Adams''' < check 1 & 2 > 0");
+    expect(first.revision.comment).toEqual(Option.some("first version"));
+    expect(first.revision.contributor).toEqual(
+      Option.some({ username: Option.some("AxelBoldt"), id: Option.some(2), ip: Option.none() }),
+    );
+    expect(first.revision.text).toEqual(Option.some("'''Douglas Adams''' < check 1 & 2 > 0"));
 
     const second = hits[1];
     if (second?._tag !== "revision") return expect.unreachable("expected revision");
     expect(second.revision.id).toBe(101);
-    expect(second.revision.parentId).toBe(100);
-    expect(second.revision.contributor).toEqual({ username: null, id: null, ip: "10.0.0.1" });
+    expect(second.revision.parentId).toEqual(Option.some(100));
+    expect(second.revision.contributor).toEqual(
+      Option.some({ username: Option.none(), id: Option.none(), ip: Option.some("10.0.0.1") }),
+    );
     expect(second.revision.minor).toBe(false);
 
     const error = errors[0];
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.page).toEqual({ title: "Category:Writers", ns: 14, id: 200, redirect: null });
+    expect(error.page).toEqual(pageRef("Category:Writers", 14, 200, null));
   });
 
   const perByte = (text: string): Stream.Stream<Uint8Array> => {
@@ -264,8 +282,8 @@ describe("pageRecords pipeline", () => {
     expect(chunked).toEqual(whole);
     const hit = whole[0];
     if (hit?._tag !== "revision") return expect.unreachable("expected revision");
-    expect(hit.page.title).toBe("Café 日本語");
-    expect(hit.revision.text).toBe("é 漢 & ok");
+    expect(hit.page.title).toEqual(Option.some("Café 日本語"));
+    expect(hit.revision.text).toEqual(Option.some("é 漢 & ok"));
   });
 
   it("incrementalRecords decodes the same schema", async () => {
@@ -282,7 +300,7 @@ describe("pageRecords pipeline", () => {
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("truncated");
-    expect(error.page).toEqual({ title: "T", ns: 0, id: 1, redirect: null });
+    expect(error.page).toEqual(pageRef("T", 0, 1, null));
   });
 
   it("degrades a revision left unclosed before </page> (not silently dropped)", async () => {
@@ -295,7 +313,7 @@ describe("pageRecords pipeline", () => {
     if (error?._tag !== "error") return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("not closed");
-    expect(error.page).toEqual({ title: "A", ns: 0, id: 1, redirect: null });
+    expect(error.page).toEqual(pageRef("A", 0, 1, null));
   });
 
   it("degrades a revision left unclosed before the next <revision>, keeping the next one", async () => {
@@ -354,10 +372,10 @@ describe("pageRecords pipeline", () => {
       if (hit?._tag !== "revision") return expect.unreachable("expected revision");
       expect(hit.revision).toMatchObject({
         id: 5,
-        model: "wikitext",
-        format: "text/x-wiki",
-        text: "main",
-        sha1: "x",
+        model: Option.some("wikitext"),
+        format: Option.some("text/x-wiki"),
+        text: Option.some("main"),
+        sha1: Option.some("x"),
       });
     });
 
@@ -385,7 +403,7 @@ describe("pageRecords pipeline", () => {
 
     it("reads <redirect title> onto PageRef.redirect, decoded and trimmed", async () => {
       const records = await collect(Dumps.pageRecords(bytesOf(dump)));
-      expect(records.map((r) => r.page?.redirect)).toEqual([
+      expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual([
         'Ada & "Lovelace"',
         null,
         "Single quoted",
@@ -394,14 +412,14 @@ describe("pageRecords pipeline", () => {
         "Gone",
         null,
       ]);
-      expect(records[0]?.page).toEqual({ title: "P1", ns: 0, id: 1, redirect: 'Ada & "Lovelace"' });
+      expect(records[0]?.page).toEqual(pageRef("P1", 0, 1, 'Ada & "Lovelace"'));
     });
 
     it("doesn't carry a redirect over to the next page", async () => {
       const records = await collect(
         Dumps.pageRecords(bytesOf("<mediawiki>" + page(1, '<redirect title="X"/>') + page(2, ""))),
       );
-      expect(records.map((r) => r.page?.redirect)).toEqual(["X", null]);
+      expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual(["X", null]);
     });
 
     it("is chunk-boundary safe", async () => {
@@ -415,23 +433,22 @@ describe("pageRecords pipeline", () => {
       const records = await collect(
         Dumps.pageRecords(bytesOf(page(1, `<redirect title="${long}" />`))),
       );
-      expect(records[0]?.page?.redirect).toBe("x".repeat(4096));
+      expect(Option.getOrNull(records[0]?.page.redirect ?? Option.none())).toBe("x".repeat(4096));
     });
 
     it("skipRedirects drops redirect pages' records, errors included", async () => {
       const records = await collect(Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.skipRedirects));
-      expect(records.map((r) => r.page?.id)).toEqual([2, 4, 5, 7]);
+      expect(records.map((r) => Option.getOrNull(r.page.id))).toEqual([2, 4, 5, 7]);
       const hits = await collect(
         Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.onlyRevisions, Dumps.skipRedirects),
       );
       expect(hits.map((r) => r.revision.id)).toEqual([20, 40, 50, 70]);
     });
-
-    it("skipRedirects keeps a record with no page", async () => {
+    it("skipRedirects keeps an error record on a page that isn't a redirect", async () => {
       const orphan: Dumps.PageRevisionError = {
         _tag: "error",
         reason: "dumps/malformed-revision",
-        page: null,
+        page: pageRef("P", 0, 1, null),
         detail: "revision missing id",
       };
       expect(await collect(Stream.make(orphan).pipe(Dumps.skipRedirects))).toEqual([orphan]);
