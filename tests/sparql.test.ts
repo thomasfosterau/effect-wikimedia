@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
@@ -144,8 +145,8 @@ describe("Sparql.query — recorded fixture, term typing", () => {
     expect(first?.itemLabel).toEqual({
       _tag: "literal",
       value: "Douglas Adams",
-      datatype: null,
-      language: "en",
+      datatype: Option.none(),
+      language: Option.some("en"),
       kind: "monolingualtext",
     });
   });
@@ -154,7 +155,7 @@ describe("Sparql.query — recorded fixture, term typing", () => {
     const { first } = await decodeFixture();
     const dob = asLiteral(first?.dob);
     expect(dob.kind).toBe("time");
-    expect(dob.datatype).toBe("http://www.w3.org/2001/XMLSchema#dateTime");
+    expect(dob.datatype).toEqual(Option.some("http://www.w3.org/2001/XMLSchema#dateTime"));
     expect(asLiteral(first?.height).kind).toBe("quantity");
     // A non-xsd datatype → "other".
     expect(asLiteral(first?.coord).kind).toBe("other");
@@ -164,7 +165,7 @@ describe("Sparql.query — recorded fixture, term typing", () => {
     const { second } = await decodeFixture();
     const label = asLiteral(second?.itemLabel);
     expect(label.kind).toBe("string");
-    expect(label.language).toBeNull();
+    expect(label.language).toEqual(Option.none());
     expect(second?.dob).toBeUndefined();
   });
 });
@@ -174,15 +175,19 @@ describe("Sparql.query — recorded fixture, term typing", () => {
 describe("Sparql.literalKind", () => {
   const xsd = "http://www.w3.org/2001/XMLSchema#";
   it("maps datatype IRIs back toward the Wikibase datavalue vocabulary", () => {
-    expect(Sparql.literalKind(null, "en")).toBe("monolingualtext");
-    expect(Sparql.literalKind(`${xsd}string`, "en")).toBe("monolingualtext");
-    expect(Sparql.literalKind(`${xsd}dateTime`, null)).toBe("time");
-    expect(Sparql.literalKind(`${xsd}date`, null)).toBe("time");
-    expect(Sparql.literalKind(`${xsd}decimal`, null)).toBe("quantity");
-    expect(Sparql.literalKind(`${xsd}integer`, null)).toBe("quantity");
-    expect(Sparql.literalKind(`${xsd}string`, null)).toBe("string");
-    expect(Sparql.literalKind(null, null)).toBe("string");
-    expect(Sparql.literalKind("http://example.com/custom", null)).toBe("other");
+    expect(Sparql.literalKind(Option.none(), Option.some("en"))).toBe("monolingualtext");
+    expect(Sparql.literalKind(Option.some(`${xsd}string`), Option.some("en"))).toBe(
+      "monolingualtext",
+    );
+    expect(Sparql.literalKind(Option.some(`${xsd}dateTime`), Option.none())).toBe("time");
+    expect(Sparql.literalKind(Option.some(`${xsd}date`), Option.none())).toBe("time");
+    expect(Sparql.literalKind(Option.some(`${xsd}decimal`), Option.none())).toBe("quantity");
+    expect(Sparql.literalKind(Option.some(`${xsd}integer`), Option.none())).toBe("quantity");
+    expect(Sparql.literalKind(Option.some(`${xsd}string`), Option.none())).toBe("string");
+    expect(Sparql.literalKind(Option.none(), Option.none())).toBe("string");
+    expect(Sparql.literalKind(Option.some("http://example.com/custom"), Option.none())).toBe(
+      "other",
+    );
   });
 });
 
@@ -192,13 +197,21 @@ describe("Sparql.normaliseTerm", () => {
   it("degrades an unrecognised term type to a typed Unknown member", () => {
     const term = Sparql.normaliseTerm({ type: "triple", value: "<< s p o >>" });
     expect(term._tag).toBe("unknown");
-    expect(term).toMatchObject({ _tag: "unknown", type: "triple" });
+    expect(term).toMatchObject({ _tag: "unknown", type: Option.some("triple") });
   });
 
   it("cuts an unrecognised type at 200 UTF-16 code units (#150)", () => {
     const term = Sparql.normaliseTerm({ type: "z".repeat(20_000) });
-    expect(term).toEqual({ _tag: "unknown", type: "z".repeat(200), value: null });
-    expect(Sparql.normaliseTerm({ type: 5 })).toEqual({ _tag: "unknown", type: null, value: null });
+    expect(term).toEqual({
+      _tag: "unknown",
+      type: Option.some("z".repeat(200)),
+      value: Option.none(),
+    });
+    expect(Sparql.normaliseTerm({ type: 5 })).toEqual({
+      _tag: "unknown",
+      type: Option.none(),
+      value: Option.none(),
+    });
   });
 });
 
@@ -212,12 +225,12 @@ describe("Sparql.query — ASK (#149)", () => {
       layer,
       Sparql.query("ASK { wd:Q42 wdt:P31 wd:Q5 }", { allowUnbounded: true }),
     );
-    expect(results).toEqual({ vars: [], bindings: [], boolean: answer });
+    expect(results).toEqual({ vars: [], bindings: [], boolean: Option.some(answer) });
   });
 
   it("reports no answer for a SELECT, or a boolean that is not one", async () => {
     const { results } = await decodeFixture();
-    expect(results.boolean).toBeNull();
-    expect(Sparql.normaliseResults({ head: {}, boolean: "true" }).boolean).toBeNull();
+    expect(results.boolean).toEqual(Option.none());
+    expect(Sparql.normaliseResults({ head: {}, boolean: "true" }).boolean).toEqual(Option.none());
   });
 });
