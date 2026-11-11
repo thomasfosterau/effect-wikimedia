@@ -30,6 +30,7 @@ import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -146,8 +147,8 @@ describe("WikidataLookup.searchByLabel", () => {
           expect(candidates).toEqual([
             {
               qid: "Q42",
-              label: "Douglas Adams",
-              description: "British writer (1952–2001)",
+              label: Option.some("Douglas Adams"),
+              description: Option.some("British writer (1952–2001)"),
               instanceOf: [],
             },
           ]);
@@ -262,8 +263,8 @@ describe("WikidataLookup.searchByIdentifier", () => {
           expect(candidates).toEqual([
             {
               qid: "Q42",
-              label: "Douglas Adams",
-              description: "British writer",
+              label: Option.some("Douglas Adams"),
+              description: Option.some("British writer"),
               instanceOf: ["Q5"],
             },
           ]);
@@ -324,7 +325,12 @@ describe("WikidataLookup.searchByIdentifier", () => {
       ),
     );
     expect(result).toEqual([
-      { qid: "Q42", label: "Douglas Adams", description: null, instanceOf: [] },
+      {
+        qid: "Q42",
+        label: Option.some("Douglas Adams"),
+        description: Option.none(),
+        instanceOf: [],
+      },
     ]);
   });
 
@@ -514,7 +520,7 @@ describe("WikidataLookup.enrich", () => {
     qid: string,
   ): Promise<WikidataFacts> => {
     const facts = await runTest(enrichEffect(layer, qid));
-    return facts ?? expect.unreachable(`expected facts for ${qid}`);
+    return Option.getOrElse(facts, () => expect.unreachable(`expected facts for ${qid}`));
   };
 
   it("returns the item fact first, then every curated authority as an Identifier fact", async () => {
@@ -815,9 +821,9 @@ describe("WikidataLookup.enrich", () => {
     });
     const facts = await runTest(enrichEffect(layer, "Q1"));
     // Only the QID self-link survives.
-    expect(facts?.facts).toEqual([
-      { _tag: "Item", qid: "Q1", iri: "http://www.wikidata.org/entity/Q1" },
-    ]);
+    expect(Option.map(facts, (f) => f.facts)).toEqual(
+      Option.some([{ _tag: "Item", qid: "Q1", iri: "http://www.wikidata.org/entity/Q1" }]),
+    );
   });
 
   it("drops an external-id value that would escape its authority's IRI path", async () => {
@@ -854,14 +860,14 @@ describe("WikidataLookup.enrich", () => {
     ]);
   });
 
-  it("returns null when the item is absent upstream", async () => {
+  it("succeeds with None when the item is absent upstream", async () => {
     const { layer } = stubClient({
       "action=wbgetentities": { body: { entities: {} } },
     });
-    expect(await runTest(enrichEffect(layer, "Q9999999"))).toBeNull();
+    expect(await runTest(enrichEffect(layer, "Q9999999"))).toEqual(Option.none());
   });
 
-  it("returns null for Wikidata's `missing` sentinel (a non-existent QID)", async () => {
+  it("succeeds with None for Wikidata's `missing` sentinel (a non-existent QID)", async () => {
     // `wbgetentities` returns a non-existent item keyed under its QID as
     // `{ id, missing: "" }` — the key is present but the item does not exist.
     const { layer } = stubClient({
@@ -869,7 +875,7 @@ describe("WikidataLookup.enrich", () => {
         body: { entities: { Q9999999: { id: "Q9999999", missing: "" } } },
       },
     });
-    expect(await runTest(enrichEffect(layer, "Q9999999"))).toBeNull();
+    expect(await runTest(enrichEffect(layer, "Q9999999"))).toEqual(Option.none());
   });
 
   it("rejects a non-QID before any request", async () => {

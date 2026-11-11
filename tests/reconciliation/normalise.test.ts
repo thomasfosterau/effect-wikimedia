@@ -12,6 +12,7 @@
  */
 
 import * as P from "effect/Predicate";
+import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type * as Wikidata from "../../src/wikidata.ts";
 import { normaliseCommonsImage } from "../../src/reconciliation/candidate.ts";
@@ -22,8 +23,10 @@ vi.mock(import("../../src/reconciliation/candidate.ts"), async (importOriginal) 
   return {
     ...original,
     normaliseCommonsImage: vi.fn<typeof original.normaliseCommonsImage>((raw: unknown) => {
-      const image = original.normaliseCommonsImage(raw);
-      return image === null ? null : { ...image, helperOnly: "leaked" };
+      return Option.map(original.normaliseCommonsImage(raw), (image) => ({
+        ...image,
+        helperOnly: "leaked",
+      }));
     }),
   };
 });

@@ -13,6 +13,7 @@
  */
 
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import type * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -28,9 +29,9 @@ export interface WikidataCandidate {
   /** The Wikidata item id (`Q<digits>`), validated and safe to persist. */
   readonly qid: string;
   /** English display label, if the item carries one. */
-  readonly label: string | null;
+  readonly label: Option.Option<string>;
   /** Short English description, used for disambiguation, if present. */
-  readonly description: string | null;
+  readonly description: Option.Option<string>;
   /**
    * `instance of` (P31) target QIDs, where cheaply available — these help
    * a reviewer tell a person from a film from a concept.
@@ -67,51 +68,51 @@ export const MAX_LABEL_QUERY_LENGTH = 300;
 /**
  * Cleans an untrusted free-text value for a reconciliation candidate: trims
  * it, collapses each internal whitespace run to one space, and clamps it to
- * {@link MAX_CANDIDATE_TEXT_LENGTH} (2000) code units. Returns `null` for a
+ * {@link MAX_CANDIDATE_TEXT_LENGTH} (2000) code units. Returns `None` for a
  * non-string or an empty / whitespace-only string, so callers can map
  * "nothing usable" to an absent field rather than an empty string.
  *
  * Differs from `Core.sanitiseText`, which only trims, keeps internal
  * whitespace and clamps to `Core.MAX_TEXT_FIELD_LENGTH` (4000).
  */
-export function sanitiseCandidateText(value: unknown): string | null {
+export function sanitiseCandidateText(value: unknown): Option.Option<string> {
   return collapseAndClamp(value, MAX_CANDIDATE_TEXT_LENGTH);
 }
 
 /**
  * Trims `value`, collapses each internal whitespace run to one space and
- * clamps it to `max` code units; `null` for a non-string or a value with
+ * clamps it to `max` code units; `None` for a non-string or a value with
  * nothing left.
  */
-function collapseAndClamp(value: unknown, max: number): string | null {
-  if (!P.isString(value)) return null;
+function collapseAndClamp(value: unknown, max: number): Option.Option<string> {
+  if (!P.isString(value)) return Option.none();
   const collapsed = value.replace(/\s+/g, " ").trim();
-  return Str.isEmpty(collapsed) ? null : collapsed.slice(0, max);
+  return Str.isEmpty(collapsed) ? Option.none() : Option.some(collapsed.slice(0, max));
 }
 
 /**
  * Trims an untrusted short token (an external-id value, a Commons filename)
- * and returns it, or `null` for a non-string, an empty value, one over 256
+ * and returns it, or `None` for a non-string, an empty value, one over 256
  * code units, or one holding an ASCII control character. A codepoint check
  * (not a literal-control-char regex) keeps this source file free of control
  * bytes.
  */
-function trimmedToken(raw: unknown): string | null {
-  if (!P.isString(raw)) return null;
+function trimmedToken(raw: unknown): Option.Option<string> {
+  if (!P.isString(raw)) return Option.none();
   const trimmed = raw.trim();
-  if (Str.isEmpty(trimmed) || trimmed.length > 256) return null;
+  if (Str.isEmpty(trimmed) || trimmed.length > 256) return Option.none();
   const hasControl = Arr.some(Arr.fromIterable(trimmed), (char) => {
     const code = char.charCodeAt(0);
     return code < 0x20 || code === 0x7f;
   });
-  return hasControl ? null : trimmed;
+  return hasControl ? Option.none() : Option.some(trimmed);
 }
 
 // ── Input validation (SSRF / injection defence) ───────────────────────
 
 /**
  * Normalises an untrusted label-search string into a value safe to place
- * in the Wikidata query string, or `null` if there is nothing to search.
+ * in the Wikidata query string, or `None` if there is nothing to search.
  *
  * The query is sent as a URL **query parameter** (not a path segment) and
  * is percent-encoded by `URLSearchParams` before transmission, so this is
@@ -119,13 +120,13 @@ function trimmedToken(raw: unknown): string | null {
  * we still trim, collapse whitespace, and clamp so a megabyte of caller
  * text never reaches the request builder.
  */
-export function normaliseLabelQuery(raw: string): string | null {
+export function normaliseLabelQuery(raw: string): Option.Option<string> {
   return collapseAndClamp(raw, MAX_LABEL_QUERY_LENGTH);
 }
 
 /**
  * Validates a Wikidata item id (`Q` followed by digits) and upper-cases
- * the leading letter. Returns `null` for anything else.
+ * the leading letter. Returns `None` for anything else.
  *
  * The strict character class is the SSRF / injection guard: a QID echoed
  * back by an upstream response, or supplied by a caller, may be slotted
@@ -133,27 +134,25 @@ export function normaliseLabelQuery(raw: string): string | null {
  * `Q` plus digits — never a slash, dot, or anything that could escape its
  * intended position.
  */
-export function normaliseQid(raw: string): string | null {
-  if (!P.isString(raw)) return null;
+export function normaliseQid(raw: string): Option.Option<string> {
+  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
-  if (/^Q[1-9]\d{0,18}$/.test(cleaned)) return cleaned;
-  return null;
+  return /^Q[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned) : Option.none();
 }
 
 /**
  * Validates a Wikidata property id (`P` followed by digits). Used to key
  * an identifier lookup (e.g. `P214` = VIAF, `P244` = LCCN). Returns
- * `null` for anything else.
+ * `None` for anything else.
  *
  * Like {@link normaliseQid}, the strict class is the injection guard: the
  * property id is interpolated into the `haswbstatement:` search clause, so
  * it must be exclusively `P` plus digits.
  */
-export function normalisePropertyId(raw: string): string | null {
-  if (!P.isString(raw)) return null;
+export function normalisePropertyId(raw: string): Option.Option<string> {
+  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
-  if (/^P[1-9]\d{0,18}$/.test(cleaned)) return cleaned;
-  return null;
+  return /^P[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned) : Option.none();
 }
 
 /**
@@ -169,14 +168,11 @@ export function normalisePropertyId(raw: string): string | null {
  * the belt to that braces, refusing a hostile value before the request is
  * even built.
  */
-export function normaliseExternalIdValue(raw: string): string | null {
-  // Rejects ASCII control characters defensively.
-  const trimmed = trimmedToken(raw);
-  if (trimmed === null) return null;
-  // `haswbstatement` uses `|` to OR terms; refuse it so a value can never
-  // smuggle a second statement clause into the search.
-  if (!/^[A-Za-z0-9 ._:/-]+$/.test(trimmed)) return null;
-  return trimmed;
+export function normaliseExternalIdValue(raw: string): Option.Option<string> {
+  // Rejects ASCII control characters defensively. `haswbstatement` uses `|`
+  // to OR terms; refuse it so a value can never smuggle a second statement
+  // clause into the search.
+  return Option.filter(trimmedToken(raw), (token) => /^[A-Za-z0-9 ._:/-]+$/.test(token));
 }
 
 // ── Enrich: the fact union + extraction helpers (website#613) ──────────
@@ -325,7 +321,7 @@ export interface ExternalIdAuthority {
    * value is percent-encoded into a single path segment of a fixed host,
    * so the result never points outside that authority's identifier path.
    */
-  readonly iri: (value: string) => string | null;
+  readonly iri: (value: string) => Option.Option<string>;
 }
 
 /**
@@ -341,7 +337,9 @@ const externalIdAuthority = (
 ): ExternalIdAuthority => ({
   authority,
   iri: (value) =>
-    P.isString(value) && format.test(value) ? template(encodeURIComponent(canonical(value))) : null,
+    P.isString(value) && format.test(value)
+      ? Option.some(template(encodeURIComponent(canonical(value))))
+      : Option.none(),
 });
 
 /**
@@ -352,7 +350,7 @@ const externalIdAuthority = (
  * Deliberately a closed set: only well-known authorities over known hosts,
  * so an enriched `sameAs` IRI is always a fixed template plus one
  * percent-encoded path segment — never an arbitrary host or path from the
- * untrusted response. Each `iri` returns `null` for a value outside the
+ * untrusted response. Each `iri` returns `None` for a value outside the
  * authority's identifier format, which also refuses `.`, `..` and `/`.
  * Each format is anchored at both ends and is at least as permissive as
  * the property's Wikidata "format as a regular expression" (P1793)
@@ -419,16 +417,16 @@ export const IMAGE_PROPERTIES: readonly string[] = ["P18"];
 /**
  * Validates and trims a Wikidata time value's `time` string (e.g.
  * `"+1879-03-14T00:00:00Z"`). Returns the value with the leading `+`
- * dropped, or `null` for anything that isn't a Wikidata-shaped timestamp.
+ * dropped, or `None` for anything that isn't a Wikidata-shaped timestamp.
  * The strict pattern is the guard: a stored date is surfaced downstream,
  * so it must be exclusively a sign, digits, and the fixed separators.
  */
-export function normaliseTimeValue(raw: unknown): string | null {
-  if (!P.isString(raw)) return null;
+export function normaliseTimeValue(raw: unknown): Option.Option<string> {
+  if (!P.isString(raw)) return Option.none();
   const trimmed = raw.trim();
   // Wikidata times are `±YYYYYYYYYYY-MM-DDThh:mm:ssZ` (year up to 16 digits).
-  if (!/^[+-]\d{1,16}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(trimmed)) return null;
-  return trimmed.replace(/^\+/, "");
+  if (!/^[+-]\d{1,16}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(trimmed)) return Option.none();
+  return Option.some(trimmed.replace(/^\+/, ""));
 }
 
 /**
@@ -439,25 +437,31 @@ export function normaliseTimeValue(raw: unknown): string | null {
  * relative-path titles (`.`, `..`, a leading `./` or `../`, a `/./` or
  * `/../` anywhere, a trailing `/.` or `/..`), which `new URL` would resolve
  * into a different path; the filename is percent-encoded into the fixed
- * Commons host. Returns `null` for unusable input, where `Commons.filePathUrl`
- * gives `None`. The returned `filename` is the trimmed claim as spelled (the
+ * Commons host. Returns `None` for unusable input, as `Commons.filePathUrl`
+ * does. The returned `filename` is the trimmed claim as spelled (the
  * {@link ImageFact} `filename`) and `iri` is its `Special:FilePath` URL;
  * both are trusted.
  */
-export function normaliseCommonsImage(raw: unknown): {
+export function normaliseCommonsImage(raw: unknown): Option.Option<{
   /** The trimmed claim value as spelled: no `File:` prefix stripped, spaces not turned into underscores. */
   readonly filename: string;
   /** `https://commons.wikimedia.org/wiki/Special:FilePath/` plus `filename` percent-encoded as one path segment (a space becomes `%20`). */
   readonly iri: string;
-} | null {
+}> {
   // Control characters are checked on the raw string: `normaliseTitle`
   // collapses whitespace (tab, newline, CR, ...) to `_` before its own
   // control-character check, so it can't be relied on to reject them here.
-  const trimmed = trimmedToken(raw);
-  if (trimmed === null || /[|#?]/.test(trimmed)) return null;
-  // `normaliseTitle` adds the illegal characters and relative-path forms; its whitespace-collapsed
-  // result is discarded so `filename` keeps the claim's own spelling.
-  if (normaliseTitle(trimmed) === null) return null;
-  const iri = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`;
-  return { filename: trimmed, iri };
+  // `normaliseTitle` adds the illegal characters and relative-path forms; its
+  // whitespace-collapsed result is discarded so `filename` keeps the claim's
+  // own spelling.
+  return Option.map(
+    Option.filter(
+      trimmedToken(raw),
+      (trimmed) => !/[|#?]/.test(trimmed) && normaliseTitle(trimmed) !== null,
+    ),
+    (trimmed) => ({
+      filename: trimmed,
+      iri: `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}`,
+    }),
+  );
 }

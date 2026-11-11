@@ -9,6 +9,7 @@
  */
 
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Str from "effect/String";
@@ -30,26 +31,26 @@ import { Core, Reconciliation } from "../../src/index.ts";
 
 describe("normaliseLabelQuery", () => {
   it("trims and collapses internal whitespace", () => {
-    expect(normaliseLabelQuery("  Douglas   Adams \n")).toBe("Douglas Adams");
+    expect(Option.getOrNull(normaliseLabelQuery("  Douglas   Adams \n"))).toBe("Douglas Adams");
   });
 
   it("returns null for whitespace-only or non-string input", () => {
-    expect(normaliseLabelQuery("   ")).toBeNull();
+    expect(Option.getOrNull(normaliseLabelQuery("   "))).toBeNull();
     // SAFETY: deliberately ill-typed — a JS caller can pass anything, and
     // the validator re-checks at runtime.
-    expect(normaliseLabelQuery(undefined as never)).toBeNull();
+    expect(Option.getOrNull(normaliseLabelQuery(undefined as never))).toBeNull();
   });
 
   it("clamps an over-long query to the max length", () => {
-    const result = normaliseLabelQuery("x".repeat(MAX_LABEL_QUERY_LENGTH + 100));
+    const result = Option.getOrNull(normaliseLabelQuery("x".repeat(MAX_LABEL_QUERY_LENGTH + 100)));
     expect(result?.length).toBe(MAX_LABEL_QUERY_LENGTH);
   });
 });
 
 describe("normaliseQid", () => {
   it("accepts a well-formed QID and upper-cases the prefix", () => {
-    expect(normaliseQid("q42")).toBe("Q42");
-    expect(normaliseQid("  Q12345  ")).toBe("Q12345");
+    expect(Option.getOrNull(normaliseQid("q42"))).toBe("Q42");
+    expect(Option.getOrNull(normaliseQid("  Q12345  "))).toBe("Q12345");
   });
 
   it.each([
@@ -61,13 +62,13 @@ describe("normaliseQid", () => {
     ["a slash", "Q42/foo"],
     ["empty", ""],
   ])("rejects %s", (_label, value) => {
-    expect(normaliseQid(value)).toBeNull();
+    expect(Option.getOrNull(normaliseQid(value))).toBeNull();
   });
 });
 
 describe("normalisePropertyId", () => {
   it("accepts a well-formed property id, upper-cased", () => {
-    expect(normalisePropertyId("p214")).toBe("P214");
+    expect(Option.getOrNull(normalisePropertyId("p214"))).toBe("P214");
   });
 
   it.each([
@@ -76,14 +77,16 @@ describe("normalisePropertyId", () => {
     ["a leading zero", "P0214"],
     ["a pipe (term injection)", "P214|P31"],
   ])("rejects %s", (_label, value) => {
-    expect(normalisePropertyId(value)).toBeNull();
+    expect(Option.getOrNull(normalisePropertyId(value))).toBeNull();
   });
 });
 
 describe("normaliseExternalIdValue", () => {
   it("accepts a typical identifier value with separators", () => {
-    expect(normaliseExternalIdValue("0000-0002-1825-0097")).toBe("0000-0002-1825-0097");
-    expect(normaliseExternalIdValue("113230702")).toBe("113230702");
+    expect(Option.getOrNull(normaliseExternalIdValue("0000-0002-1825-0097"))).toBe(
+      "0000-0002-1825-0097",
+    );
+    expect(Option.getOrNull(normaliseExternalIdValue("113230702"))).toBe("113230702");
   });
 
   it.each([
@@ -92,23 +95,25 @@ describe("normaliseExternalIdValue", () => {
     ["empty", ""],
     ["an over-long value", "a".repeat(300)],
   ])("rejects %s", (_label, value) => {
-    expect(normaliseExternalIdValue(value)).toBeNull();
+    expect(Option.getOrNull(normaliseExternalIdValue(value))).toBeNull();
   });
 });
 
 describe("sanitiseCandidateText", () => {
   it("trims and collapses internal whitespace", () => {
-    expect(sanitiseCandidateText("  hello   world \n")).toBe("hello world");
+    expect(Option.getOrNull(sanitiseCandidateText("  hello   world \n"))).toBe("hello world");
   });
 
   it("returns null for whitespace-only or non-string input", () => {
-    expect(sanitiseCandidateText("   ")).toBeNull();
-    expect(sanitiseCandidateText(undefined)).toBeNull();
-    expect(sanitiseCandidateText(42)).toBeNull();
+    expect(Option.getOrNull(sanitiseCandidateText("   "))).toBeNull();
+    expect(Option.getOrNull(sanitiseCandidateText(undefined))).toBeNull();
+    expect(Option.getOrNull(sanitiseCandidateText(42))).toBeNull();
   });
 
   it("clamps an over-long value to the max field length", () => {
-    const result = sanitiseCandidateText("x".repeat(MAX_CANDIDATE_TEXT_LENGTH + 500));
+    const result = Option.getOrNull(
+      sanitiseCandidateText("x".repeat(MAX_CANDIDATE_TEXT_LENGTH + 500)),
+    );
     expect(result?.length).toBe(MAX_CANDIDATE_TEXT_LENGTH);
   });
 });
@@ -128,7 +133,7 @@ describe("candidate text names on the barrel", () => {
   it("keeps Core's looser bound and trim-only behaviour distinct", () => {
     expect(Core.MAX_TEXT_FIELD_LENGTH).toBe(4000);
     expect(Core.sanitiseText("  a   b ")).toBe("a   b");
-    expect(Reconciliation.sanitiseCandidateText("  a   b ")).toBe("a b");
+    expect(Option.getOrNull(Reconciliation.sanitiseCandidateText("  a   b "))).toBe("a b");
   });
 });
 
@@ -145,18 +150,22 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
   // template change anywhere in the allowlist fails a test, not just a
   // coverage gate.
   it("builds each authority's canonical IRI from its id + value", () => {
-    expect(EXTERNAL_ID_AUTHORITIES.P214?.iri("113230702")).toBe("https://viaf.org/viaf/113230702");
-    expect(EXTERNAL_ID_AUTHORITIES.P213?.iri("0000000121032683")).toBe(
-      "https://isni.org/isni/0000000121032683",
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P214?.iri("113230702") ?? Option.none())).toBe(
+      "https://viaf.org/viaf/113230702",
     );
-    expect(EXTERNAL_ID_AUTHORITIES.P496?.iri("0000-0002-1825-0097")).toBe(
-      "https://orcid.org/0000-0002-1825-0097",
-    );
-    expect(EXTERNAL_ID_AUTHORITIES.P244?.iri("n79021164")).toBe(
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P213?.iri("0000000121032683") ?? Option.none()),
+    ).toBe("https://isni.org/isni/0000000121032683");
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P496?.iri("0000-0002-1825-0097") ?? Option.none()),
+    ).toBe("https://orcid.org/0000-0002-1825-0097");
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P244?.iri("n79021164") ?? Option.none())).toBe(
       "https://id.loc.gov/authorities/names/n79021164",
     );
-    expect(EXTERNAL_ID_AUTHORITIES.P227?.iri("118540238")).toBe("https://d-nb.info/gnd/118540238");
-    expect(EXTERNAL_ID_AUTHORITIES.P268?.iri("119008064")).toBe(
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P227?.iri("118540238") ?? Option.none())).toBe(
+      "https://d-nb.info/gnd/118540238",
+    );
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P268?.iri("119008064") ?? Option.none())).toBe(
       "https://catalogue.bnf.fr/ark:/12148/cb119008064",
     );
   });
@@ -166,24 +175,30 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     // into the compact IRI), an ORCID and an ISNI with an `X` check
     // character, a ten-digit LCCN, GND's hyphenated subject/corporate forms
     // and a BnF id with a letter check character.
-    expect(EXTERNAL_ID_AUTHORITIES.P214?.iri("8159156797922315270004")).toBe(
-      "https://viaf.org/viaf/8159156797922315270004",
+    expect(
+      Option.getOrNull(
+        EXTERNAL_ID_AUTHORITIES.P214?.iri("8159156797922315270004") ?? Option.none(),
+      ),
+    ).toBe("https://viaf.org/viaf/8159156797922315270004");
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P213?.iri("0000 0001 2103 2683") ?? Option.none()),
+    ).toBe("https://isni.org/isni/0000000121032683");
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P213?.iri("000000012146438X") ?? Option.none()),
+    ).toBe("https://isni.org/isni/000000012146438X");
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P496?.iri("0000-0002-1694-233X") ?? Option.none()),
+    ).toBe("https://orcid.org/0000-0002-1694-233X");
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P244?.iri("no2010123456") ?? Option.none()),
+    ).toBe("https://id.loc.gov/authorities/names/no2010123456");
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P227?.iri("4015701-7") ?? Option.none())).toBe(
+      "https://d-nb.info/gnd/4015701-7",
     );
-    expect(EXTERNAL_ID_AUTHORITIES.P213?.iri("0000 0001 2103 2683")).toBe(
-      "https://isni.org/isni/0000000121032683",
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P227?.iri("2028309-X") ?? Option.none())).toBe(
+      "https://d-nb.info/gnd/2028309-X",
     );
-    expect(EXTERNAL_ID_AUTHORITIES.P213?.iri("000000012146438X")).toBe(
-      "https://isni.org/isni/000000012146438X",
-    );
-    expect(EXTERNAL_ID_AUTHORITIES.P496?.iri("0000-0002-1694-233X")).toBe(
-      "https://orcid.org/0000-0002-1694-233X",
-    );
-    expect(EXTERNAL_ID_AUTHORITIES.P244?.iri("no2010123456")).toBe(
-      "https://id.loc.gov/authorities/names/no2010123456",
-    );
-    expect(EXTERNAL_ID_AUTHORITIES.P227?.iri("4015701-7")).toBe("https://d-nb.info/gnd/4015701-7");
-    expect(EXTERNAL_ID_AUTHORITIES.P227?.iri("2028309-X")).toBe("https://d-nb.info/gnd/2028309-X");
-    expect(EXTERNAL_ID_AUTHORITIES.P268?.iri("11907966z")).toBe(
+    expect(Option.getOrNull(EXTERNAL_ID_AUTHORITIES.P268?.iri("11907966z") ?? Option.none())).toBe(
       "https://catalogue.bnf.fr/ark:/12148/cb11907966z",
     );
   });
@@ -220,7 +235,7 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     "%s refuses every relative-path value",
     (_property, scheme) => {
       expect(Arr.map(relativePathValues, scheme.iri)).toEqual(
-        Arr.map(relativePathValues, () => null),
+        Arr.map(relativePathValues, () => Option.none()),
       );
     },
   );
@@ -239,7 +254,9 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     ["P268", "119008064a"],
     ["P268", "cb119008064"],
   ])("%s refuses %j, which is outside its identifier format", (property, value) => {
-    expect(EXTERNAL_ID_AUTHORITIES[property]?.iri(value)).toBeNull();
+    expect(
+      Option.getOrNull(EXTERNAL_ID_AUTHORITIES[property]?.iri(value) ?? Option.none()),
+    ).toBeNull();
   });
 
   it("keeps every built IRI inside the authority's identifier path", () => {
@@ -253,7 +270,7 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     ]);
     expect(R.keys(valid)).toEqual(R.keys(EXTERNAL_ID_AUTHORITIES));
     Arr.forEach(R.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) => {
-      const iri = scheme.iri(valid[property] ?? "");
+      const iri = Option.getOrNull(scheme.iri(valid[property] ?? ""));
       expect(iri, property).toEqual(expect.any(String));
       // Resolving the IRI must not move it: no dot segment, no extra `/`.
       expect(new URL(iri ?? "").href, property).toBe(iri);
@@ -272,20 +289,24 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
 
 describe("normaliseTimeValue", () => {
   it("accepts a Wikidata timestamp and drops the leading +", () => {
-    expect(normaliseTimeValue("+1952-03-11T00:00:00Z")).toBe("1952-03-11T00:00:00Z");
-    expect(normaliseTimeValue("-0044-03-15T00:00:00Z")).toBe("-0044-03-15T00:00:00Z");
+    expect(Option.getOrNull(normaliseTimeValue("+1952-03-11T00:00:00Z"))).toBe(
+      "1952-03-11T00:00:00Z",
+    );
+    expect(Option.getOrNull(normaliseTimeValue("-0044-03-15T00:00:00Z"))).toBe(
+      "-0044-03-15T00:00:00Z",
+    );
   });
 
   it("rejects anything that isn't a Wikidata-shaped timestamp", () => {
-    expect(normaliseTimeValue("yesterday")).toBeNull();
-    expect(normaliseTimeValue("1952-03-11")).toBeNull();
-    expect(normaliseTimeValue(42)).toBeNull();
+    expect(Option.getOrNull(normaliseTimeValue("yesterday"))).toBeNull();
+    expect(Option.getOrNull(normaliseTimeValue("1952-03-11"))).toBeNull();
+    expect(Option.getOrNull(normaliseTimeValue(42))).toBeNull();
   });
 });
 
 describe("normaliseCommonsImage", () => {
   it("builds the Special:FilePath URL for a Commons filename", () => {
-    expect(normaliseCommonsImage("Douglas adams portrait.jpg")).toEqual({
+    expect(Option.getOrNull(normaliseCommonsImage("Douglas adams portrait.jpg"))).toEqual({
       filename: "Douglas adams portrait.jpg",
       iri: "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait.jpg",
     });
@@ -294,17 +315,17 @@ describe("normaliseCommonsImage", () => {
   it("keeps a File: prefix as the claim spells it, unlike Commons.filePathUrl", () => {
     // Wikibase `commonsMedia` values carry no prefix, so `ImageFact.filename`
     // has none in practice; this helper doesn't strip one if it appears.
-    expect(normaliseCommonsImage("File:Foo.jpg")).toEqual({
+    expect(Option.getOrNull(normaliseCommonsImage("File:Foo.jpg"))).toEqual({
       filename: "File:Foo.jpg",
       iri: "https://commons.wikimedia.org/wiki/Special:FilePath/File%3AFoo.jpg",
     });
   });
 
   it("rejects path-breaking characters and empty / non-string input", () => {
-    expect(normaliseCommonsImage("evil#name.jpg")).toBeNull();
-    expect(normaliseCommonsImage("a?b.jpg")).toBeNull();
-    expect(normaliseCommonsImage("")).toBeNull();
-    expect(normaliseCommonsImage(null)).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage("evil#name.jpg"))).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage("a?b.jpg"))).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage(""))).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage(null))).toBeNull();
   });
 
   it.each([
@@ -316,7 +337,7 @@ describe("normaliseCommonsImage", () => {
     "Foo\u0000Bar.jpg",
     "Foo\u007fBar.jpg",
   ])("rejects the control character in %j, including whitespace ones", (filename) => {
-    expect(normaliseCommonsImage(filename)).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage(filename))).toBeNull();
   });
 
   it.each([
@@ -332,24 +353,24 @@ describe("normaliseCommonsImage", () => {
   ])(
     "rejects MediaWiki's relative-path filename %j, which new URL would resolve away",
     (filename) => {
-      expect(normaliseCommonsImage(filename)).toBeNull();
+      expect(Option.getOrNull(normaliseCommonsImage(filename))).toBeNull();
     },
   );
 
   it("keeps a filename that merely contains dots", () => {
-    expect(normaliseCommonsImage("Mr. Smith.jpg")).toEqual({
+    expect(Option.getOrNull(normaliseCommonsImage("Mr. Smith.jpg"))).toEqual({
       filename: "Mr. Smith.jpg",
       iri: "https://commons.wikimedia.org/wiki/Special:FilePath/Mr.%20Smith.jpg",
     });
-    expect(normaliseCommonsImage("...")?.iri).toBe(
+    expect(Option.getOrNull(normaliseCommonsImage("..."))?.iri).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/...",
     );
   });
 
   it("rejects a lone UTF-16 surrogate and keeps a valid surrogate pair", () => {
-    expect(normaliseCommonsImage("Foo\uD800Bar.jpg")).toBeNull();
-    expect(normaliseCommonsImage("Foo\uDC00Bar.jpg")).toBeNull();
-    expect(normaliseCommonsImage("Smile \u{1F600}.jpg")?.iri).toBe(
+    expect(Option.getOrNull(normaliseCommonsImage("Foo\uD800Bar.jpg"))).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage("Foo\uDC00Bar.jpg"))).toBeNull();
+    expect(Option.getOrNull(normaliseCommonsImage("Smile \u{1F600}.jpg"))?.iri).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Smile%20%F0%9F%98%80.jpg",
     );
   });
