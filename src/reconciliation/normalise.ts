@@ -14,6 +14,7 @@
  */
 
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Result from "effect/Result";
@@ -52,16 +53,14 @@ import {
  * always empty.
  */
 export function hitToCandidate(hit: Wikidata.SearchHit): readonly WikidataCandidate[] {
-  const qid = normaliseQid(hit.id);
-  if (qid === null) return [];
-  return [
-    {
+  return Option.toArray(
+    Option.map(normaliseQid(hit.id), (qid) => ({
       qid,
       label: sanitiseCandidateText(hit.label),
       description: sanitiseCandidateText(hit.description),
       instanceOf: [],
-    },
-  ];
+    })),
+  );
 }
 
 // ── list=search (identifier search) ────────────────────────────────────
@@ -79,9 +78,9 @@ export function dedupedQids(hits: readonly Action.SearchResult[]): readonly stri
   );
 }
 
-/** `Result.succeed` for a validated value, `Result.failVoid` for a rejected (`null`) one. */
-function present<A>(value: A | null): Result.Result<A, void> {
-  return value === null ? Result.failVoid : Result.succeed(value);
+/** `Result.succeed` for a validated value, `Result.failVoid` for a rejected (`None`) one. */
+function present<A>(value: Option.Option<A>): Result.Result<A, void> {
+  return Option.match(value, { onNone: () => Result.failVoid, onSome: Result.succeed });
 }
 
 /** The validated `wikibase-entityid` targets of a P31 (`instance of`) statement list, capped. */
@@ -109,7 +108,7 @@ export function itemToCandidate(
   if (item === undefined) return [];
   return [
     {
-      qid: normaliseQid(item.id) ?? qid,
+      qid: Option.getOrElse(normaliseQid(item.id), () => qid),
       label: sanitiseCandidateText(item.labels[language]),
       description: sanitiseCandidateText(item.descriptions[language]),
       instanceOf: instanceOfQids(item),
@@ -142,17 +141,17 @@ function identifierFacts(item: Wikidata.WikidataItem): IdentifierFact[] {
   const facts = Arr.flatMap(R.toEntries(EXTERNAL_ID_AUTHORITIES), ([property, scheme]) =>
     Arr.filterMap(statementValues(item, property), (value): Result.Result<IdentifierFact, void> => {
       if (!P.isTagged(value, "external-id")) return Result.failVoid;
-      const validated = normaliseExternalIdValue(value.value);
-      const iri = validated === null ? null : scheme.iri(validated);
-      return validated === null || iri === null
-        ? Result.failVoid
-        : Result.succeed({
+      return present(
+        Option.flatMap(normaliseExternalIdValue(value.value), (validated) =>
+          Option.map(scheme.iri(validated), (iri): IdentifierFact => ({
             _tag: "Identifier",
             property,
             authority: scheme.authority,
             value: validated,
             iri,
-          });
+          })),
+        ),
+      );
     }),
   );
   return Arr.take(facts, MAX_SAME_AS);
@@ -189,17 +188,16 @@ function dateFacts(item: Wikidata.WikidataItem): DateFact[] {
   const facts = Arr.flatMap(R.toEntries(DATE_PROPERTIES), ([property, label]) =>
     Arr.filterMap(statementValues(item, property), (value): Result.Result<DateFact, void> => {
       if (!P.isTagged(value, "time")) return Result.failVoid;
-      const time = normaliseTimeValue(value.time);
-      return time === null
-        ? Result.failVoid
-        : Result.succeed({
-            _tag: "Date",
-            property,
-            label,
-            time,
-            precision: timePrecision(value.precision),
-            calendar: timeCalendar(value.calendarModel),
-          });
+      return present(
+        Option.map(normaliseTimeValue(value.time), (time): DateFact => ({
+          _tag: "Date",
+          property,
+          label,
+          time,
+          precision: timePrecision(value.precision),
+          calendar: timeCalendar(value.calendarModel),
+        })),
+      );
     }),
   );
   return Arr.take(facts, MAX_DATES);
@@ -217,12 +215,16 @@ function imageFacts(item: Wikidata.WikidataItem): ImageFact[] {
   const facts = Arr.flatMap(IMAGE_PROPERTIES, (property) =>
     Arr.filterMap(statementValues(item, property), (value): Result.Result<ImageFact, void> => {
       if (!P.isTagged(value, "string")) return Result.failVoid;
-      const image = normaliseCommonsImage(value.value);
       // Fields spelled out, not spread: a field the helper gains must not
       // reach `ImageFact` at runtime, where no type check would see it.
-      return image === null
-        ? Result.failVoid
-        : Result.succeed({ _tag: "Image", property, filename: image.filename, iri: image.iri });
+      return present(
+        Option.map(normaliseCommonsImage(value.value), (image): ImageFact => ({
+          _tag: "Image",
+          property,
+          filename: image.filename,
+          iri: image.iri,
+        })),
+      );
     }),
   );
   return Arr.take(facts, MAX_IMAGES);

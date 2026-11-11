@@ -34,6 +34,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   MAX_CANDIDATES,
@@ -125,7 +126,7 @@ export class WikidataLookup extends Context.Service<
      * Returns `null` when the item is absent upstream; fails
      * `InvalidQuery` for a non-QID input.
      */
-    readonly enrich: (qid: string) => Effect.Effect<WikidataFacts | null, LookupError>;
+    readonly enrich: (qid: string) => Effect.Effect<Option.Option<WikidataFacts>, LookupError>;
   }
 >()("effect-wikimedia/WikidataLookup") {}
 
@@ -178,10 +179,11 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
     );
 
   const searchByLabel = Effect.fn("WikidataLookup.searchByLabel")(function* (label: string) {
-    const query = normaliseLabelQuery(label);
-    if (query === null) {
+    const normalised = normaliseLabelQuery(label);
+    if (Option.isNone(normalised)) {
       return yield* new InvalidQuery({ kind: "label", value: label });
     }
+    const query = normalised.value;
     const hits = yield* run(
       Wikidata.searchEntities(WIKIDATA_HOST, query, {
         language: DEFAULT_LANGUAGE,
@@ -195,14 +197,16 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
   const searchByIdentifier = Effect.fn("WikidataLookup.searchByIdentifier")(function* (
     identifier: ExternalIdentifier,
   ) {
-    const property = normalisePropertyId(identifier.property);
-    if (property === null) {
+    const propertyId = normalisePropertyId(identifier.property);
+    if (Option.isNone(propertyId)) {
       return yield* new InvalidQuery({ kind: "property", value: identifier.property });
     }
-    const value = normaliseExternalIdValue(identifier.value);
-    if (value === null) {
+    const idValue = normaliseExternalIdValue(identifier.value);
+    if (Option.isNone(idValue)) {
       return yield* new InvalidQuery({ kind: "identifier", value: identifier.value });
     }
+    const property = propertyId.value;
+    const value = idValue.value;
 
     // `haswbstatement:P<prop>=<value>` is the cheap "items carrying this
     // identifier" search. Both halves are validated above; the whole
@@ -228,10 +232,11 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
   });
 
   const enrich = Effect.fn("WikidataLookup.enrich")(function* (qid: string) {
-    const validated = normaliseQid(qid);
-    if (validated === null) {
+    const checked = normaliseQid(qid);
+    if (Option.isNone(checked)) {
       return yield* new InvalidQuery({ kind: "identifier", value: qid });
     }
+    const validated = checked.value;
     // Single confirmed item; `validated` is the already-validated QID.
     const entities = yield* run(
       Wikidata.getEntities(WIKIDATA_HOST, [validated], {
@@ -239,9 +244,9 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
         props: ENTITY_PROPS,
       }),
     );
-    const item = entities[validated];
-    if (item === undefined) return null;
-    return normaliseFacts(item, validated);
+    return Option.map(Option.fromUndefinedOr(entities[validated]), (item) =>
+      normaliseFacts(item, validated),
+    );
   });
 
   return { searchByLabel, searchByIdentifier, enrich } as const;
