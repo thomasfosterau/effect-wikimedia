@@ -20,6 +20,7 @@ import { runInNewContext } from "node:vm";
 import { createGzip, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import * as Iterable from "effect/Iterable";
 import * as P from "effect/Predicate";
@@ -82,7 +83,7 @@ describe("stripFraming", () => {
   ];
   Arr.forEach(cases, ([input, expected]) => {
     it(`${toJson(input)} → ${toJson(expected)}`, () => {
-      expect(Dumps.stripFraming(input)).toBe(expected);
+      expect(Option.getOrNull(Dumps.stripFraming(input))).toBe(expected);
     });
   });
 });
@@ -91,12 +92,12 @@ describe("stripFraming", () => {
 
 describe("decodeEntityLine", () => {
   it("frames-only lines yield null", () => {
-    expect(Dumps.decodeEntityLine("[", 1)).toBeNull();
-    expect(Dumps.decodeEntityLine("]", 9)).toBeNull();
+    expect(Dumps.decodeEntityLine("[", 1)).toEqual(Option.none());
+    expect(Dumps.decodeEntityLine("]", 9)).toEqual(Option.none());
   });
 
   it("a valid entity line decodes to an entity record with its line number", () => {
-    const record = Dumps.decodeEntityLine('{"type":"item","id":"Q1"},', 5);
+    const record = Option.getOrNull(Dumps.decodeEntityLine('{"type":"item","id":"Q1"},', 5));
     expect(record?._tag).toBe("entity");
     if (record?._tag !== "entity") return expect.unreachable("expected entity");
     expect(record.line).toBe(5);
@@ -104,7 +105,7 @@ describe("decodeEntityLine", () => {
   });
 
   it("invalid JSON degrades to an invalid-json error element", () => {
-    const record = Dumps.decodeEntityLine("{ not json },", 3);
+    const record = Option.getOrNull(Dumps.decodeEntityLine("{ not json },", 3));
     expect(record?._tag).toBe("error");
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/invalid-json");
@@ -112,7 +113,7 @@ describe("decodeEntityLine", () => {
   });
 
   it("valid JSON that is not an entity degrades to a not-an-entity error element", () => {
-    const record = Dumps.decodeEntityLine('{"foo":"bar"},', 4);
+    const record = Option.getOrNull(Dumps.decodeEntityLine('{"foo":"bar"},', 4));
     expect(record?._tag).toBe("error");
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
@@ -122,7 +123,7 @@ describe("decodeEntityLine", () => {
   // what it parses to is not an entity, the same as `42` or `"x"` (#116).
   Arr.forEach(["null", "42", '"x"', "[]"], (body) => {
     it(`a JSON ${body} line degrades to a not-an-entity error element`, () => {
-      const record = Dumps.decodeEntityLine(`${body},`, 3);
+      const record = Option.getOrNull(Dumps.decodeEntityLine(`${body},`, 3));
       expect(record?._tag).toBe("error");
       if (!isLineError(record)) return expect.unreachable("expected error");
       expect(record.reason).toBe("dumps/not-an-entity");
@@ -133,7 +134,7 @@ describe("decodeEntityLine", () => {
   // Wikibase marks an entity that does not exist with `missing`; such an
   // object has a valid id but is still not an entity (#122).
   it("an object Wikibase flagged missing degrades to a not-an-entity error element", () => {
-    const record = Dumps.decodeEntityLine('{"id":"Q42","missing":""},', 5);
+    const record = Option.getOrNull(Dumps.decodeEntityLine('{"id":"Q42","missing":""},', 5));
     expect(record?._tag).toBe("error");
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");

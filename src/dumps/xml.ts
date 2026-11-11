@@ -58,6 +58,7 @@
  */
 
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import * as Str from "effect/String";
@@ -68,105 +69,105 @@ import * as Str from "effect/String";
 export interface PageRef {
   /**
    * The page's `<title>`, entity-decoded, trimmed and cut to 4,096 UTF-16
-   * code units; `null` when absent or blank. MediaWiki's exporter writes the
+   * code units; `None` when absent or blank. MediaWiki's exporter writes the
    * namespace-prefixed title with spaces, such as `Category:Writers`.
    */
-  readonly title: string | null;
+  readonly title: Option.Option<string>;
   /**
-   * Namespace number (`0` = main, `14` = category, …), from `<ns>`. `null` when
+   * Namespace number (`0` = main, `14` = category, …), from `<ns>`. `None` when
    * absent, above `Number.MAX_SAFE_INTEGER`, or not a non-negative decimal
    * integer: surrounding whitespace and leading zeros are accepted (up to 18
-   * digits in all), but a sign, a fraction or an exponent gives `null`, not a
+   * digits in all), but a sign, a fraction or an exponent gives `None`, not a
    * rounded value.
    */
-  readonly ns: number | null;
-  /** The page id, from the page's own `<id>`; `null` under the same rules as {@link PageRef.ns}. */
-  readonly id: number | null;
+  readonly ns: Option.Option<number>;
+  /** The page id, from the page's own `<id>`; `None` under the same rules as {@link PageRef.ns}. */
+  readonly id: Option.Option<number>;
   /**
    * The redirect target when the page is a redirect: the `title` attribute
    * of the page's `<redirect title="…" />`, entity-decoded, trimmed and cut
    * to 4,096 UTF-16 code units, as MediaWiki's exporter writes it (the
-   * namespace-prefixed title with spaces and without any `#section`). `null`
+   * namespace-prefixed title with spaces and without any `#section`). `None`
    * when the page has no `<redirect>`, or one whose `title` is absent or
    * blank, as in export schemas before 0.5, which wrote a bare
    * `<redirect />`. A `<redirect>` inside a `<revision>` is ignored.
    * {@link skipRedirects} drops the records of pages where it is set.
    */
-  readonly redirect: string | null;
+  readonly redirect: Option.Option<string>;
 }
 
-/** Who made a revision. A suppressed / anonymous edit leaves fields `null`. */
+/** Who made a revision. A suppressed / anonymous edit leaves fields `None`. */
 export interface Contributor {
   /**
    * The `<username>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
-   * units; `null` when absent or blank, as for an anonymous (IP) edit or a
+   * units; `None` when absent or blank, as for an anonymous (IP) edit or a
    * suppressed contributor.
    */
-  readonly username: string | null;
+  readonly username: Option.Option<string>;
   /**
-   * The user id, from the contributor's `<id>`; `null` when absent, under
+   * The user id, from the contributor's `<id>`; `None` when absent, under
    * the same rules as {@link PageRef.ns}. MediaWiki writes `0` for a username
    * with no user id behind it, and that stays `0`.
    */
-  readonly id: number | null;
+  readonly id: Option.Option<number>;
   /**
    * Set instead of `username` for an anonymous (IP) edit: the `<ip>`, which
    * MediaWiki writes in place of `<username>` and `<id>`. Entity-decoded,
-   * trimmed and cut like `username`, and not validated as an address; `null`
+   * trimmed and cut like `username`, and not validated as an address; `None`
    * when absent.
    */
-  readonly ip: string | null;
+  readonly ip: Option.Option<string>;
 }
 
 /** One revision's metadata and content (usually wikitext). */
 export interface Revision {
   /**
-   * The revision id, from the revision's `<id>`. Never `null` on a
-   * {@link PageRevisionHit}: a revision whose `<id>` is absent or fails the
-   * rules of {@link PageRef.ns} becomes a {@link PageRevisionError} instead.
+   * The revision id, from the revision's `<id>`. Always present: a revision
+   * whose `<id>` is absent or fails the rules of {@link PageRef.ns} becomes a
+   * {@link PageRevisionError} instead.
    */
-  readonly id: number | null;
+  readonly id: number;
   /**
-   * The previous revision's id, from `<parentid>`; `null` when absent or
+   * The previous revision's id, from `<parentid>`; `None` when absent or
    * invalid (rules as for {@link PageRef.ns}). MediaWiki omits `<parentid>`
    * when a revision has no parent, as for a page's first revision.
    */
-  readonly parentId: number | null;
+  readonly parentId: Option.Option<number>;
   /**
    * The `<timestamp>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
-   * units but not parsed or validated; `null` when absent or blank. MediaWiki
+   * units but not parsed or validated; `None` when absent or blank. MediaWiki
    * writes ISO 8601 UTC, such as `2001-01-21T02:12:21Z`.
    */
-  readonly timestamp: string | null;
+  readonly timestamp: Option.Option<string>;
   /**
-   * The `<contributor>`, or `null` when the revision has none. A suppressed
+   * The `<contributor>`, or `None` when the revision has none. A suppressed
    * contributor (`<contributor deleted="deleted" />`) still gives a
-   * {@link Contributor}, with every field `null`.
+   * {@link Contributor}, with every field `None`.
    */
-  readonly contributor: Contributor | null;
+  readonly contributor: Option.Option<Contributor>;
   /**
    * The edit summary, from `<comment>`: entity-decoded, trimmed and cut to
-   * 4,096 UTF-16 code units. `null` when absent, blank or suppressed
+   * 4,096 UTF-16 code units. `None` when absent, blank or suppressed
    * (`<comment deleted="deleted" />`); MediaWiki omits an empty summary.
    */
-  readonly comment: string | null;
+  readonly comment: Option.Option<string>;
   /**
    * The content model id, from `<model>` (`wikitext`, `css`, `json`, …),
-   * entity-decoded, trimmed and cut to 4,096 UTF-16 code units; `null` when
+   * entity-decoded, trimmed and cut to 4,096 UTF-16 code units; `None` when
    * absent or blank. It is the main slot's: a slot other than the main one
    * (export schema 0.11 puts each in a `<content>` element) is skipped.
    */
-  readonly model: string | null;
+  readonly model: Option.Option<string>;
   /**
    * The serialization format, from `<format>` (`text/x-wiki`, …),
-   * entity-decoded, trimmed and cut like `model`; `null` when absent or blank.
+   * entity-decoded, trimmed and cut like `model`; `None` when absent or blank.
    * The main slot's, as for `model`.
    */
-  readonly format: string | null;
+  readonly format: Option.Option<string>;
   /**
    * The revision's content, from `<text>`: entity-decoded, but neither
    * trimmed nor cut. It is wikitext when `model` is `wikitext`, and then
-   * composes with the `Wikitext` parser downstream. `null` when `<text>` is
+   * composes with the `Wikitext` parser downstream. `None` when `<text>` is
    * absent or empty, as in a stub dump or for suppressed text
    * (`<text bytes="…" sha1="…" deleted="deleted" />`).
    *
@@ -177,14 +178,14 @@ export interface Revision {
    * schema 0.11 puts each other slot in a `<content>` element, which is
    * skipped, so its text neither replaces this nor counts towards the cap.
    */
-  readonly text: string | null;
+  readonly text: Option.Option<string>;
   /**
    * The `<sha1>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code units,
-   * not validated; `null` when absent or empty, as MediaWiki writes it for a
+   * not validated; `None` when absent or empty, as MediaWiki writes it for a
    * revision whose text is suppressed. Export schema 0.11 defines it as one
    * hash over the content of all the revision's slots.
    */
-  readonly sha1: string | null;
+  readonly sha1: Option.Option<string>;
   /** `true` when the revision has a `<minor>` element (MediaWiki writes `<minor/>`), else `false`. */
   readonly minor: boolean;
 }
@@ -196,11 +197,11 @@ export interface PageRevisionHit {
   /**
    * The enclosing `<page>`'s `title`, `ns`, `id` and `redirect` as read up
    * to this revision (MediaWiki writes them before the first `<revision>`), in a
-   * fresh object per record. Every field is `null` for a revision outside
+   * fresh object per record. Every field is `None` for a revision outside
    * any `<page>`.
    */
   readonly page: PageRef;
-  /** The decoded revision. Its `id` is never `null`. */
+  /** The decoded revision. Its `id` is never `None`. */
   readonly revision: Revision;
 }
 
@@ -218,10 +219,9 @@ export interface PageRevisionError {
   readonly reason: "dumps/malformed-revision";
   /**
    * The page the revision belonged to, as read so far (see
-   * {@link PageRevisionHit.page}). The reader always sets it, so it is never
-   * `null` today, though the type allows it.
+   * {@link PageRevisionHit.page}). The reader always sets it.
    */
-  readonly page: PageRef | null;
+  readonly page: PageRef;
   /**
    * A short English description for logs. It is currently one of
    * `"revision missing id"`, `"revision not closed before next revision"`,
@@ -726,10 +726,10 @@ export class XmlPageReader {
 
   private snapshotPage(): PageRef {
     return {
-      title: this.page.title,
-      ns: this.page.ns,
-      id: this.page.id,
-      redirect: this.page.redirect,
+      title: Option.fromNullOr(this.page.title),
+      ns: Option.fromNullOr(this.page.ns),
+      id: Option.fromNullOr(this.page.id),
+      redirect: Option.fromNullOr(this.page.redirect),
     };
   }
 
@@ -752,25 +752,29 @@ export class XmlPageReader {
         detail: `revision field exceeds the ${MAX_TEXT_LENGTH}-code-unit cap`,
       };
     }
-    return { _tag: "revision", page, revision: toRevision(rev) };
+    return { _tag: "revision", page, revision: toRevision(rev, rev.id) };
   }
 }
 
-/** Projects the mutable accumulator into the immutable {@link Revision}. */
-function toRevision(rev: MutableRevision): Revision {
-  const contributor: Contributor | null = rev.hasContributor
-    ? { username: rev.contributorUsername, id: rev.contributorId, ip: rev.contributorIp }
-    : null;
+/** Projects the mutable accumulator into the immutable {@link Revision}, given its checked `id`. */
+function toRevision(rev: MutableRevision, id: number): Revision {
+  const contributor: Option.Option<Contributor> = rev.hasContributor
+    ? Option.some({
+        username: Option.fromNullOr(rev.contributorUsername),
+        id: Option.fromNullOr(rev.contributorId),
+        ip: Option.fromNullOr(rev.contributorIp),
+      })
+    : Option.none();
   return {
-    id: rev.id,
-    parentId: rev.parentId,
-    timestamp: rev.timestamp,
+    id,
+    parentId: Option.fromNullOr(rev.parentId),
+    timestamp: Option.fromNullOr(rev.timestamp),
     contributor,
-    comment: rev.comment,
-    model: rev.model,
-    format: rev.format,
-    text: rev.text,
-    sha1: rev.sha1,
+    comment: Option.fromNullOr(rev.comment),
+    model: Option.fromNullOr(rev.model),
+    format: Option.fromNullOr(rev.format),
+    text: Option.fromNullOr(rev.text),
+    sha1: Option.fromNullOr(rev.sha1),
     minor: rev.minor,
   };
 }
@@ -826,10 +830,10 @@ export const onlyRevisions = <E, R>(
  * is set, from a {@link PageRevisionRecord} stream: the usual "skip
  * redirects" dump filter, read from the export's `<redirect>` element rather
  * than from each revision's text. A per-record error on a redirect page is
- * dropped with it; one with no page (`page: null`) is kept. Works before or
- * after {@link onlyRevisions}, and never fails.
+ * dropped with it. Works before or after {@link onlyRevisions}, and never
+ * fails.
  */
 export const skipRedirects = <A extends PageRevisionRecord, E, R>(
   records: Stream.Stream<A, E, R>,
 ): Stream.Stream<A, E, R> =>
-  records.pipe(Stream.filter((record) => record.page === null || record.page.redirect === null));
+  records.pipe(Stream.filter((record) => Option.isNone(record.page.redirect)));

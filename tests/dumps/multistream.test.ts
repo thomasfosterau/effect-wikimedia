@@ -70,7 +70,7 @@ describe("decodeIndexLine", () => {
     ["0:0:Zero", entry(1, 0, 0, "Zero")],
     ["0007:0008:Leading zeros", entry(1, 7, 8, "Leading zeros")],
   ])("%j decodes", (line, expected) => {
-    expect(Dumps.decodeIndexLine(line, 1)).toEqual(Result.succeed(expected));
+    expect(Dumps.decodeIndexLine(line, 1)).toEqual(Result.succeed(Option.some(expected)));
   });
 
   it.each([
@@ -96,7 +96,7 @@ describe("decodeIndexLine", () => {
   });
 
   it.each([[""], ["   "], ["\t"]])("%j is blank and decodes to null", (line) => {
-    expect(Dumps.decodeIndexLine(line, 1)).toEqual(Result.succeed(null));
+    expect(Dumps.decodeIndexLine(line, 1)).toEqual(Result.succeed(Option.none()));
   });
 
   it("bounds the detail of a malformed line to 500 code units", () => {
@@ -170,15 +170,15 @@ describe("multistreamRanges", () => {
 
   it("groups entries by offset, each range ending where the next starts", async () => {
     expect(await collect(entriesOf(INDEX).pipe(Dumps.multistreamRanges()))).toEqual([
-      { start: 10, end: 40, pageCount: 3, firstPageId: 1, lastPageId: 5 },
-      { start: 40, end: 90, pageCount: 1, firstPageId: 7, lastPageId: 7 },
-      { start: 90, end: null, pageCount: 2, firstPageId: 9, lastPageId: 11 },
+      { start: 10, end: Option.some(40), pageCount: 3, firstPageId: 1, lastPageId: 5 },
+      { start: 40, end: Option.some(90), pageCount: 1, firstPageId: 7, lastPageId: 7 },
+      { start: 90, end: Option.none(), pageCount: 2, firstPageId: 9, lastPageId: 11 },
     ]);
   });
 
   it("closes the last range at fileSize", async () => {
     const ranges = await collect(entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: 120 })));
-    expect(ranges.map((r) => [r.start, r.end])).toEqual([
+    expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
       [10, 40],
       [40, 90],
       [90, 120],
@@ -189,7 +189,7 @@ describe("multistreamRanges", () => {
     const ranges = await collect(
       entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: undefined })),
     );
-    expect(ranges.map((r) => r.end)).toEqual([40, 90, null]);
+    expect(ranges.map((r) => Option.getOrNull(r.end))).toEqual([40, 90, null]);
   });
 
   it("emits nothing for an empty index", async () => {
@@ -201,7 +201,7 @@ describe("multistreamRanges", () => {
       Dumps.multistreamRanges(),
     );
     expect(await collectUntilIndexError(stream)).toEqual([
-      { start: 10, end: 50, pageCount: 1, firstPageId: 1, lastPageId: 1 },
+      { start: 10, end: Option.some(50), pageCount: 1, firstPageId: 1, lastPageId: 1 },
     ]);
     expect(await indexErrorOf(stream)).toMatchObject({
       reason: "dumps/index-offset-decreased",
@@ -241,7 +241,14 @@ const pagesInRange = (
   range: Dumps.MultistreamRange,
 ): Promise<ReadonlyArray<Dumps.PageRevisionRecord>> =>
   collect(
-    Stream.make(new Uint8Array(DUMP_BZ2.subarray(range.start, range.end ?? DUMP_BZ2.length))).pipe(
+    Stream.make(
+      new Uint8Array(
+        DUMP_BZ2.subarray(
+          range.start,
+          Option.getOrElse(range.end, () => DUMP_BZ2.length),
+        ),
+      ),
+    ).pipe(
       Dumps.decompressWith(() => unbzip2()),
       Dumps.pageRecords,
     ),
@@ -263,7 +270,7 @@ describe("a multistream range decoded on its own", () => {
     const ranges = await collect(
       Stream.fromIterable(entries).pipe(Dumps.multistreamRanges({ fileSize })),
     );
-    expect(ranges.map((r) => [r.start, r.end])).toEqual([
+    expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
       [236, 533],
       [533, 814],
       [814, lastEnd],
@@ -272,9 +279,9 @@ describe("a multistream range decoded on its own", () => {
     Arr.forEach(Arr.zip(ranges, decoded), ([range, records]) => {
       const listed = entries.filter((e) => e.offset === range.start);
       expect(records.every((r) => P.isTagged(r, "revision"))).toBe(true);
-      expect(records.map((r) => [r.page?.id, r.page?.title])).toEqual(
-        listed.map((e) => [e.pageId, e.title]),
-      );
+      expect(
+        records.map((r) => [Option.getOrNull(r.page.id), Option.getOrNull(r.page.title)]),
+      ).toEqual(listed.map((e) => [e.pageId, e.title]));
     });
   });
 
@@ -284,7 +291,7 @@ describe("a multistream range decoded on its own", () => {
     expect(
       await pagesInRange({
         start: 0,
-        end: first?.offset ?? 0,
+        end: Option.some(first?.offset ?? 0),
         pageCount: 0,
         firstPageId: 0,
         lastPageId: 0,
@@ -299,7 +306,7 @@ describe("a multistream range decoded on its own", () => {
         Dumps.pageRecords,
       ),
     );
-    expect(whole.map((r) => r.page?.title)).toEqual([
+    expect(whole.map((r) => Option.getOrNull(r.page.title))).toEqual([
       "Ada Lovelace",
       "AT&T",
       "Category:Writers",
@@ -328,7 +335,7 @@ describe("fromMultistreamRange", () => {
       ),
     );
     expect(fromFile).toEqual(await Promise.all(ranges.map(pagesInRange)));
-    expect(fromFile.flat().map((r) => r.page?.title)).toEqual([
+    expect(fromFile.flat().map((r) => Option.getOrNull(r.page.title))).toEqual([
       "Ada Lovelace",
       "AT&T",
       "Category:Writers",
@@ -351,7 +358,7 @@ describe("random access and iteration over the fixture dump", () => {
   const openRange = (range: Dumps.MultistreamRange) =>
     Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
   const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
-    records.map((r) => r.page?.title);
+    records.map((r) => Option.getOrNull(r.page.title));
 
   it("finds the whole range holding a page by title, then reads just that range", async () => {
     const found = await runTest(
@@ -359,7 +366,7 @@ describe("random access and iteration over the fixture dump", () => {
     );
     expect(Option.isSome(found)).toBe(true);
     if (Option.isNone(found)) return;
-    expect(found.value).toMatchObject({ start: 533, end: 814 });
+    expect(found.value).toMatchObject({ start: 533, end: Option.some(814) });
     const records = await collect(openRange(found.value).pipe(Dumps.pageRecords));
     expect(titles(records)).toContain("Category:Writers");
   });
@@ -372,7 +379,7 @@ describe("random access and iteration over the fixture dump", () => {
         Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: DUMP_BZ2.length }),
       ),
     );
-    expect(Option.map(last, (range) => [range.start, range.end])).toEqual(
+    expect(Option.map(last, (range) => [range.start, Option.getOrNull(range.end)])).toEqual(
       Option.some([814, DUMP_BZ2.length]),
     );
     expect(

@@ -127,7 +127,7 @@ export interface MultistreamRange {
    * meaning the end of the file. Either way the last range also takes in the
    * trailer stream (`</mediawiki>`), which decodes to no records.
    */
-  readonly end: number | null;
+  readonly end: Option.Option<number>;
   /** How many index entries share this stream: Wikimedia writes 100, the last stream fewer. */
   readonly pageCount: number;
   /** The `pageId` of the stream's first index entry. */
@@ -181,8 +181,8 @@ const malformed = (line: string, lineNumber: number): MultistreamIndexError =>
 export function decodeIndexLine(
   line: string,
   lineNumber: number,
-): Result.Result<MultistreamIndexEntry | null, MultistreamIndexError> {
-  if (Str.isEmpty(line.trim())) return Result.succeed(null);
+): Result.Result<Option.Option<MultistreamIndexEntry>, MultistreamIndexError> {
+  if (Str.isEmpty(line.trim())) return Result.succeed(Option.none());
   const match = INDEX_LINE_RE.exec(line);
   if (match === null) return Result.fail(malformed(line, lineNumber));
   const [, offsetDigits = "", pageIdDigits = "", rawTitle = ""] = match;
@@ -192,7 +192,7 @@ export function decodeIndexLine(
   if (offset === null || pageId === null || Str.isEmpty(title)) {
     return Result.fail(malformed(line, lineNumber));
   }
-  return Result.succeed({ line: lineNumber, offset, pageId, title });
+  return Result.succeed(Option.some({ line: lineNumber, offset, pageId, title }));
 }
 
 // ── The index stream ─────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ const decodeNextLine = (
   line: string,
 ): Effect.Effect<readonly [number, ReadonlyArray<MultistreamIndexEntry>], MultistreamIndexError> =>
   Effect.fromResult(decodeIndexLine(line, linesSoFar + 1)).pipe(
-    Effect.map((entry) => [linesSoFar + 1, entry === null ? [] : [entry]]),
+    Effect.map((entry) => [linesSoFar + 1, Option.toArray(entry)] as const),
   );
 
 /**
@@ -242,7 +242,10 @@ const openRange = (entry: MultistreamIndexEntry): OpenRange => ({
   lastPageId: entry.pageId,
 });
 
-const closeRange = (range: OpenRange, end: number | null): MultistreamRange => ({ ...range, end });
+const closeRange = (range: OpenRange, end: Option.Option<number>): MultistreamRange => ({
+  ...range,
+  end,
+});
 
 /** The offset check for one entry: `null` when it passes. */
 function offsetError(
@@ -290,7 +293,7 @@ const groupEntry =
         [],
       ]);
     }
-    return Effect.succeed([openRange(entry), [closeRange(open, entry.offset)]]);
+    return Effect.succeed([openRange(entry), [closeRange(open, Option.some(entry.offset))]]);
   };
 
 /**
@@ -322,7 +325,8 @@ export const multistreamRanges =
     const fileSize = options?.fileSize;
     return entries.pipe(
       Stream.mapAccumEffect((): OpenRange | null => null, groupEntry(fileSize), {
-        onHalt: (open) => (open === null ? [] : [closeRange(open, fileSize ?? null)]),
+        onHalt: (open) =>
+          open === null ? [] : [closeRange(open, Option.fromUndefinedOr(fileSize))],
       }),
     );
   };

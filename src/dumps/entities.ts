@@ -111,11 +111,11 @@ const MAX_RAW_LENGTH = 500;
  * JSON text, or `null` for a line that carries no entity — a blank line or
  * the array's opening `[` / closing `]` delimiter.
  */
-export function stripFraming(line: string): string | null {
+export function stripFraming(line: string): Option.Option<string> {
   const trimmed = line.trim();
-  if (Str.isEmpty(trimmed) || trimmed === "[" || trimmed === "]") return null;
+  if (Str.isEmpty(trimmed) || trimmed === "[" || trimmed === "]") return Option.none();
   const body = trimmed.endsWith(",") ? trimmed.slice(0, -1).trim() : trimmed;
-  return Str.isEmpty(body) ? null : body;
+  return Str.isEmpty(body) ? Option.none() : Option.some(body);
 }
 
 /** Parses a line's JSON text; `None` when it is not JSON. */
@@ -139,20 +139,25 @@ function boundRaw(text: string): string {
  * {@link EntityHit} carrying a best-effort item, as
  * {@link Wikidata.decodeEntity} documents.
  */
-export function decodeEntityLine(line: string, lineNumber: number): EntityRecord | null {
-  const body = stripFraming(line);
-  if (body === null) return null;
-  // Only a failed parse means the body is not JSON: a body of `null` parses
-  // to `Some(null)`, which the entity check below rejects (#116).
-  const parsed = parseJson(body);
-  if (Option.isNone(parsed)) {
-    return { _tag: "error", line: lineNumber, reason: "dumps/invalid-json", raw: boundRaw(body) };
-  }
-  const item = decodeEntity(parsed.value);
-  if (item === null) {
-    return { _tag: "error", line: lineNumber, reason: "dumps/not-an-entity", raw: boundRaw(body) };
-  }
-  return { _tag: "entity", line: lineNumber, item };
+export function decodeEntityLine(line: string, lineNumber: number): Option.Option<EntityRecord> {
+  return Option.map(stripFraming(line), (body): EntityRecord => {
+    // Only a failed parse means the body is not JSON: a body of `null` parses
+    // to `Some(null)`, which the entity check below rejects (#116).
+    const parsed = parseJson(body);
+    if (Option.isNone(parsed)) {
+      return { _tag: "error", line: lineNumber, reason: "dumps/invalid-json", raw: boundRaw(body) };
+    }
+    const item = decodeEntity(parsed.value);
+    if (item === null) {
+      return {
+        _tag: "error",
+        line: lineNumber,
+        reason: "dumps/not-an-entity",
+        raw: boundRaw(body),
+      };
+    }
+    return { _tag: "entity", line: lineNumber, item };
+  });
 }
 
 // ── The pipeline ─────────────────────────────────────────────────────────
@@ -175,7 +180,7 @@ export const entityRecords = <E, R>(
       (count, line) => {
         const lineNumber = count + 1;
         const record = decodeEntityLine(line, lineNumber);
-        return [lineNumber, record === null ? [] : [record]];
+        return [lineNumber, Option.toArray(record)];
       },
     ),
   );

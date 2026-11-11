@@ -39,6 +39,7 @@ import { compose, Duplex, isReadable, isWritable, Readable } from "node:stream";
 import { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { createGunzip } from "node:zlib";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -677,7 +678,7 @@ export const fromMultistreamRange = (
   range: MultistreamRange,
   decompressor: Decompressor,
 ): Stream.Stream<Uint8Array, SourceError> =>
-  fromFile(path, { start: range.start, end: range.end ?? undefined, decompressor });
+  fromFile(path, { start: range.start, end: Option.getOrUndefined(range.end), decompressor });
 
 // ── HTTP range source (resumable) ────────────────────────────────────────
 
