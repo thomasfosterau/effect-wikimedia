@@ -50,6 +50,7 @@ import * as Match from "effect/Match";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import {
   type Argument,
@@ -1518,8 +1519,60 @@ const blockConstructs = constructs({
 
 const document = fragment(NO_STOP, true);
 
-/** Parses wikitext into a {@link Document}. Total and fail-soft. */
-export function parse(source: string): Document {
+/** Options for {@link parse}. */
+export interface ParseOptions {
+  /**
+   * Where `source` starts in a larger text, such as a `<ref>` body's offset
+   * in its page: every span, the document's own included, is shifted by it,
+   * so spans index the larger text and a splice edit there needs no
+   * arithmetic. `Document.source` is still `source` itself, so slice it at
+   * `span.start - offset`. A non-negative safe integer; defaults to `0`.
+   */
+  readonly offset?: number | undefined;
+}
+
+/** Whether `value` is a {@link Span}. */
+const isSpan = (value: unknown): value is Span =>
+  P.hasProperty(value, "start") &&
+  P.hasProperty(value, "end") &&
+  P.isNumber(value.start) &&
+  P.isNumber(value.end);
+
+/** A copy of `value` with every `span` in it, at any depth, moved `by` code units. */
+function shiftSpans<A>(value: A, by: number): A {
+  if (Array.isArray(value)) {
+    // SAFETY: each element is replaced by a copy of the same shape, so the
+    // array keeps its type.
+    return Arr.map(value, (item: unknown) => shiftSpans(item, by)) as A;
+  }
+  if (!P.isObject(value) || P.isFunction(value)) return value;
+  const fields: R.ReadonlyRecord<string, unknown> = { ...value };
+  // SAFETY: the copy has `value`'s own keys, each field a copy of the same
+  // shape (a span's numbers moved), so it has `value`'s type.
+  return R.map(fields, (field, key) =>
+    key === "span" && isSpan(field)
+      ? { start: field.start + by, end: field.end + by }
+      : shiftSpans(field, by),
+  ) as A;
+}
+
+/**
+ * Parses wikitext into a {@link Document}. Total and fail-soft: any string
+ * parses. With `options.offset`, spans are positions in a larger text (see
+ * {@link ParseOptions.offset}); an offset that is not a non-negative safe
+ * integer throws a `RangeError`, the one way `parse` throws.
+ */
+export function parse(source: string, options?: ParseOptions): Document {
+  const offset = options?.offset ?? 0;
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new RangeError(`parse: offset must be a non-negative safe integer, got ${offset}`);
+  }
+  const doc = parseAt0(source);
+  return offset === 0 ? doc : shiftSpans(doc, offset);
+}
+
+/** {@link parse} with spans from `0`. */
+function parseAt0(source: string): Document {
   // The grammar runs on a cursor of its own rather than through
   // `Parser.parse`, which would first look for a compiled form of it: there
   // is none, since its `Parser.make` steps run interpreted.
