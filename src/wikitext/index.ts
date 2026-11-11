@@ -28,6 +28,7 @@ export { type List, type ListItem, type ListItemKind, lists } from "./lists.ts";
 export { type ParseOptions, parse } from "./parse.ts";
 export { type Section, sections } from "./sections.ts";
 export { serialize, serializeNode, serializeNodes } from "./serialize.ts";
+export { type GridCell, type TableRecord, tableGrid, tableRecords } from "./tables.ts";
 export {
   basicTemplateRenderers,
   type Fragment,
