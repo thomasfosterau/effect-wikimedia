@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import unbzip2 from "unbzip2-stream";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
@@ -334,5 +335,101 @@ describe("fromMultistreamRange", () => {
       "Talk:Foo:Bar",
       "Zebra",
     ]);
+  });
+});
+
+// ── Random access, iteration and resume ──────────────────────────────────
+
+describe("random access and iteration over the fixture dump", () => {
+  const entries = (): Stream.Stream<
+    Dumps.MultistreamIndexEntry,
+    Dumps.SourceError | Dumps.MultistreamIndexError
+  > =>
+    Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
+      Dumps.multistreamIndexRecords,
+    );
+  const openRange = (range: Dumps.MultistreamRange) =>
+    Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
+  const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
+    records.map((r) => r.page?.title);
+
+  it("finds the whole range holding a page by title, then reads just that range", async () => {
+    const found = await runTest(
+      entries().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Category:Writers"))),
+    );
+    expect(Option.isSome(found)).toBe(true);
+    if (Option.isNone(found)) return;
+    expect(found.value).toMatchObject({ start: 533, end: 814 });
+    const records = await collect(openRange(found.value).pipe(Dumps.pageRecords));
+    expect(titles(records)).toContain("Category:Writers");
+  });
+
+  it("finds by page id, closes the last range with fileSize, and gives None for a miss", async () => {
+    const all = await collect(entries());
+    const lastId = all.at(-1)?.pageId ?? -1;
+    const last = await runTest(
+      entries().pipe(
+        Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: DUMP_BZ2.length }),
+      ),
+    );
+    expect(Option.map(last, (range) => [range.start, range.end])).toEqual(
+      Option.some([814, DUMP_BZ2.length]),
+    );
+    expect(
+      await runTest(entries().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Nope")))),
+    ).toEqual(Option.none());
+  });
+
+  it("counts every entry of the matched range, ones before the match included", async () => {
+    const first = await runTest(entries().pipe(Dumps.findMultistreamRange(() => true)));
+    const ranges = await collect(entries().pipe(Dumps.multistreamRanges()));
+    const byLaterEntry = await runTest(
+      entries().pipe(Dumps.findMultistreamRange(Dumps.byPageId(ranges[0]?.lastPageId ?? -1))),
+    );
+    expect(byLaterEntry).toEqual(first);
+    expect(first).toEqual(Option.fromNullOr(ranges[0]));
+  });
+
+  it("fails with the index's error when it rejects the index before a match", async () => {
+    const stream = bytesOf("10:1:A\n5:2:B\n").pipe(Dumps.multistreamIndexRecords);
+    const error = await expectFailureInstanceOf(
+      stream.pipe(Dumps.findMultistreamRange(Dumps.byTitle("B"))),
+      Dumps.MultistreamIndexError,
+    );
+    expect(error.reason).toBe("dumps/index-offset-decreased");
+  });
+
+  it("decodes every range's pages in order, sequentially and concurrently", async () => {
+    const ranges = entries().pipe(Dumps.multistreamRanges());
+    const sequential = await collect(ranges.pipe(Dumps.multistreamPageRecords(openRange)));
+    expect(titles(sequential)).toEqual([
+      "Ada Lovelace",
+      "AT&T",
+      "Category:Writers",
+      "Talk:Foo:Bar",
+      "Zebra",
+    ]);
+    const concurrent = await collect(
+      ranges.pipe(Dumps.multistreamPageRecords(openRange, { concurrency: 3 })),
+    );
+    expect(titles(concurrent)).toHaveLength(titles(sequential).length);
+    expect(titles(concurrent)).toEqual(expect.arrayContaining(titles(sequential)));
+  });
+
+  it("resumes from a checkpoint without opening the ranges before it", async () => {
+    const opened: number[] = [];
+    const records = await collect(
+      entries().pipe(
+        Dumps.multistreamRanges(),
+        Dumps.fromCheckpoint(533),
+        Dumps.multistreamPageRecords((range) => {
+          opened.push(range.start);
+          return openRange(range);
+        }),
+      ),
+    );
+    expect(opened).toEqual([533, 814]);
+    expect(titles(records)).not.toContain("Ada Lovelace");
+    expect(titles(records)).toContain("Zebra");
   });
 });

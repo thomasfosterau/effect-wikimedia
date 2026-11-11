@@ -50,7 +50,8 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Str from "effect/String";
-import { decodeXmlEntities } from "./xml.ts";
+import * as Option from "effect/Option";
+import { decodeXmlEntities, type PageRevisionRecord, pageRecords } from "./xml.ts";
 
 // ── Record model & error ─────────────────────────────────────────────────
 
@@ -325,3 +326,127 @@ export const multistreamRanges =
       }),
     );
   };
+
+// ── Random access, iteration and resume ──────────────────────────────────
+
+/**
+ * An index-entry predicate for {@link findMultistreamRange}: the entry whose
+ * title is `title` exactly, as the index (decoded) gives it, namespace
+ * prefix included (`Category:Writers`). Titles are compared as written, with
+ * no first-letter or underscore normalisation.
+ */
+export const byTitle =
+  (title: string) =>
+  (entry: MultistreamIndexEntry): boolean =>
+    entry.title === title;
+
+/** An index-entry predicate for {@link findMultistreamRange}: the entry whose page id is `pageId`. */
+export const byPageId =
+  (pageId: number) =>
+  (entry: MultistreamIndexEntry): boolean =>
+    entry.pageId === pageId;
+
+/**
+ * Finds the range that holds a page: scans an index entry stream (from
+ * {@link multistreamIndexRecords}) for the first entry `match` accepts, and
+ * succeeds with the whole {@link MultistreamRange} of the stream it sits
+ * in, as {@link multistreamRanges} (with `options`) would give it, or `None`
+ * when no entry matches. Pair it with {@link byTitle} or {@link byPageId},
+ * then read just that range (`fromMultistreamRange` over a local file, or
+ * `fromHttpRange` with `startByte` / `endByte`):
+ *
+ * ```ts
+ * const range = yield* Dumps.fromFile(indexPath, { decompressor: () => unbzip2() }).pipe(
+ *   Dumps.multistreamIndexRecords,
+ *   Dumps.findMultistreamRange(Dumps.byTitle("Ada Lovelace")),
+ * );
+ * ```
+ *
+ * It reads the index only as far as the end of the matching stream's
+ * entries (the next stream's first entry), at constant memory, so a lookup
+ * near the start of a 25-million-line index returns quickly; one near its
+ * end, or a miss, reads all of it. Repeated lookups want a persisted map
+ * built once from the entry stream instead. Fails as
+ * {@link multistreamRanges} does, with a {@link MultistreamIndexError} for
+ * an index it rejects before the match is found.
+ */
+export const findMultistreamRange =
+  (match: (entry: MultistreamIndexEntry) => boolean, options?: MultistreamRangesOptions) =>
+  <E, R>(
+    entries: Stream.Stream<MultistreamIndexEntry, E, R>,
+  ): Effect.Effect<Option.Option<MultistreamRange>, E | MultistreamIndexError, R> =>
+    Effect.suspend(() => {
+      // The offset of the first matching entry. `multistreamRanges` emits a
+      // range only once it has pulled the next stream's first entry, so by
+      // then every entry of that range has passed the tap.
+      let found: Option.Option<number> = Option.none();
+      return entries.pipe(
+        Stream.tap((entry) =>
+          Effect.sync(() => {
+            if (Option.isNone(found) && match(entry)) found = Option.some(entry.offset);
+          }),
+        ),
+        multistreamRanges(options),
+        Stream.filter((range) => Option.exists(found, (offset) => offset === range.start)),
+        Stream.runHead,
+      );
+    });
+
+/** Options for {@link multistreamPageRecords}. */
+export interface MultistreamPageRecordsOptions {
+  /**
+   * How many ranges to open and decode at once. Defaults to `1`, which keeps
+   * the records in range order. Above `1`, ranges overlap their I/O and
+   * decoding, and their records interleave as they arrive, though each
+   * range's own records stay in order. Decoding still runs on one core, as
+   * a bzip2 decoder in JavaScript and the XML reader both run on the event
+   * loop.
+   */
+  readonly concurrency?: number | "unbounded" | undefined;
+}
+
+/**
+ * Decodes the pages of each {@link MultistreamRange} in a range stream (from
+ * {@link multistreamRanges}, possibly after {@link fromCheckpoint}): `open`
+ * gives each range's decompressed bytes, and {@link pageRecords} turns them
+ * into records. `open` is the caller's, so this stays platform-neutral:
+ *
+ * ```ts
+ * const pages = ranges.pipe(
+ *   Dumps.multistreamPageRecords((range) =>
+ *     Dumps.fromMultistreamRange(dumpPath, range, () => unbzip2()),
+ *   ),
+ * );
+ * ```
+ *
+ * A browser or Worker can pass a ranged `fetch` and its own bzip2 decoder.
+ * Fails with what the range stream or `open` fails with.
+ */
+export const multistreamPageRecords =
+  <E2, R2>(
+    open: (range: MultistreamRange) => Stream.Stream<Uint8Array, E2, R2>,
+    options?: MultistreamPageRecordsOptions,
+  ) =>
+  <E, R>(
+    ranges: Stream.Stream<MultistreamRange, E, R>,
+  ): Stream.Stream<PageRevisionRecord, E | E2, R | R2> =>
+    ranges.pipe(
+      Stream.flatMap((range) => pageRecords(open(range)), {
+        concurrency: options?.concurrency ?? 1,
+      }),
+    );
+
+/**
+ * Resumes a range stream from a checkpoint: keeps only the ranges whose
+ * `start` is at or after `offset`, so a run can restart where it left off.
+ * Ranges are contiguous (each `end` is the next `start`), so the checkpoint
+ * to record after finishing a range is its `end`. Record it only once every
+ * earlier range has finished too: process ranges with `Stream.mapEffect`,
+ * which keeps input order even with a `concurrency` above `1`, and record
+ * each range's `end` as it is emitted. Ranges before the checkpoint are
+ * still read from the index, but none of them is opened.
+ */
+export const fromCheckpoint =
+  (offset: number) =>
+  <E, R>(ranges: Stream.Stream<MultistreamRange, E, R>): Stream.Stream<MultistreamRange, E, R> =>
+    ranges.pipe(Stream.filter((range) => range.start >= offset));
