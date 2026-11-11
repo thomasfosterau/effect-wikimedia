@@ -61,7 +61,7 @@ assert<
 assert<
   Equals<
     ReturnType<typeof Action.getWikitext>,
-    Effect.Effect<Action.WikitextResult | null, Core.WikimediaError, Core.WikimediaClient>
+    Effect.Effect<Option.Option<Action.WikitextResult>, Core.WikimediaError, Core.WikimediaClient>
   >
 >();
 

@@ -55,6 +55,18 @@ import {
   WikimediaClient,
 } from "./core.ts";
 
+/** `Core.sanitiseText`, as an `Option`: `None` for a value it rejects. */
+const optionalText = (value: unknown): Option.Option<string> =>
+  Option.fromNullOr(sanitiseText(value));
+
+/** `Core.toNonNegativeInt`, as an `Option`: `None` for a value it rejects. */
+const optionalInt = (value: unknown, max?: number): Option.Option<number> =>
+  Option.fromNullOr(toNonNegativeInt(value, max));
+
+/** A timestamp string as the API sent it, cut to 40 characters; `None` unless it is a string. */
+const timestampOf = (value: unknown): Option.Option<string> =>
+  P.isString(value) ? Option.some(value.slice(0, 40)) : Option.none();
+
 /** Builds the fixed-path `/w/api.php` request for a given `action` and its params. */
 function actionRequest(
   host: string,
@@ -124,11 +136,11 @@ export type WikitextResponse = typeof WikitextResponse.Type;
 export interface WikitextResult {
   /**
    * The page's MediaWiki page ID (`pageid`), which stays the same when the page
-   * is renamed. `null` if the response's `pageid` is absent or isn't a
+   * is renamed. `None` if the response's `pageid` is absent or isn't a
    * non-negative number up to `Number.MAX_SAFE_INTEGER`; a fraction is
    * truncated.
    */
-  readonly pageId: number | null;
+  readonly pageId: Option.Option<number>;
   /**
    * The page's title as MediaWiki reports it: prefixed display form, with
    * spaces rather than underscores, after the wiki's normalisation (such as
@@ -139,18 +151,18 @@ export interface WikitextResult {
   readonly title: string;
   /**
    * The ID (`revid`) of the revision the wikitext was read from: the page's
-   * latest revision at request time. `null` if the response's `revid` is absent
+   * latest revision at request time. `None` if the response's `revid` is absent
    * or isn't a non-negative number up to `Number.MAX_SAFE_INTEGER`; a fraction
    * is truncated.
    */
-  readonly revisionId: number | null;
+  readonly revisionId: Option.Option<number>;
   /**
    * When that revision was saved, as the API sent it: an ISO 8601 UTC
    * string such as `2024-01-22T09:15:00Z`. It is cut to 40 characters but
-   * not parsed or validated. `null` if the response has no string
+   * not parsed or validated. `None` if the response has no string
    * `timestamp`.
    */
-  readonly timestamp: string | null;
+  readonly timestamp: Option.Option<string>;
   /**
    * The revision's main-slot content, exactly as the API sent it: not
    * trimmed or length-capped, and possibly empty. It is returned whatever
@@ -161,29 +173,29 @@ export interface WikitextResult {
   readonly wikitext: string;
 }
 
-/** Normalises a `WikitextResponse` for the requested `title`; `null` on a missing page or no wikitext. */
+/** Normalises a `WikitextResponse` for the requested `title`; `None` on a missing page or no wikitext. */
 export function normaliseWikitext(
   response: WikitextResponse,
   title: string,
-): WikitextResult | null {
+): Option.Option<WikitextResult> {
   const pages = R.values(response.query?.pages ?? {});
   const page = pages.find((p) => p.missing === undefined && p.revisions !== undefined);
-  if (page === undefined) return null;
+  if (page === undefined) return Option.none();
   const revision = page.revisions?.[0];
   const wikitext = revision?.slots?.main?.["*"];
-  if (!P.isString(wikitext)) return null;
-  return {
-    pageId: toNonNegativeInt(page.pageid),
+  if (!P.isString(wikitext)) return Option.none();
+  return Option.some({
+    pageId: optionalInt(page.pageid),
     title: sanitiseText(page.title) ?? title,
-    revisionId: toNonNegativeInt(revision?.revid),
-    timestamp: P.isString(revision?.timestamp) ? revision.timestamp.slice(0, 40) : null,
+    revisionId: optionalInt(revision?.revid),
+    timestamp: timestampOf(revision?.timestamp),
     wikitext,
-  };
+  });
 }
 
 /**
  * Fetches a page's current wikitext (`rvprop=content`, main slot) via the
- * Action API. Returns `null` when the page does not exist upstream.
+ * Action API. Succeeds with `None` when the page does not exist upstream.
  */
 export const getWikitext = Effect.fn("Action.getWikitext")(function* (
   host: string,
@@ -258,17 +270,17 @@ export type PageMetadataResponse = typeof PageMetadataResponse.Type;
 
 /**
  * A page's identity and bookkeeping metadata, from `prop=info&inprop=url`.
- * Every field except `title` is `null` when the response lacks it or it
+ * Every field except `title` is `None` when the response lacks it or it
  * fails its check.
  */
 export interface PageMetadata {
   /**
    * The page's MediaWiki page ID (`pageid`), which stays the same when the page
-   * is renamed. `null` if the response's `pageid` is absent or isn't a
+   * is renamed. `None` if the response's `pageid` is absent or isn't a
    * non-negative number up to `Number.MAX_SAFE_INTEGER`; a fraction is
    * truncated.
    */
-  readonly pageId: number | null;
+  readonly pageId: Option.Option<number>;
   /**
    * The page's title as MediaWiki reports it: prefixed display form, with
    * spaces rather than underscores, after the wiki's normalisation (such as
@@ -282,13 +294,13 @@ export interface PageMetadata {
    * interpreted: `wikitext` for most pages, or another model such as
    * `Scribunto` (a Lua module), `json`, `css` or `javascript`.
    */
-  readonly contentModel: string | null;
+  readonly contentModel: Option.Option<string>;
   /**
    * MediaWiki's code for the page's content language (`pagelanguage`), such
    * as `en`. It is MediaWiki's own code, which is not always a BCP 47 tag.
    * It is usually the wiki's content language.
    */
-  readonly language: string | null;
+  readonly language: Option.Option<string>;
   /**
    * When the page was last touched (`touched`), as the API sent it: an ISO
    * 8601 UTC string such as `2024-01-22T09:15:00Z`, cut to 40 characters
@@ -296,31 +308,30 @@ export interface PageMetadata {
    * whenever the page's cached rendering is invalidated (a purge, or an edit
    * to a template it uses), so it can be later than the latest revision.
    */
-  readonly touched: string | null;
+  readonly touched: Option.Option<string>;
   /** The ID (`lastrevid`) of the page's latest revision. */
-  readonly lastRevisionId: number | null;
+  readonly lastRevisionId: Option.Option<number>;
   /**
    * The size of the latest revision's content (`length`), in bytes of its
-   * UTF-8 encoding, not characters. `null` above 100,000,000.
+   * UTF-8 encoding, not characters. `None` above 100,000,000.
    */
-  readonly length: number | null;
+  readonly length: Option.Option<number>;
   /**
    * The page's full URL (`fullurl`, not MediaWiki's separate `canonicalurl`) as
    * the queried wiki builds it, such as
    * `https://en.wikipedia.org/wiki/Douglas_Adams`. It is re-parsed with `URL`
-   * and returned in that serialisation; `null` unless it is an absolute
+   * and returned in that serialisation; `None` unless it is an absolute
    * `https:` URL of at most 2000 characters.
    */
-  readonly fullUrl: string | null;
+  readonly fullUrl: Option.Option<string>;
 }
 
-/** A URL string, re-validated as `https:` before being trusted, or `null`. */
-function toHttpsUrl(value: string | undefined): string | null {
-  if (value === undefined || Str.isEmpty(value) || value.length > 2000) return null;
+/** A URL string, re-validated as `https:` before being trusted, or `None`. */
+function toHttpsUrl(value: string | undefined): Option.Option<string> {
+  if (value === undefined || Str.isEmpty(value) || value.length > 2000) return Option.none();
   return parseUrl(value).pipe(
     Option.filter((parsed) => parsed.protocol === "https:"),
     Option.map((parsed) => parsed.toString()),
-    Option.getOrNull,
   );
 }
 
@@ -329,34 +340,34 @@ const parseUrl = Option.liftThrowable((value: string) => new URL(value));
 
 /**
  * Normalises a `PageMetadataResponse` for the requested `title`. Returns
- * `null` when the response has no entry for a stored page: every entry is
+ * `None` when the response has no entry for a stored page: every entry is
  * flagged `missing`, `invalid` (a title MediaWiki rejects) or `special` (a
  * `Special:` or `Media:` title), or there are no entries.
  */
 export function normalisePageMetadata(
   response: PageMetadataResponse,
   title: string,
-): PageMetadata | null {
+): Option.Option<PageMetadata> {
   const pages = R.values(response.query?.pages ?? {});
   const page = pages.find(
     (p) => p.missing === undefined && p.invalid === undefined && p.special === undefined,
   );
-  if (page === undefined) return null;
-  return {
-    pageId: toNonNegativeInt(page.pageid),
+  if (page === undefined) return Option.none();
+  return Option.some({
+    pageId: optionalInt(page.pageid),
     title: sanitiseText(page.title) ?? title,
-    contentModel: sanitiseText(page.contentmodel),
-    language: sanitiseText(page.pagelanguage),
-    touched: P.isString(page.touched) ? page.touched.slice(0, 40) : null,
-    lastRevisionId: toNonNegativeInt(page.lastrevid),
-    length: toNonNegativeInt(page.length, 100_000_000),
+    contentModel: optionalText(page.contentmodel),
+    language: optionalText(page.pagelanguage),
+    touched: timestampOf(page.touched),
+    lastRevisionId: optionalInt(page.lastrevid),
+    length: optionalInt(page.length, 100_000_000),
     fullUrl: toHttpsUrl(page.fullurl),
-  };
+  });
 }
 
 /**
  * Fetches a page's identity and bookkeeping metadata via the Action API's
- * `prop=info`. Returns `null` when the title names no stored page upstream:
+ * `prop=info`. Succeeds with `None` when the title names no stored page upstream:
  * the page does not exist, MediaWiki rejects the title as invalid (for
  * example `Talk:../Foo`, a relative path after the namespace prefix, which
  * {@link Core.requireTitle} lets through), it is a `Special:` or `Media:` title, existing or not, or it is
@@ -424,11 +435,11 @@ export type SearchResponse = typeof SearchResponse.Type;
 /** One search hit, with its HTML-snippet excerpt (Wikimedia wraps matches in `<span class="searchmatch">`). */
 export interface SearchResult {
   /**
-   * The matching page's MediaWiki page ID (`pageid`). `null` if the hit's
+   * The matching page's MediaWiki page ID (`pageid`). `None` if the hit's
    * `pageid` is absent or isn't a non-negative number up to
    * `Number.MAX_SAFE_INTEGER`; a fraction is truncated.
    */
-  readonly pageId: number | null;
+  readonly pageId: Option.Option<number>;
   /**
    * The matching page's title as MediaWiki reports it: prefixed display
    * form, with spaces rather than underscores. Trimmed, and never empty: a
@@ -439,23 +450,23 @@ export interface SearchResult {
    * An excerpt of the page's text around the match, as HTML: matched terms
    * are wrapped in `<span class="searchmatch">`. It is trimmed and capped at
    * {@link Core.MAX_TEXT_FIELD_LENGTH} UTF-16 code units but not sanitised, so
-   * escape or sanitise it before putting it into a page. `null` if the
+   * escape or sanitise it before putting it into a page. `None` if the
    * excerpt is absent or empty.
    */
-  readonly snippet: string | null;
+  readonly snippet: Option.Option<string>;
   /** The number of words in the page (`wordcount`), as the search index counts them. */
-  readonly wordCount: number | null;
+  readonly wordCount: Option.Option<number>;
 }
 
 /** Normalises a `SearchResponse`, bounding the result count and dropping unusably-titled hits. */
 export function normaliseSearch(response: SearchResponse): readonly SearchResult[] {
   const results = Arr.getSomes(
     Arr.map(response.query?.search ?? [], (hit) =>
-      Option.map(Option.fromNullOr(sanitiseText(hit.title)), (title): SearchResult => ({
-        pageId: toNonNegativeInt(hit.pageid),
+      Option.map(optionalText(hit.title), (title): SearchResult => ({
+        pageId: optionalInt(hit.pageid),
         title,
-        snippet: sanitiseText(hit.snippet),
-        wordCount: toNonNegativeInt(hit.wordcount),
+        snippet: optionalText(hit.snippet),
+        wordCount: optionalInt(hit.wordcount),
       })),
     ),
   );
@@ -475,8 +486,9 @@ export const search = Effect.fn("Action.search")(function* (
   options?: SearchOptions,
   retry?: RetryOptions,
 ) {
-  const cleanedQuery = sanitiseText(query);
-  if (cleanedQuery === null) return yield* new InvalidRequest({ kind: "query", value: query });
+  const cleaned = optionalText(query);
+  if (Option.isNone(cleaned)) return yield* new InvalidRequest({ kind: "query", value: query });
+  const cleanedQuery = cleaned.value;
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), MAX_SEARCH_RESULTS);
   const client = yield* WikimediaClient;
   const response = yield* client.getJson(
@@ -559,11 +571,11 @@ export type ParseResponse = typeof ParseResponse.Type;
 export interface ParsedSection {
   /**
    * The heading's level: the number of `=` around it in wikitext, so `2` for
-   * `== Life ==`, or the `<hN>` number of an HTML heading. `null` unless the
+   * `== Life ==`, or the `<hN>` number of an HTML heading. `None` unless the
    * response's `hLevel` is a number, or a numeric string, from 0 to 20; a
    * fraction is truncated, and an empty string reads as `0`.
    */
-  readonly level: number | null;
+  readonly level: Option.Option<number>;
   /**
    * The heading's text as HTML (the API's `line`), not wikitext: MediaWiki
    * renders it and keeps only some inline tags (such as `<i>`, `<b>`,
@@ -576,20 +588,20 @@ export interface ParsedSection {
   /**
    * The heading's fragment ID (`anchor`), for linking to the section as
    * `#anchor`, such as `Early_life`. MediaWiki makes it unique within the
-   * page, adding `_2`, `_3` and so on to repeated headings. `null` if the
+   * page, adding `_2`, `_3` and so on to repeated headings. `None` if the
    * response has none.
    */
-  readonly anchor: string | null;
+  readonly anchor: Option.Option<string>;
 }
 
 /** A parsed page's structural outline — headings, outgoing links, categories, and transcluded templates. */
 export interface ParsedPage {
   /**
-   * The parsed page's MediaWiki page ID (`pageid`). `null` if the response's
+   * The parsed page's MediaWiki page ID (`pageid`). `None` if the response's
    * `pageid` is absent or isn't a non-negative number up to
    * `Number.MAX_SAFE_INTEGER`; a fraction is truncated.
    */
-  readonly pageId: number | null;
+  readonly pageId: Option.Option<number>;
   /**
    * The parsed page's title as MediaWiki reports it: prefixed display form,
    * with spaces rather than underscores. Redirects are not followed, so for a
@@ -639,48 +651,43 @@ export const MAX_PARSE_ENTRIES = 500;
 function titledEntries(
   entries: readonly { readonly "*"?: unknown }[] | undefined,
 ): readonly string[] {
-  const titles = Arr.getSomes(
-    Arr.map(entries ?? [], (entry) => Option.fromNullOr(sanitiseText(entry["*"]))),
-  );
+  const titles = Arr.getSomes(Arr.map(entries ?? [], (entry) => optionalText(entry["*"])));
   return Arr.take(titles, MAX_PARSE_ENTRIES);
 }
 
-/** Normalises a `ParseResponse`; `null` when the endpoint returned no `parse` result (page missing). */
-export function normaliseParse(response: ParseResponse, title: string): ParsedPage | null {
+/** Normalises a `ParseResponse`; `None` when the endpoint returned no `parse` result (page missing). */
+export function normaliseParse(response: ParseResponse, title: string): Option.Option<ParsedPage> {
   const parsed = response.parse;
-  if (parsed === undefined) return null;
+  if (parsed === undefined) return Option.none();
   const sections = Arr.take(
     Arr.getSomes(
       Arr.map(parsed.tocdata?.sections ?? [], (section) =>
-        Option.map(
-          Option.fromNullOr(sanitiseText(section.line)),
-          (sectionTitle): ParsedSection => ({
-            level: toNonNegativeInt(
-              P.isString(section.hLevel) ? Number(section.hLevel) : section.hLevel,
-              20,
-            ),
-            title: sectionTitle,
-            anchor: sanitiseText(section.anchor),
-          }),
-        ),
+        Option.map(optionalText(section.line), (sectionTitle): ParsedSection => ({
+          level: optionalInt(
+            P.isString(section.hLevel) ? Number(section.hLevel) : section.hLevel,
+            20,
+          ),
+          title: sectionTitle,
+          anchor: optionalText(section.anchor),
+        })),
       ),
     ),
     MAX_PARSE_ENTRIES,
   );
-  return {
-    pageId: toNonNegativeInt(parsed.pageid),
+  return Option.some({
+    pageId: optionalInt(parsed.pageid),
     title: sanitiseText(parsed.title) ?? title,
     sections,
     links: titledEntries(parsed.links),
     categories: titledEntries(parsed.categories),
     templates: titledEntries(parsed.templates),
-  };
+  });
 }
 
 /**
  * Parses a page via `action=parse` (`prop=tocdata|links|categories|templates`),
  * returning its section outline, outgoing links, categories, and transcluded
- * templates. Returns `null` when the
+ * templates. Succeeds with `None` when the
  * page does not exist upstream (the endpoint answers an `error` body with
  * no `parse` key, which decodes cleanly under the lenient schema).
  */
@@ -761,7 +768,7 @@ const isHiddenLinkNamespace = (id: number | undefined): boolean => id === 6 || i
 /** A prefix from the response, or `None` when it is not a usable namespace or interwiki name. */
 function linkPrefix(value: string | undefined): Option.Option<string> {
   return Option.filter(
-    Option.fromNullOr(sanitiseText(value)),
+    optionalText(value),
     (prefix) => prefix.length <= 255 && !/[:|[\]{}#<>]/.test(prefix),
   );
 }
@@ -869,7 +876,7 @@ export const MAX_REDIRECT_ALIASES = 100;
 
 /** A spelling from the response, or `None` when it is not a usable redirect word. */
 function redirectAlias(value: string | undefined): Option.Option<string> {
-  return Option.filter(Option.fromNullOr(sanitiseText(value)), (alias) => alias.length <= 255);
+  return Option.filter(optionalText(value), (alias) => alias.length <= 255);
 }
 
 /**
