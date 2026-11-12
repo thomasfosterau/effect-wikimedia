@@ -7,28 +7,18 @@
  * work), and the **resumable** HTTP range download (offset tracked across a
  * mid-stream failure). The network is stubbed at `FetchHttpClient.Fetch`.
  *
- * The Node-stream tests run under `it.live`: the sources wait on real Node
+ * The Node-stream tests run on real time: the sources wait on real Node
  * streams (a `close` event, bounded by an Effect timeout), and the tests bound
  * a hang with a real 5 s timer, neither of which a `TestClock` would advance.
- * The HTTP range tests run under `it.effect`, as no time passes in them.
+ * Those outside a `layer(...)` block use `it.live`; inside one, which hands
+ * out no `it.live`, `layer(..., { excludeTestServices: true })` leaves out the
+ * `TestClock` so `it.effect` runs live. The HTTP range tests run under
+ * `it.effect` with the test services, as no time passes in them.
  *
  * @module tests/dumps/sources
  */
 
-import { execFileSync } from "node:child_process";
-import {
-  closeSync,
-  createReadStream,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  ReadStream,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createReadStream, ReadStream } from "node:fs";
 import {
   compose,
   Duplex,
@@ -41,15 +31,7 @@ import { createGunzip, gzipSync } from "node:zlib";
 import unbzip2 from "unbzip2-stream";
 import { it, layer } from "@effect/vitest";
 import { assertInstanceOf } from "@effect/vitest/utils";
-import {
-  afterAll,
-  beforeAll,
-  describe,
-  expect,
-  expectTypeOf,
-  onTestFinished,
-  vi,
-} from "vite-plus/test";
+import { describe, expect, expectTypeOf, onTestFinished, vi } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -57,16 +39,28 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import * as FileSystem from "effect/FileSystem";
+import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient } from "effect/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Core, Dumps } from "../../src/index.ts";
+import {
+  fixturePath,
+  readFixture,
+  readFixtureBytes,
+  TempDir,
+  tempPath,
+  writeTestFile,
+} from "../helpers/fixtures.ts";
 
 const DUMP = '[\n{"type":"item","id":"Q1"},\n{"type":"item","id":"Q2"}\n]\n';
 
-let tmp: string;
-beforeAll(() => (tmp = mkdtempSync(join(tmpdir(), "dumps-sources-"))));
-afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+/** The Node platform services, and a temporary directory for the tests that write files. */
+const platform = Layer.provideMerge(TempDir.layer("dumps-sources-"), NodeServices.layer);
 
 const decodeUtf8 = (bytes: ReadonlyArray<Uint8Array>): string =>
   Buffer.concat(bytes.map((b) => Buffer.from(b))).toString("utf8");
@@ -127,7 +121,7 @@ const promiseOrHung = <A>(promise: Promise<A>): Effect.Effect<A | "hung", Cause.
  * listener makes the test fail on its own (Vitest would otherwise only fail
  * the run, unattributed).
  */
-const withoutUncaught = <A, E>(body: Effect.Effect<A, E>): Effect.Effect<void, E> =>
+const withoutUncaught = <A, E, R>(body: Effect.Effect<A, E, R>): Effect.Effect<void, E, R> =>
   Effect.gen(function* () {
     const uncaught = collectProcessEvents("uncaughtException");
     yield* body;
@@ -137,29 +131,29 @@ const withoutUncaught = <A, E>(body: Effect.Effect<A, E>): Effect.Effect<void, E
 
 // ── File source + decompression ──────────────────────────────────────────
 
-describe("fromFile", () => {
-  it.live("reads a plain file as bytes", () =>
+layer(platform, { excludeTestServices: true })("fromFile", (it) => {
+  it.effect("reads a plain file as bytes", () =>
     Effect.gen(function* () {
-      const path = join(tmp, "plain.ndjson");
-      writeFileSync(path, DUMP);
+      const path = yield* tempPath("plain.ndjson");
+      yield* writeTestFile(path, DUMP);
       const bytes = yield* Stream.runCollect(Dumps.fromFile(path));
       expect(decodeUtf8(bytes)).toBe(DUMP);
     }),
   );
 
-  it.live("auto-detects gzip from a .gz extension", () =>
+  it.effect("auto-detects gzip from a .gz extension", () =>
     Effect.gen(function* () {
-      const path = join(tmp, "auto.json.gz");
-      writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+      const path = yield* tempPath("auto.json.gz");
+      yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
       const bytes = yield* Stream.runCollect(Dumps.fromFile(path));
       expect(decodeUtf8(bytes)).toBe(DUMP);
     }),
   );
 
-  it.live("uses an explicit decompressor when given", () =>
+  it.effect("uses an explicit decompressor when given", () =>
     Effect.gen(function* () {
-      const path = join(tmp, "explicit.bin");
-      writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+      const path = yield* tempPath("explicit.bin");
+      yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
       const bytes = yield* Stream.runCollect(
         Dumps.fromFile(path, { decompressor: Dumps.gunzipTransform }),
       );
@@ -167,7 +161,7 @@ describe("fromFile", () => {
     }),
   );
 
-  it.live("destroys the decompressor when opening the file throws", () =>
+  it.effect("destroys the decompressor when opening the file throws", () =>
     Effect.gen(function* () {
       // A NUL byte in the path makes `createReadStream` throw synchronously,
       // after the decompressor was created.
@@ -175,7 +169,7 @@ describe("fromFile", () => {
       assertInstanceOf(
         yield* Effect.flip(
           Stream.runDrain(
-            Dumps.fromFile(join(tmp, "bad\0path.gz"), {
+            Dumps.fromFile(yield* tempPath("bad\0path.gz"), {
               decompressor: () => {
                 const stage = new PassThrough();
                 created.stage = Option.some(stage);
@@ -239,9 +233,6 @@ describe("decompression stages", () => {
 
 // ── bzip2 through a classic stream (#128) ────────────────────────────────
 
-const fixturePath = (name: string): string =>
-  fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
-
 /**
  * `entities-slice.ndjson`, bzip2-compressed: made with
  * `bzip2 -1 -c tests/fixtures/dumps/entities-slice.ndjson > tests/fixtures/dumps/entities-slice.ndjson.bz2`
@@ -251,8 +242,11 @@ const fixturePath = (name: string): string =>
  * decodes during `write()` from about 925 kB to 125 kB, so the multi-stream
  * test below reaches that path with a small input.
  */
-const SLICE_BZ2 = fixturePath("entities-slice.ndjson.bz2");
-const SLICE = readFileSync(fixturePath("entities-slice.ndjson"), "utf8");
+const SLICE_BZ2 = fixturePath("dumps/entities-slice.ndjson.bz2");
+/** The bytes of {@link SLICE_BZ2}'s file. */
+const SLICE_BZ2_BYTES = readFixtureBytes("dumps/entities-slice.ndjson.bz2");
+/** The slice's uncompressed text. */
+const SLICE = readFixture("dumps/entities-slice.ndjson");
 
 /** Whether a classic `through` stream, which has no `destroyed`, has been destroyed. */
 const throughDestroyed = (stream: LegacyStream & { readable: boolean; writable: boolean }) =>
@@ -291,156 +285,161 @@ const explodingWrite = (): never => {
   throw new FakeFailure({ message: "write exploded" });
 };
 
-describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
-  // `unbzip2-stream` returns a classic `through` stream: no `read()`, and
-  // `end` / `close` but never `finish`, so `stream.compose` failed it with
-  // "Premature close". The stage is adapted into a streams2 Duplex first.
-  it.live("streams a .bz2 dump through fromFile to its entities", () =>
-    Effect.gen(function* () {
-      const ids = yield* Stream.runCollect(
-        Dumps.fromFile(SLICE_BZ2, { decompressor: () => unbzip2() }).pipe(
-          Dumps.entityRecords,
-          Dumps.onlyEntities,
-          Stream.map((item) => item.id),
-        ),
-      );
-      expect(ids).toEqual(["Q1", "Q42", "Q64", "P31", "Q5"]);
-    }),
-  );
-
-  it.live("streams a .bz2 source through decompressWith to its bytes", () =>
-    Effect.gen(function* () {
-      const source = Dumps.fromNodeReadable(() => createReadStream(SLICE_BZ2));
-      const bytes = yield* Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2())));
-      expect(decodeUtf8(bytes)).toBe(SLICE);
-    }),
-  );
-
-  it.live("decodes a multi-stream input without a hang", () =>
-    Effect.gen(function* () {
-      // Concatenated bzip2 streams (what parallel compressors such as `pbzip2`
-      // write), in one 212 kB chunk: past 125 kB of input the decoder decodes
-      // inside `write()`, and that one write's output outruns the adapter's
-      // buffer, so a write left waiting on a `drain` that never comes would
-      // hang here.
-      const copies = 400;
-      const compressed = readFileSync(SLICE_BZ2);
-      const source = Stream.make(
-        new Uint8Array(Buffer.concat(Array.from({ length: copies }, () => compressed))),
-      );
-      const bytes = yield* orHung(
-        Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2()))),
-      );
-      expect(bytes).not.toBe("hung");
-      if (bytes === "hung") return;
-      expect(decodeUtf8(bytes)).toBe(SLICE.repeat(copies));
-    }),
-  );
-
-  it.live("stops writing to a classic stage while its output is unread", () =>
-    Effect.gen(function* () {
-      // Small chunks and a slow consumer: the adapter must pause the decoder
-      // when its own buffer fills (so its `write()` returns `false`) and must
-      // not write again until the decoder drains. Skipping either step leaves
-      // memory unbounded for a slow consumer of a large dump.
-      const copies = 400;
-      const compressed = Buffer.concat(
-        Array.from({ length: copies }, () => readFileSync(SLICE_BZ2)),
-      );
-      const chunks = Array.from(
-        { length: Math.ceil(compressed.length / 4096) },
-        (_, i) => new Uint8Array(compressed.subarray(i * 4096, (i + 1) * 4096)),
-      );
-      const stage = unbzip2();
-      const write = stage.write.bind(stage);
-      let refused = 0;
-      let writesWhilePaused = 0;
-      // unbzip2-stream's `through` stream carries a `paused` flag its type
-      // declarations omit, so it is read through a guard.
-      const through: unknown = stage;
-      const paused = (): boolean => P.hasProperty(through, "paused") && through.paused === true;
-      vi.spyOn(stage, "write").mockImplementation((chunk: Uint8Array) => {
-        if (paused()) writesWhilePaused++;
-        const accepted = write(chunk);
-        if (!accepted) refused++;
-        return accepted;
-      });
-      const bytes = yield* orHung(
-        Stream.runCollect(
-          Stream.fromIterable(chunks).pipe(
-            Dumps.decompressWith(() => stage),
-            Stream.tap(() => Effect.tryPromise(() => wait(0))),
+layer(NodeServices.layer, { excludeTestServices: true })(
+  "bzip2 through unbzip2-stream, a classic stream (#128)",
+  (it) => {
+    // `unbzip2-stream` returns a classic `through` stream: no `read()`, and
+    // `end` / `close` but never `finish`, so `stream.compose` failed it with
+    // "Premature close". The stage is adapted into a streams2 Duplex first.
+    it.effect("streams a .bz2 dump through fromFile to its entities", () =>
+      Effect.gen(function* () {
+        const ids = yield* Stream.runCollect(
+          Dumps.fromFile(yield* SLICE_BZ2, { decompressor: () => unbzip2() }).pipe(
+            Dumps.entityRecords,
+            Dumps.onlyEntities,
+            Stream.map((item) => item.id),
           ),
-        ),
-      );
-      expect(bytes).not.toBe("hung");
-      if (bytes === "hung") return;
-      expect(decodeUtf8(bytes)).toBe(SLICE.repeat(copies));
-      expect(refused).toBeGreaterThan(0);
-      expect(writesWhilePaused).toBe(0);
-    }),
-  );
+        );
+        expect(ids).toEqual(["Q1", "Q42", "Q64", "P31", "Q5"]);
+      }),
+    );
 
-  // The decoder reports truncated input with the `TypeError` its bit reader
-  // throws on running out of bytes, so that case pins only the prefix.
-  it.live.each([
-    {
-      label: "corrupt",
-      input: Buffer.from("BZh1 is not bzip2 data, though it starts like it"),
-      message: "not valid bzip",
-    },
-    {
-      label: "truncated",
-      input: readFileSync(SLICE_BZ2).subarray(0, -8),
-      message: "dumps/source-read-failed: ",
-    },
-  ])("fails with a SourceError on $label input", ({ input, message }) =>
-    Effect.gen(function* () {
-      const source = Stream.make(new Uint8Array(input));
-      yield* withoutUncaught(
-        Effect.gen(function* () {
-          const error = yield* failsPromptly(source.pipe(Dumps.decompressWith(() => unbzip2())));
-          expect(error).toMatchObject({ description: expect.stringContaining(message) });
-        }),
-      );
-    }),
-  );
+    it.effect("streams a .bz2 source through decompressWith to its bytes", () =>
+      Effect.gen(function* () {
+        const slicePath = yield* SLICE_BZ2;
+        const source = Dumps.fromNodeReadable(() => createReadStream(slicePath));
+        const bytes = yield* Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2())));
+        expect(decodeUtf8(bytes)).toBe(yield* SLICE);
+      }),
+    );
 
-  it.live("fails with a SourceError when a classic stage's write() throws", () =>
-    Effect.gen(function* () {
-      const stage = classicStream(explodingWrite);
-      const error = yield* failsPromptly(
-        Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
-      );
-      expect(error).toMatchObject({ description: expect.stringContaining("write exploded") });
-      expect(throughDestroyed(stage)).toBe(true);
-    }),
-  );
+    it.effect("decodes a multi-stream input without a hang", () =>
+      Effect.gen(function* () {
+        // Concatenated bzip2 streams (what parallel compressors such as `pbzip2`
+        // write), in one 212 kB chunk: past 125 kB of input the decoder decodes
+        // inside `write()`, and that one write's output outruns the adapter's
+        // buffer, so a write left waiting on a `drain` that never comes would
+        // hang here.
+        const copies = 400;
+        const compressed = yield* SLICE_BZ2_BYTES;
+        const source = Stream.make(
+          new Uint8Array(Buffer.concat(Array.from({ length: copies }, () => compressed))),
+        );
+        const bytes = yield* orHung(
+          Stream.runCollect(source.pipe(Dumps.decompressWith(() => unbzip2()))),
+        );
+        expect(bytes).not.toBe("hung");
+        if (bytes === "hung") return;
+        expect(decodeUtf8(bytes)).toBe((yield* SLICE).repeat(copies));
+      }),
+    );
 
-  it.live("fails with a SourceError when a classic stage closes before its output ends", () =>
-    Effect.gen(function* () {
-      const stage = classicStream(function () {
-        this.emit("close");
-        return true;
-      });
-      const error = yield* failsPromptly(
-        Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
-      );
-      expect(error).toMatchObject({ description: expect.stringContaining("closed before") });
-    }),
-  );
+    it.effect("stops writing to a classic stage while its output is unread", () =>
+      Effect.gen(function* () {
+        // Small chunks and a slow consumer: the adapter must pause the decoder
+        // when its own buffer fills (so its `write()` returns `false`) and must
+        // not write again until the decoder drains. Skipping either step leaves
+        // memory unbounded for a slow consumer of a large dump.
+        const copies = 400;
+        const member = yield* SLICE_BZ2_BYTES;
+        const compressed = Buffer.concat(Array.from({ length: copies }, () => member));
+        const chunks = Array.from(
+          { length: Math.ceil(compressed.length / 4096) },
+          (_, i) => new Uint8Array(compressed.subarray(i * 4096, (i + 1) * 4096)),
+        );
+        const stage = unbzip2();
+        const write = stage.write.bind(stage);
+        let refused = 0;
+        let writesWhilePaused = 0;
+        // unbzip2-stream's `through` stream carries a `paused` flag its type
+        // declarations omit, so it is read through a guard.
+        const through: unknown = stage;
+        const paused = (): boolean => P.hasProperty(through, "paused") && through.paused === true;
+        vi.spyOn(stage, "write").mockImplementation((chunk: Uint8Array) => {
+          if (paused()) writesWhilePaused++;
+          const accepted = write(chunk);
+          if (!accepted) refused++;
+          return accepted;
+        });
+        const bytes = yield* orHung(
+          Stream.runCollect(
+            Stream.fromIterable(chunks).pipe(
+              Dumps.decompressWith(() => stage),
+              Stream.tap(() => Effect.tryPromise(() => wait(0))),
+            ),
+          ),
+        );
+        expect(bytes).not.toBe("hung");
+        if (bytes === "hung") return;
+        expect(decodeUtf8(bytes)).toBe((yield* SLICE).repeat(copies));
+        expect(refused).toBeGreaterThan(0);
+        expect(writesWhilePaused).toBe(0);
+      }),
+    );
 
-  it.live("rejects a classic stage that has already ended", () =>
-    Effect.gen(function* () {
-      const stage = unbzip2();
-      stage.end();
-      const error = yield* failsPromptly(Dumps.fromFile(SLICE_BZ2, { decompressor: () => stage }));
-      expect(error).toMatchObject({
-        description: expect.stringContaining("neither destroyed nor ended"),
-      });
-    }),
-  );
-});
+    // The decoder reports truncated input with the `TypeError` its bit reader
+    // throws on running out of bytes, so that case pins only the prefix.
+    it.effect.each([
+      {
+        label: "corrupt",
+        input: () => Buffer.from("BZh1 is not bzip2 data, though it starts like it"),
+        message: "not valid bzip",
+      },
+      {
+        label: "truncated",
+        input: (member: Uint8Array) => member.subarray(0, -8),
+        message: "dumps/source-read-failed: ",
+      },
+    ])("fails with a SourceError on $label input", ({ input, message }) =>
+      Effect.gen(function* () {
+        const source = Stream.make(new Uint8Array(input(yield* SLICE_BZ2_BYTES)));
+        yield* withoutUncaught(
+          Effect.gen(function* () {
+            const error = yield* failsPromptly(source.pipe(Dumps.decompressWith(() => unbzip2())));
+            expect(error).toMatchObject({ description: expect.stringContaining(message) });
+          }),
+        );
+      }),
+    );
+
+    it.effect("fails with a SourceError when a classic stage's write() throws", () =>
+      Effect.gen(function* () {
+        const stage = classicStream(explodingWrite);
+        const error = yield* failsPromptly(
+          Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
+        );
+        expect(error).toMatchObject({ description: expect.stringContaining("write exploded") });
+        expect(throughDestroyed(stage)).toBe(true);
+      }),
+    );
+
+    it.effect("fails with a SourceError when a classic stage closes before its output ends", () =>
+      Effect.gen(function* () {
+        const stage = classicStream(function () {
+          this.emit("close");
+          return true;
+        });
+        const error = yield* failsPromptly(
+          Stream.make(new Uint8Array([1])).pipe(Dumps.decompressWith(() => stage)),
+        );
+        expect(error).toMatchObject({ description: expect.stringContaining("closed before") });
+      }),
+    );
+
+    it.effect("rejects a classic stage that has already ended", () =>
+      Effect.gen(function* () {
+        const stage = unbzip2();
+        stage.end();
+        const error = yield* failsPromptly(
+          Dumps.fromFile(yield* SLICE_BZ2, { decompressor: () => stage }),
+        );
+        expect(error).toMatchObject({
+          description: expect.stringContaining("neither destroyed nor ended"),
+        });
+      }),
+    );
+  },
+);
 
 // ── Structural stream types ──────────────────────────────────────────────
 
@@ -510,18 +509,18 @@ const failsPromptly = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<Dumps.S
     return error;
   });
 
-describe("a decompressor that is not a Node stream", () => {
+layer(platform, { excludeTestServices: true })("a decompressor that is not a Node stream", (it) => {
   // The structural type admits it, so the runtime must reject it.
-  it.live("fails fromFile with a SourceError", () =>
+  it.effect("fails fromFile with a SourceError", () =>
     Effect.gen(function* () {
-      const path = join(tmp, "fake-decompressor.bin");
-      writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+      const path = yield* tempPath("fake-decompressor.bin");
+      yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
       const error = yield* failsPromptly(Dumps.fromFile(path, { decompressor: fakeDuplex }));
       expect(error).toMatchObject({ description: expect.stringContaining("Node stream") });
     }),
   );
 
-  it.live("fails decompressWith with a SourceError", () =>
+  it.effect("fails decompressWith with a SourceError", () =>
     Effect.gen(function* () {
       const source = Dumps.fromNodeReadable(() => Readable.from([gzipSync(Buffer.from(DUMP))]));
       const error = yield* failsPromptly(source.pipe(Dumps.decompressWith(fakeDuplex)));
@@ -529,7 +528,7 @@ describe("a decompressor that is not a Node stream", () => {
     }),
   );
 
-  it.live("rejects decompressWith's stage before it starts the upstream source", () =>
+  it.effect("rejects decompressWith's stage before it starts the upstream source", () =>
     Effect.gen(function* () {
       // The stage is checked before the source is started, as `fromFile` checks
       // it before opening its file, so a rejected stage opens nothing that
@@ -547,7 +546,7 @@ describe("a decompressor that is not a Node stream", () => {
     }),
   );
 
-  it.live("fails without an unhandled rejection when the upstream has already failed", () =>
+  it.effect("fails without an unhandled rejection when the upstream has already failed", () =>
     Effect.gen(function* () {
       // A source that fails as it starts leaves the bridged web stream errored,
       // so cancelling it rejects; that rejection must not escape. The listener
@@ -564,95 +563,100 @@ describe("a decompressor that is not a Node stream", () => {
   );
 });
 
-describe("a decompressor that returns a used stream", () => {
-  // `isReadable` / `isWritable` give `false`, not `null`, for a used stage, so
-  // the not-a-stream check let it through (#111). `compose` then throws on a
-  // destroyed stage or one whose input has ended, but only once the upstream
-  // has been opened, which leaked; and it accepts one whose output has
-  // already ended, which never settles. The stage must be rejected before
-  // anything is opened, and a `compose` that throws anyway must release what
-  // it was given. Each case builds its stage before the stream runs.
-  const usedStages: ReadonlyArray<readonly [string, () => Promise<Duplex>]> = [
-    [
-      "destroyed",
-      async () => {
-        const stage = createGunzip();
-        stage.destroy();
-        return stage;
-      },
-    ],
-    ["ended", async () => new PassThrough().end()],
-    [
-      "read to its end",
-      async () => {
-        const stage = new Duplex({ read() {}, write: (_chunk, _encoding, done) => done() });
-        stage.push(null);
-        stage.resume();
-        await new Promise((resolve) => stage.once("end", resolve));
-        return stage;
-      },
-    ],
-  ];
+layer(platform, { excludeTestServices: true })(
+  "a decompressor that returns a used stream",
+  (it) => {
+    // `isReadable` / `isWritable` give `false`, not `null`, for a used stage, so
+    // the not-a-stream check let it through (#111). `compose` then throws on a
+    // destroyed stage or one whose input has ended, but only once the upstream
+    // has been opened, which leaked; and it accepts one whose output has
+    // already ended, which never settles. The stage must be rejected before
+    // anything is opened, and a `compose` that throws anyway must release what
+    // it was given. Each case builds its stage before the stream runs.
+    const usedStages: ReadonlyArray<readonly [string, () => Promise<Duplex>]> = [
+      [
+        "destroyed",
+        async () => {
+          const stage = createGunzip();
+          stage.destroy();
+          return stage;
+        },
+      ],
+      ["ended", async () => new PassThrough().end()],
+      [
+        "read to its end",
+        async () => {
+          const stage = new Duplex({ read() {}, write: (_chunk, _encoding, done) => done() });
+          stage.push(null);
+          stage.resume();
+          await new Promise((resolve) => stage.once("end", resolve));
+          return stage;
+        },
+      ],
+    ];
 
-  it.live.each(usedStages)(
-    "fails decompressWith with a SourceError and opens no upstream when the stage is %s",
-    ([, used]) =>
-      Effect.gen(function* () {
-        const stage = yield* Effect.tryPromise(used);
-        let opened = false;
-        const source = Dumps.fromNodeReadable(() => {
-          opened = true;
-          return new Readable({ read() {} });
-        });
-        yield* withoutUncaught(
-          Effect.gen(function* () {
-            const error = yield* failsPromptly(source.pipe(Dumps.decompressWith(() => stage)));
-            expect(error).toMatchObject({
-              description: expect.stringContaining("neither destroyed nor ended"),
-            });
-          }),
-        );
-        expect(opened).toBe(false);
-      }),
-  );
-
-  it.live.each(usedStages)(
-    "fails fromFile with a SourceError and leaks no file descriptor when the stage is %s",
-    ([, used]) =>
-      Effect.gen(function* () {
-        const stage = yield* Effect.tryPromise(used);
-        const path = join(tmp, "used-decompressor.bin");
-        writeFileSync(path, gzipSync(Buffer.from(DUMP)));
-        // Every `fs.ReadStream` calls `_construct`, which opens the file, on a
-        // `nextTick` after it is constructed; collect the ones for this path to
-        // check each is closed again.
-        const construct = vi.spyOn(ReadStream.prototype, "_construct");
-        const opened = (): ReadonlyArray<ReadStream> =>
-          construct.mock.contexts.filter(
-            (context): context is ReadStream =>
-              context instanceof ReadStream && context.path === path,
+    it.effect.each(usedStages)(
+      "fails decompressWith with a SourceError and opens no upstream when the stage is %s",
+      ([, used]) =>
+        Effect.gen(function* () {
+          const stage = yield* Effect.tryPromise(used);
+          let opened = false;
+          const source = Dumps.fromNodeReadable(() => {
+            opened = true;
+            return new Readable({ read() {} });
+          });
+          yield* withoutUncaught(
+            Effect.gen(function* () {
+              const error = yield* failsPromptly(source.pipe(Dumps.decompressWith(() => stage)));
+              expect(error).toMatchObject({
+                description: expect.stringContaining("neither destroyed nor ended"),
+              });
+            }),
           );
-        onTestFinished(() => construct.mockRestore());
-        yield* withoutUncaught(
-          Effect.gen(function* () {
-            const error = yield* failsPromptly(Dumps.fromFile(path, { decompressor: () => stage }));
-            yield* Effect.sleep("1 millis"); // let any `_construct` tick run
-            const closed = opened().map((file) =>
-              file.closed
-                ? Promise.resolve("closed" as const)
-                : new Promise<"closed">((resolve) => file.once("close", () => resolve("closed"))),
+          expect(opened).toBe(false);
+        }),
+    );
+
+    it.effect.each(usedStages)(
+      "fails fromFile with a SourceError and leaks no file descriptor when the stage is %s",
+      ([, used]) =>
+        Effect.gen(function* () {
+          const stage = yield* Effect.tryPromise(used);
+          const path = yield* tempPath("used-decompressor.bin");
+          yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
+          // Every `fs.ReadStream` calls `_construct`, which opens the file, on a
+          // `nextTick` after it is constructed; collect the ones for this path to
+          // check each is closed again.
+          const construct = vi.spyOn(ReadStream.prototype, "_construct");
+          const opened = (): ReadonlyArray<ReadStream> =>
+            construct.mock.contexts.filter(
+              (context): context is ReadStream =>
+                context instanceof ReadStream && context.path === path,
             );
-            expect(yield* promiseOrHung(Promise.all(closed))).not.toBe("hung");
-            // Rejected before the file is opened at all.
-            expect(opened()).toEqual([]);
-            expect(error).toMatchObject({
-              description: expect.stringContaining("neither destroyed nor ended"),
-            });
-          }),
-        );
-      }),
-  );
-});
+          onTestFinished(() => construct.mockRestore());
+          yield* withoutUncaught(
+            Effect.gen(function* () {
+              const error = yield* failsPromptly(
+                Dumps.fromFile(path, { decompressor: () => stage }),
+              );
+              yield* Effect.sleep("1 millis"); // let any `_construct` tick run
+              const closed = opened().map((file) =>
+                file.closed
+                  ? Promise.resolve("closed" as const)
+                  : new Promise<"closed">((resolve) => file.once("close", () => resolve("closed"))),
+              );
+              expect(yield* promiseOrHung(Promise.all(closed))).not.toBe("hung");
+              // Rejected before the file is opened at all.
+              expect(opened()).toEqual([]);
+              expect(error).toMatchObject({
+                description: expect.stringContaining("neither destroyed nor ended"),
+              });
+            }),
+          );
+        }),
+    );
+  },
+);
 
 // ── Interruption teardown ────────────────────────────────────────────────
 
@@ -701,8 +705,8 @@ const interruptsPromptly = <A, E>(
     expect(outcome).toBe("interrupted");
   });
 
-describe("interruption teardown", () => {
-  it.live("destroys the decompression source when the Effect is interrupted", () =>
+layer(platform, { excludeTestServices: true })("interruption teardown", (it) => {
+  it.effect("destroys the decompression source when the Effect is interrupted", () =>
     Effect.gen(function* () {
       const source = new TrackedGzSource();
       const program = Stream.runDrain(
@@ -720,7 +724,7 @@ describe("interruption teardown", () => {
     }),
   );
 
-  it.live("destroys a stalled Readable when the Effect is interrupted", () =>
+  it.effect("destroys a stalled Readable when the Effect is interrupted", () =>
     Effect.gen(function* () {
       const { readable, reading } = stalledReadable();
       yield* interruptsPromptly(
@@ -731,7 +735,7 @@ describe("interruption teardown", () => {
     }),
   );
 
-  it.live(
+  it.effect(
     "destroys a stalled source behind a decompression stage when the Effect is interrupted",
     () =>
       Effect.gen(function* () {
@@ -748,7 +752,7 @@ describe("interruption teardown", () => {
   // `return()`, only on `close`. A source whose `destroy()` never gets there
   // would hold the interrupt up for good, so teardown waits for `close` only
   // up to a bound (#94); these fail with "hung" without it.
-  it.live(
+  it.effect(
     "completes the interrupt within a bound when the stalled Readable's destroy() never emits close",
     () =>
       Effect.gen(function* () {
@@ -762,16 +766,19 @@ describe("interruption teardown", () => {
   );
 
   // `mkfifo` is POSIX-only; CI runs on Linux.
-  it.live.skipIf(process.platform === "win32")(
+  it.effect.skipIf(process.platform === "win32")(
     "completes the interrupt within a bound on a fromFile read of a FIFO whose writer is idle",
     () =>
       Effect.gen(function* () {
         // `fs.ReadStream`'s `destroy()` waits for its in-flight read, which an
         // open writer that writes nothing never lets return. Opening the FIFO
         // read-write first holds a writer, so the source's open doesn't block.
-        const fifo = join(tmp, "idle.fifo");
-        execFileSync("mkfifo", [fifo]);
-        const writer = openSync(fifo, "r+");
+        const fifo = yield* tempPath("idle.fifo");
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const fs = yield* FileSystem.FileSystem;
+        yield* spawner.exitCode(ChildProcess.make("mkfifo", [fifo]));
+        const writerScope = yield* Scope.make();
+        yield* fs.open(fifo, { flag: "r+" }).pipe(Scope.provide(writerScope));
         // `_read` dispatches the blocking read, so once it has been called a read
         // is in flight and the drain's `next()` is pending on it.
         const read = vi.spyOn(ReadStream.prototype, "_read");
@@ -796,7 +803,7 @@ describe("interruption teardown", () => {
                   ? Promise.resolve("closed" as const)
                   : new Promise<"closed">((resolve) => open.once("close", () => resolve("closed"))),
             });
-            closeSync(writer);
+            yield* Scope.close(writerScope, Exit.void);
             expect(yield* promiseOrHung(closed)).toBe("closed");
           }).pipe(Effect.orDie),
         );
@@ -808,7 +815,7 @@ describe("interruption teardown", () => {
       }),
   );
 
-  it.live("waits for a slow-closing Readable to close before the interrupt returns", () =>
+  it.effect("waits for a slow-closing Readable to close before the interrupt returns", () =>
     Effect.gen(function* () {
       // `_destroy` finishes 200 ms after `destroy()`: inside the bound, so the
       // interrupt must wait for it; a near-zero bound would return first.
@@ -826,7 +833,7 @@ describe("interruption teardown", () => {
     }),
   );
 
-  it.live("swallows the delegated return()'s rejection when it settles after the bound", () =>
+  it.effect("swallows the delegated return()'s rejection when it settles after the bound", () =>
     Effect.gen(function* () {
       // A source whose `return()` outlives the bound and then rejects: the
       // interrupt has already completed, so the rejection has nowhere to go and
@@ -861,7 +868,7 @@ describe("interruption teardown", () => {
     }),
   );
 
-  it.live(
+  it.effect(
     "destroys the Readable when interrupted before the iterator's return() is registered",
     () =>
       Effect.gen(function* () {
@@ -886,7 +893,7 @@ describe("interruption teardown", () => {
       }),
   );
 
-  it.live("destroys a hand-built source whose iterator's return() doesn't, exactly once", () =>
+  it.effect("destroys a hand-built source whose iterator's return() doesn't, exactly once", () =>
     Effect.gen(function* () {
       // A Node Readable's own iterator destroys the stream in `return()`, which
       // would mask a teardown that never calls `destroy()` (#80). This source's
@@ -923,7 +930,7 @@ describe("interruption teardown", () => {
     }),
   );
 
-  it.live("destroys the Readable when interrupted as soon as evaluate returns it", () =>
+  it.effect("destroys the Readable when interrupted as soon as evaluate returns it", () =>
     Effect.gen(function* () {
       // An interruption the fiber observes right after `evaluate` returns, before
       // anything else runs, must still destroy the Readable: opening it and
@@ -945,7 +952,7 @@ describe("interruption teardown", () => {
     }),
   );
 
-  it.live(
+  it.effect(
     "releases decompressWith's upstream source when interrupted before the stage is opened",
     () =>
       Effect.gen(function* () {
@@ -988,7 +995,7 @@ describe("interruption teardown", () => {
       }),
   );
 
-  it.live(
+  it.effect(
     "destroys a classic bzip2 stage behind decompressWith, without an uncaught error, when interrupted while stalled",
     () =>
       Effect.gen(function* () {
@@ -1005,7 +1012,7 @@ describe("interruption teardown", () => {
       }),
   );
 
-  it.live(
+  it.effect(
     "destroys a classic bzip2 stage behind fromFile, without an uncaught error, when interrupted as soon as it is opened",
     () =>
       Effect.gen(function* () {
@@ -1022,7 +1029,7 @@ describe("interruption teardown", () => {
         yield* withoutUncaught(
           Effect.gen(function* () {
             const exit = yield* exitOrHung(
-              Stream.runDrain(Dumps.fromFile(SLICE_BZ2, { decompressor })),
+              Stream.runDrain(Dumps.fromFile(yield* SLICE_BZ2, { decompressor })),
             );
             expect(exit).not.toBe("hung");
             if (exit === "hung") return;
@@ -1034,7 +1041,7 @@ describe("interruption teardown", () => {
       }),
   );
 
-  it.live(
+  it.effect(
     "destroys fromFile's decompression chain, without an uncaught error, when interrupted as soon as it is opened",
     () =>
       Effect.gen(function* () {
@@ -1044,8 +1051,8 @@ describe("interruption teardown", () => {
         // that error, and a real process would crash on it (#109). The
         // decompressor interrupts the fiber, which lands the interruption right
         // after the open, as in the #95 test above.
-        const path = join(tmp, "interrupted-open.json.gz");
-        writeFileSync(path, gzipSync(Buffer.from(DUMP)));
+        const path = yield* tempPath("interrupted-open.json.gz");
+        yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
         const created = { stage: Option.none<Transform>() };
         const decompressor = (): Transform => {
           Option.map(Option.fromUndefinedOr(Fiber.getCurrent()), (fiber) =>
@@ -1073,43 +1080,47 @@ describe("interruption teardown", () => {
 // ── Byte ranges of a file ────────────────────────────────────────────────
 
 /** Writes the alphabet fixture to the temp directory and returns its path. */
-const alphabetFile = (): string => {
-  const file = join(tmp, "alphabet.txt");
-  writeFileSync(file, "abcdefghijklmnopqrstuvwxyz");
+const alphabetFile = Effect.fn("alphabetFile")(function* () {
+  const file = yield* tempPath("alphabet.txt");
+  yield* writeTestFile(file, "abcdefghijklmnopqrstuvwxyz");
   return file;
-};
+});
 
 /** Reads the alphabet fixture through `Dumps.fromFile` with `options`, decoded as UTF-8. */
-const readAlphabet = (options: Dumps.FromFileOptions): Effect.Effect<string, Dumps.SourceError> =>
-  Effect.map(Stream.runCollect(Dumps.fromFile(alphabetFile(), options)), decodeUtf8);
+const readAlphabet = (
+  options: Dumps.FromFileOptions,
+): Effect.Effect<string, Dumps.SourceError | PlatformError, FileSystem.FileSystem | TempDir> =>
+  Effect.flatMap(alphabetFile(), (file) =>
+    Effect.map(Stream.runCollect(Dumps.fromFile(file, options)), decodeUtf8),
+  );
 
-describe("fromFile with a byte range", () => {
-  it.live("reads [start, end) with end exclusive", () =>
+layer(platform, { excludeTestServices: true })("fromFile with a byte range", (it) => {
+  it.effect("reads [start, end) with end exclusive", () =>
     Effect.gen(function* () {
       expect(yield* readAlphabet({ start: 3, end: 6 })).toBe("def");
       expect(yield* readAlphabet({ start: 0, end: 1 })).toBe("a");
     }),
   );
 
-  it.live("reads from start to the end of the file, or from the start to end", () =>
+  it.effect("reads from start to the end of the file, or from the start to end", () =>
     Effect.gen(function* () {
       expect(yield* readAlphabet({ start: 23 })).toBe("xyz");
       expect(yield* readAlphabet({ end: 3 })).toBe("abc");
     }),
   );
 
-  it.live("reads to the end of the file for an end past it", () =>
+  it.effect("reads to the end of the file for an end past it", () =>
     Effect.gen(function* () {
       expect(yield* readAlphabet({ start: 24, end: 1000 })).toBe("yz");
     }),
   );
 
-  it.live("decompresses one member of a concatenated gzip file on its own", () =>
+  it.effect("decompresses one member of a concatenated gzip file on its own", () =>
     Effect.gen(function* () {
       const first = gzipSync(Buffer.from("first member"));
       const second = gzipSync(Buffer.from("second member"));
-      const file = join(tmp, "members.gz");
-      writeFileSync(file, Buffer.concat([first, second]));
+      const file = yield* tempPath("members.gz");
+      yield* writeTestFile(file, Buffer.concat([first, second]));
       const bytes = yield* Stream.runCollect(
         Dumps.fromFile(file, { start: first.length, end: first.length + second.length }),
       );
@@ -1117,10 +1128,10 @@ describe("fromFile with a byte range", () => {
     }),
   );
 
-  it.live("closes the ranged file read when the stream is torn down early", () =>
+  it.effect("closes the ranged file read when the stream is torn down early", () =>
     Effect.gen(function* () {
-      const file = join(tmp, "large.bin");
-      writeFileSync(file, Buffer.alloc(1 << 20, 1));
+      const file = yield* tempPath("large.bin");
+      yield* writeTestFile(file, Buffer.alloc(1 << 20, 1));
       const reads = vi.spyOn(ReadStream.prototype, "_read");
       onTestFinished(() => reads.mockRestore());
       const first = yield* Stream.runCollect(
@@ -1133,7 +1144,7 @@ describe("fromFile with a byte range", () => {
     }),
   );
 
-  it.live.each([
+  it.effect.each([
     { label: "a negative start", options: { start: -1 } },
     { label: "a fractional start", options: { start: 1.5 } },
     { label: "an end equal to start", options: { start: 4, end: 4 } },
@@ -1142,7 +1153,7 @@ describe("fromFile with a byte range", () => {
   ])("fails with a SourceError for $label, before opening the file", ({ options }) =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(
-        Stream.runDrain(Dumps.fromFile(join(tmp, "does-not-exist.txt"), options)),
+        Stream.runDrain(Dumps.fromFile(yield* tempPath("does-not-exist.txt"), options)),
       );
       assertInstanceOf(error, Dumps.SourceError);
       expect(error.description).toContain("dumps/invalid-byte-range");

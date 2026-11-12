@@ -6,12 +6,13 @@
  * @module tests/sections
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import { describe, expect } from "vite-plus/test";
 import {
   type Document,
   filter,
@@ -22,9 +23,7 @@ import {
   serialize,
   serializeNodes,
 } from "../src/wikitext/index.ts";
-
-const fixture = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** A section's heading (when it has one) followed by its own nodes. */
 const ownNodes = (s: Section): readonly Node[] =>
@@ -65,7 +64,7 @@ const outline = (all: readonly Section[]) =>
     inTable: Option.isSome(table),
   }));
 
-describe("sections", () => {
+layer(NodeServices.layer)("sections", (it) => {
   it("always has a lead, even for an empty page", () => {
     const all = sections(parse(""));
     expect(all).toHaveLength(1);
@@ -234,19 +233,29 @@ describe("sections", () => {
     });
   });
 
-  it.each(["ada-lovelace.txt", "pathological.txt", "tables-and-autolinks.txt"])(
+  it.effect.each(["ada-lovelace.txt", "pathological.txt", "tables-and-autolinks.txt"])(
     "partitions the %s fixture losslessly",
-    (name) => {
-      expectLossless(parse(fixture(name)));
-    },
+    (name) =>
+      Effect.gen(function* () {
+        expectLossless(parse(yield* readFixture(name)));
+      }),
   );
 
-  it("outlines the Ada Lovelace fixture", () => {
-    expect(outline(sections(parse(fixture("ada-lovelace.txt"))))).toEqual([
-      { index: 0, level: 0, title: undefined, parent: undefined, children: [], inTable: false },
-      { index: 1, level: 2, title: "Biography", parent: undefined, children: [2], inTable: false },
-      { index: 2, level: 3, title: "Early life", parent: 1, children: [], inTable: false },
-      { index: 3, level: 2, title: "See also", parent: undefined, children: [], inTable: false },
-    ]);
-  });
+  it.effect("outlines the Ada Lovelace fixture", () =>
+    Effect.gen(function* () {
+      expect(outline(sections(parse(yield* readFixture("ada-lovelace.txt"))))).toEqual([
+        { index: 0, level: 0, title: undefined, parent: undefined, children: [], inTable: false },
+        {
+          index: 1,
+          level: 2,
+          title: "Biography",
+          parent: undefined,
+          children: [2],
+          inTable: false,
+        },
+        { index: 2, level: 3, title: "Early life", parent: 1, children: [], inTable: false },
+        { index: 3, level: 2, title: "See also", parent: undefined, children: [], inTable: false },
+      ]);
+    }),
+  );
 });

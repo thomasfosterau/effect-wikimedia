@@ -18,12 +18,13 @@
  * @module tests/tree-shaking
  */
 
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { expect } from "vite-plus/test";
 import { build } from "esbuild";
 import { expectDefined } from "./helpers/narrow.ts";
-
-const srcDir = fileURLToPath(new URL("../src", import.meta.url));
+import * as Effect from "effect/Effect";
+import * as Path from "effect/Path";
 
 /** Span-name markers unique to each surface module's `Effect.fn` calls. */
 const MARKERS = {
@@ -62,7 +63,9 @@ type Surface =
   | "Wikitext";
 
 /** Bundles a one-line entry that imports and uses only the given namespace from the package barrel. */
-async function bundleImporting(namespace: Surface): Promise<string> {
+const bundleImporting = Effect.fn("bundleImporting")(function* (namespace: Surface) {
+  const path = yield* Path.Path;
+  const srcDir = yield* path.fromFileUrl(new URL("../src", import.meta.url));
   const entryByNamespace: Record<Surface, string> = {
     Action: `import { Action } from "./index";\nconsole.log(Action.getWikitext, Action.getPageMetadata, Action.search, Action.parsePage);\n`,
     Rest: `import { Rest } from "./index";\nconsole.log(Rest.getPageMetadata, Rest.getRevisionMetadata, Rest.getParsedHtml, Rest.getRevisionHtml);\n`,
@@ -74,29 +77,31 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     Wikitext: `import { Wikitext } from "./index";\nconsole.log(Wikitext.parse, Wikitext.stripToText, Wikitext.serialize);\n`,
   };
 
-  const result = await build({
-    stdin: {
-      contents: entryByNamespace[namespace],
-      resolveDir: srcDir,
-      loader: "ts",
-    },
-    bundle: true,
-    write: false,
-    format: "esm",
-    platform: "neutral",
-    target: "esnext",
-    treeShaking: true,
-    minify: false,
-    logLevel: "silent",
-    // `effect` (the peer) and `@thomasfosterau/effect-parse` (the `Wikitext`
-    // parser's combinators) are the package's only dependencies; excluding
-    // them keeps the check focused on this package's own module boundaries
-    // (and keeps the bundle fast — effect is large). `node:*` builtins are
-    // external too — the Dumps sources module is the one Node-only module.
-    external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
-  });
+  const result = yield* Effect.tryPromise(() =>
+    build({
+      stdin: {
+        contents: entryByNamespace[namespace],
+        resolveDir: srcDir,
+        loader: "ts",
+      },
+      bundle: true,
+      write: false,
+      format: "esm",
+      platform: "neutral",
+      target: "esnext",
+      treeShaking: true,
+      minify: false,
+      logLevel: "silent",
+      // `effect` (the peer) and `@thomasfosterau/effect-parse` (the `Wikitext`
+      // parser's combinators) are the package's only dependencies; excluding
+      // them keeps the check focused on this package's own module boundaries
+      // (and keeps the bundle fast — effect is large). `node:*` builtins are
+      // external too — the Dumps sources module is the one Node-only module.
+      external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
+    }),
+  );
   return expectDefined(result.outputFiles?.[0]?.text, "esbuild output");
-}
+});
 
 /** Each surface, its own markers, and the marker groups it must NOT pull. */
 const SURFACES: readonly {
@@ -208,14 +213,15 @@ const SURFACES: readonly {
   },
 ];
 
-describe("module-per-surface tree-shaking", () => {
-  it.each(SURFACES)(
+layer(NodeServices.layer)("module-per-surface tree-shaking", (it) => {
+  it.effect.each(SURFACES)(
     "importing $namespace pulls no other surface's code",
-    async ({ namespace, own, foreign }) => {
-      const bundle = await bundleImporting(namespace);
-      // The markers each check misses, so a failure names them.
-      expect(own.filter((marker) => !bundle.includes(marker))).toEqual([]);
-      expect(foreign.flat().filter((marker) => bundle.includes(marker))).toEqual([]);
-    },
+    ({ namespace, own, foreign }) =>
+      Effect.gen(function* () {
+        const bundle = yield* bundleImporting(namespace);
+        // The markers each check misses, so a failure names them.
+        expect(own.filter((marker) => !bundle.includes(marker))).toEqual([]);
+        expect(foreign.flat().filter((marker) => bundle.includes(marker))).toEqual([]);
+      }),
   );
 });

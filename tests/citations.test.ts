@@ -6,21 +6,20 @@
  * @module tests/citations
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import { expect } from "vite-plus/test";
 import { citations, filter, parse, serializeNodes, templateName } from "../src/wikitext/index.ts";
-
-const fixture = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** The value of `option`, failing the test when it is `None`. */
 const some = <A>(option: Option.Option<A>, what: string): A =>
   Option.match(option, { onNone: () => expect.unreachable(`no ${what}`), onSome: (a) => a });
 
-describe("citations", () => {
+layer(NodeServices.layer)("citations", (it) => {
   it("parses each body with spans in the page and finds its citation templates", () => {
     const page =
       'Intro.<ref name="nyt">{{cite news|title=Hi|url=x}} and [[Link]]</ref> More.<ref>Plain.</ref>';
@@ -65,18 +64,20 @@ describe("citations", () => {
     expect(citations(doc)[0]?.templates.map(templateName)).toEqual(["Citation"]);
   });
 
-  it("reads the corpus fixture's refs", () => {
-    const page = fixture("ada-lovelace.txt");
-    const all = citations(parse(page));
-    expect(all.length).toBeGreaterThan(0);
-    expect(all[0]?.name).toEqual(Option.some("bio"));
-    Arr.forEach(all, (c) =>
-      Option.match(c.body, {
-        onNone: () => undefined,
-        onSome: (body) => expect(page.slice(body.span.start, body.span.end)).toBe(body.source),
-      }),
-    );
-  });
+  it.effect("reads the corpus fixture's refs", () =>
+    Effect.gen(function* () {
+      const page = yield* readFixture("ada-lovelace.txt");
+      const all = citations(parse(page));
+      expect(all.length).toBeGreaterThan(0);
+      expect(all[0]?.name).toEqual(Option.some("bio"));
+      Arr.forEach(all, (c) =>
+        Option.match(c.body, {
+          onNone: () => undefined,
+          onSome: (body) => expect(page.slice(body.span.start, body.span.end)).toBe(body.source),
+        }),
+      );
+    }),
+  );
 
   it("returns nothing without refs", () => {
     expect(citations(parse("No refs, just {{cite web|url=x}}."))).toEqual([]);

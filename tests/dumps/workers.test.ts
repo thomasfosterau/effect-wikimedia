@@ -8,11 +8,11 @@
  * @module tests/dumps/workers
  */
 
-import { fileURLToPath } from "node:url";
 import unbzip2 from "unbzip2-stream";
-import { it } from "@effect/vitest";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assertInstanceOf } from "@effect/vitest/utils";
-import { describe, expect } from "vite-plus/test";
+import { expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
@@ -22,28 +22,28 @@ import * as Stream from "effect/Stream";
 import { RpcClient, RpcServer } from "effect/rpc";
 import type { WorkerError } from "effect/workers";
 import { Dumps } from "../../src/index.ts";
+import { fixturePath } from "../helpers/fixtures.ts";
 import { inProcessWorkers } from "../helpers/workers.ts";
 
 /** The worker's `open` failing, as a disk read can. */
 class DiskGone extends Schema.TaggedError<DiskGone>()("DiskGone", { message: Schema.String }) {}
 
-const fixturePath = (name: string): string =>
-  fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
-
-const DUMP_PATH = fixturePath("multistream.xml.bz2");
-const INDEX_BZ2 = fixturePath("multistream-index.txt.bz2");
-
-const ranges = (): Stream.Stream<
-  Dumps.MultistreamRange,
-  Dumps.SourceError | Dumps.MultistreamIndexError
-> =>
-  Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-    Dumps.multistreamIndexRecords,
-    Dumps.multistreamRanges(),
-  );
-
-const openRange = (range: Dumps.MultistreamRange) =>
-  Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
+/** The multistream fixture's range listing and range opener, over the fixture paths. */
+const multistream = Effect.fn("multistream")(function* () {
+  const dumpPath = yield* fixturePath("dumps/multistream.xml.bz2");
+  const indexPath = yield* fixturePath("dumps/multistream-index.txt.bz2");
+  const ranges = (): Stream.Stream<
+    Dumps.MultistreamRange,
+    Dumps.SourceError | Dumps.MultistreamIndexError
+  > =>
+    Dumps.fromFile(indexPath, { decompressor: () => unbzip2() }).pipe(
+      Dumps.multistreamIndexRecords,
+      Dumps.multistreamRanges(),
+    );
+  const openRange = (range: Dumps.MultistreamRange) =>
+    Dumps.fromMultistreamRange(dumpPath, range, () => unbzip2());
+  return { ranges, openRange };
+});
 
 const collect = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<ReadonlyArray<A>, E> =>
   Stream.runCollect(stream);
@@ -69,9 +69,10 @@ const pool = <E>(
     ),
   );
 
-describe("record schemas", () => {
+layer(NodeServices.layer)("record schemas", (it) => {
   it.effect("round-trips every fixture record through JSON and structuredClone", () =>
     Effect.gen(function* () {
+      const { ranges, openRange } = yield* multistream();
       const records = yield* collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
       expect(records.length).toBeGreaterThan(0);
       const json = Schema.fromJsonString(Schema.toCodecJson(Dumps.PageRevisionRecord));
@@ -99,9 +100,10 @@ describe("record schemas", () => {
 const failingStream = (): Stream.Stream<Uint8Array, DiskGone> =>
   Stream.fail(new DiskGone({ message: "disk gone" }));
 
-describe("multistreamPageRecordsInWorkers", () => {
+layer(NodeServices.layer)("multistreamPageRecordsInWorkers", (it) => {
   it.effect("decodes every range on the pool, with the records the main thread would decode", () =>
     Effect.gen(function* () {
+      const { ranges, openRange } = yield* multistream();
       const local = yield* collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
       const remote = yield* collect(
         ranges().pipe(
@@ -117,6 +119,7 @@ describe("multistreamPageRecordsInWorkers", () => {
 
   it.effect("keeps the range order at concurrency 1", () =>
     Effect.gen(function* () {
+      const { ranges, openRange } = yield* multistream();
       const local = yield* collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
       const remote = yield* collect(
         ranges().pipe(
@@ -132,6 +135,7 @@ describe("multistreamPageRecordsInWorkers", () => {
     "fails with MultistreamRangeFailed, carrying the range and message, when a worker cannot open it",
     () =>
       Effect.gen(function* () {
+        const { ranges } = yield* multistream();
         const [first] = yield* collect(ranges());
         const error = yield* Effect.flip(
           Stream.runDrain(

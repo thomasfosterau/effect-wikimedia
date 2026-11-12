@@ -199,8 +199,10 @@ export default defineConfig({
           additionalTestBlockFunctions: [
             // A plain test in a `layer(...)` block, on the block's own `it`.
             "it",
+            "it.each",
             "it.effect",
             "it.effect.each",
+            "it.effect.skipIf",
             "it.live",
             "it.live.each",
             "it.live.skipIf",
@@ -250,21 +252,35 @@ export default defineConfig({
           "effect/use-console-service": "off",
         },
       },
-      // Tests run in bare Node with no Effect platform layer: the package
-      // depends on no `@effect/platform-node`, so there is no `FileSystem`,
-      // `Path` or `ChildProcessSpawner` implementation to provide. Tests read
-      // their recorded fixtures, write temporary dumps, drive esbuild
-      // (`tree-shaking.test.ts`) and run the system `bzip2` with Node's own
-      // modules, and feed real Node streams to the Node-only `Dumps` sources.
+      // The two test files whose subject is Node itself. `sources.test.ts`
+      // exercises the Node-only `Dumps` sources, so it feeds them real
+      // `node:fs` / `node:stream` / `node:zlib` objects, spies on
+      // `fs.ReadStream.prototype`, and pins their types against
+      // `createGunzip`'s; an Effect `FileSystem` stream is not a Node
+      // `Readable` and cannot stand in for them. `entities.test.ts` forces a
+      // garbage collection through a `node:vm` context created while `node:v8`
+      // has `--expose-gc` on, to measure retained heap; Effect has no service
+      // for V8 flags or VM contexts.
+      {
+        files: ["tests/dumps/sources.test.ts"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+          "effect/use-filesystem-service": "off",
+        },
+      },
+      {
+        files: ["tests/dumps/entities.test.ts"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+        },
+      },
+      // Test-only relaxations. Tests read fixtures, write temp dumps and run
+      // `bzip2` through `FileSystem`, `Path` and `ChildProcessSpawner`
+      // (`tests/helpers/fixtures.ts`, `NodeServices.layer`), so the platform
+      // rules apply to them unrelaxed.
       {
         files: ["tests/**"],
         rules: {
-          "effect/avoid-node-imports": "off",
-          "effect/avoid-sync-fs": "off",
-          "effect/use-filesystem-service": "off",
-          "effect/use-path-service": "off",
-          "effect/use-temp-file-scoped": "off",
-          "effect/use-command-executor-service": "off",
           // The suite has no type assertions left (#224): a node lookup goes
           // through `tests/helpers/nodes.ts`'s refinements, a stub decodes
           // with the caller's schema. Held at error so none comes back; the

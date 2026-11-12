@@ -6,12 +6,13 @@
  */
 
 import * as Struct from "effect/Struct";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import { expect } from "vite-plus/test";
 import {
   type Document,
   filter,
@@ -20,31 +21,30 @@ import {
   serializeNodes,
   type Tag,
 } from "../src/wikitext/index.ts";
-
-const fixture = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** Every node at any depth, in document order. */
 const allNodes = (doc: Document): readonly Node[] => filter(doc, () => true);
 
-describe("parse with an offset", () => {
-  it.each(["ada-lovelace.txt", "tables-and-autolinks.txt", "pathological.txt"])(
+layer(NodeServices.layer)("parse with an offset", (it) => {
+  it.effect.each(["ada-lovelace.txt", "tables-and-autolinks.txt", "pathological.txt"])(
     "shifts every span in %s by the offset and changes nothing else",
-    (name) => {
-      const source = fixture(name);
-      const plain = parse(source);
-      const shifted = parse(source, { offset: 1000 });
-      expect(shifted.source).toBe(source);
-      expect(shifted.span).toEqual({ start: 1000, end: 1000 + source.length });
-      const before = allNodes(plain);
-      const after = allNodes(shifted);
-      expect(after).toHaveLength(before.length);
-      Arr.forEach(Arr.zip(before, after), ([a, b]) => {
-        expect(Struct.get(b, "_tag")).toBe(Struct.get(a, "_tag"));
-        expect(b.span).toEqual({ start: a.span.start + 1000, end: a.span.end + 1000 });
-        expect(serializeNodes([b])).toBe(serializeNodes([a]));
-      });
-    },
+    (name) =>
+      Effect.gen(function* () {
+        const source = yield* readFixture(name);
+        const plain = parse(source);
+        const shifted = parse(source, { offset: 1000 });
+        expect(shifted.source).toBe(source);
+        expect(shifted.span).toEqual({ start: 1000, end: 1000 + source.length });
+        const before = allNodes(plain);
+        const after = allNodes(shifted);
+        expect(after).toHaveLength(before.length);
+        Arr.forEach(Arr.zip(before, after), ([a, b]) => {
+          expect(Struct.get(b, "_tag")).toBe(Struct.get(a, "_tag"));
+          expect(b.span).toEqual({ start: a.span.start + 1000, end: a.span.end + 1000 });
+          expect(serializeNodes([b])).toBe(serializeNodes([a]));
+        });
+      }),
   );
 
   it("gives a <ref> body spans in its page, so the page's text slices to each node", () => {

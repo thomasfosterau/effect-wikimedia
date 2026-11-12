@@ -10,20 +10,22 @@
 
 import * as Struct from "effect/Struct";
 import * as P from "effect/Predicate";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { it, layer } from "@effect/vitest";
 import { assertInstanceOf } from "@effect/vitest/utils";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Core, Sparql } from "../src/index.ts";
+import { readFixtureJson } from "./helpers/fixtures.ts";
 
-const fixture = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
-  readFileSync(fileURLToPath(new URL("./fixtures/wdqs-results.json", import.meta.url)), "utf8"),
-);
+const fixture = readFixtureJson("wdqs-results.json");
+
+/** The WDQS client's services plus the Node platform services the fixture is read through. */
+const servicesLayer = Layer.merge(Core.wikimediaLayer, NodeServices.layer);
 
 const stubWdqs = (body: Schema.Json) => {
   const requests: Request[] = [];
@@ -49,7 +51,7 @@ const asLiteral = (term?: Sparql.SparqlTerm): Extract<Sparql.SparqlTerm, { _tag:
 /** Decodes the recorded WDQS fixture into typed results (row 0, row 1). */
 const decodeFixture = () =>
   Effect.gen(function* () {
-    const { provideFetch } = stubWdqs(fixture);
+    const { provideFetch } = stubWdqs(yield* fixture);
     const results = yield* Sparql.query(SELECT).pipe(provideFetch);
     return { results, first: results.bindings[0], second: results.bindings[1] };
   });
@@ -69,10 +71,10 @@ describe("Sparql.hasLimitClause", () => {
   });
 });
 
-layer(Core.wikimediaLayer)("Sparql.query — LIMIT enforcement", (it) => {
+layer(servicesLayer)("Sparql.query — LIMIT enforcement", (it) => {
   it.effect("rejects an unbounded query before any request", () =>
     Effect.gen(function* () {
-      const { requests, provideFetch } = stubWdqs(fixture);
+      const { requests, provideFetch } = stubWdqs(yield* fixture);
       assertInstanceOf(
         yield* Effect.flip(
           Sparql.query("SELECT ?item WHERE { ?item wdt:P31 wd:Q5 }").pipe(provideFetch),
@@ -85,7 +87,7 @@ layer(Core.wikimediaLayer)("Sparql.query — LIMIT enforcement", (it) => {
 
   it.effect("allows an unbounded query when explicitly opted out", () =>
     Effect.gen(function* () {
-      const { requests, provideFetch } = stubWdqs(fixture);
+      const { requests, provideFetch } = stubWdqs(yield* fixture);
       yield* Sparql.query("SELECT ?item WHERE { VALUES ?item { wd:Q42 } }", {
         allowUnbounded: true,
       }).pipe(provideFetch);
@@ -95,7 +97,7 @@ layer(Core.wikimediaLayer)("Sparql.query — LIMIT enforcement", (it) => {
 
   it.effect("rejects a blank query", () =>
     Effect.gen(function* () {
-      const { requests, provideFetch } = stubWdqs(fixture);
+      const { requests, provideFetch } = stubWdqs(yield* fixture);
       assertInstanceOf(
         yield* Effect.flip(Sparql.query("   ").pipe(provideFetch)),
         Core.InvalidRequest,
@@ -107,10 +109,10 @@ layer(Core.wikimediaLayer)("Sparql.query — LIMIT enforcement", (it) => {
 
 // ── Term typing ──────────────────────────────────────────────────────────
 
-layer(Core.wikimediaLayer)("Sparql.query — recorded fixture, term typing", (it) => {
+layer(servicesLayer)("Sparql.query — recorded fixture, term typing", (it) => {
   it.effect("targets the WDQS endpoint with the polite UA and no maxlag", () =>
     Effect.gen(function* () {
-      const { requests, provideFetch } = stubWdqs(fixture);
+      const { requests, provideFetch } = stubWdqs(yield* fixture);
       yield* Sparql.query(SELECT).pipe(provideFetch);
       const request = requests[0];
       expect(request).toBeDefined();
@@ -234,7 +236,7 @@ describe("Sparql.normaliseTerm", () => {
 
 // ── ASK ──────────────────────────────────────────────────────────────────
 
-layer(Core.wikimediaLayer)("Sparql.query — ASK (#149)", (it) => {
+layer(servicesLayer)("Sparql.query — ASK (#149)", (it) => {
   // The SPARQL 1.1 Query Results JSON Format's ASK form.
   it.effect.each([true, false])("carries an ASK answer of %s through", (answer) =>
     Effect.gen(function* () {

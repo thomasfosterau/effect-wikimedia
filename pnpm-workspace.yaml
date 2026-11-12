@@ -17,6 +17,14 @@ catalogMode: strict
 catalog:
   "@changesets/cli": ^3.0.3
   "@effect/language-service": ^0.87.3
+  # The Node implementations of `FileSystem`, `Path` and `ChildProcessSpawner`
+  # the tests provide (#224; `NodeServices.layer`), so they read fixtures and
+  # write temp files through Effect's platform services rather than `node:*`.
+  # Test-only, never imported from `src/`. It peers on `effect` `^4.1.2`, so it
+  # moves with the `effect` pin below and the gates no longer pass with that
+  # pin at 4.0.0 (the published peer range stays `^4.0.0`: no `src/` code
+  # imports it).
+  "@effect/platform-node": 4.1.2
   # Effect Language Service as a native (TypeScript-Go) binary: the TS7 side of
   # the 6/7 split. `effect-tsgo patch --typescript` (the root `prepare` script)
   # overwrites the native `tsc` binary with an Effect-patched build matched by

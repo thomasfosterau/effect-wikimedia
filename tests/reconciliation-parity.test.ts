@@ -18,17 +18,15 @@
 
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
 import { Wikidata } from "../src/index.ts";
-
-const fixture: unknown = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(
-  readFileSync(fileURLToPath(new URL("./fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
-);
+import { readFixtureJson } from "./helpers/fixtures.ts";
 
 /** The recorded fixture lacks an entity the parity checks read. */
 class FixtureEntityMissing extends Schema.TaggedError<FixtureEntityMissing>()(
@@ -36,7 +34,8 @@ class FixtureEntityMissing extends Schema.TaggedError<FixtureEntityMissing>()(
   { id: Schema.String },
 ) {}
 
-const decodeQ42 = (): Wikidata.WikidataItem => {
+const decodeQ42 = Effect.fnUntraced(function* () {
+  const fixture = yield* readFixtureJson("wikidata-q42.json");
   // The response schema is Unknown-heavy, so a structural view of the parsed
   // fixture is faithful — `normaliseEntities` does the real validation.
   // SAFETY: the recorded wbgetentities fixture is that response's JSON; the schema is all
@@ -45,9 +44,9 @@ const decodeQ42 = (): Wikidata.WikidataItem => {
     Schema.decodeUnknownSync(Wikidata.WbGetEntitiesResponse)(fixture),
   );
   const item = entities.Q42;
-  if (item === undefined) throw new FixtureEntityMissing({ id: "Q42" });
+  if (item === undefined) return yield* new FixtureEntityMissing({ id: "Q42" });
   return item;
-};
+});
 
 // ── The extraction-era reconciliation shapes, restated locally (no cross-package import) ──
 
@@ -148,43 +147,48 @@ function enrichFacts(item: Wikidata.WikidataItem): readonly NeutralFact[] {
   return [qidSelfLink(item), ...sameAsFacts(item), ...dateFacts(item), ...imageFacts(item)];
 }
 
-describe("reconciliation enrich normaliser, expressed over the typed surface", () => {
-  it("produces the QID self-link, sameAs, date, and image facts", () => {
-    const item = decodeQ42();
-    const facts = enrichFacts(item);
-    expect(facts).toEqual([
-      {
-        authority: "wikidata",
-        externalId: "Q42",
-        externalIri: "http://www.wikidata.org/entity/Q42",
-        mappingKind: "exact",
-        notes: Option.none(),
-      },
-      {
-        authority: "viaf",
-        externalId: "113230702",
-        externalIri: "https://viaf.org/viaf/113230702",
-        mappingKind: "exact",
-        notes: Option.none(),
-      },
-      {
-        authority: "wikidata",
-        externalId: "1952-03-11T00:00:00Z",
-        externalIri: "http://www.wikidata.org/entity/P569",
-        mappingKind: "equivalent",
-        notes: Option.some("date of birth"),
-      },
-      {
-        authority: "wikimedia-commons",
-        externalId: "Douglas adams portrait cropped.jpg",
-        externalIri:
-          "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait%20cropped.jpg",
-        mappingKind: "equivalent",
-        notes: Option.some("image"),
-      },
-    ]);
-  });
-});
+layer(NodeServices.layer)(
+  "reconciliation enrich normaliser, expressed over the typed surface",
+  (it) => {
+    it.effect("produces the QID self-link, sameAs, date, and image facts", () =>
+      Effect.gen(function* () {
+        const item = yield* decodeQ42();
+        const facts = enrichFacts(item);
+        expect(facts).toEqual([
+          {
+            authority: "wikidata",
+            externalId: "Q42",
+            externalIri: "http://www.wikidata.org/entity/Q42",
+            mappingKind: "exact",
+            notes: Option.none(),
+          },
+          {
+            authority: "viaf",
+            externalId: "113230702",
+            externalIri: "https://viaf.org/viaf/113230702",
+            mappingKind: "exact",
+            notes: Option.none(),
+          },
+          {
+            authority: "wikidata",
+            externalId: "1952-03-11T00:00:00Z",
+            externalIri: "http://www.wikidata.org/entity/P569",
+            mappingKind: "equivalent",
+            notes: Option.some("date of birth"),
+          },
+          {
+            authority: "wikimedia-commons",
+            externalId: "Douglas adams portrait cropped.jpg",
+            externalIri:
+              "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait%20cropped.jpg",
+            mappingKind: "equivalent",
+            notes: Option.some("image"),
+          },
+        ]);
+      }),
+    );
+  },
+);
 
 // ── Label search parity ──────────────────────────────────────────────────
 

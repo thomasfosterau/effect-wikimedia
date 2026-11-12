@@ -28,19 +28,14 @@
  * @module tests/perf
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Arr from "effect/Array";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import { it } from "@effect/vitest";
+import { it, layer } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import { parse, serialize } from "../src/wikitext/index.ts";
-
-const ada = readFileSync(
-  fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),
-  "utf8",
-);
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** The best of `runs` timings of `run`, in ms, after `warmups` untimed runs (a JIT warm-up). */
 function bestTime(run: () => void, warmups: number, runs: number): number {
@@ -54,17 +49,18 @@ function bestTime(run: () => void, warmups: number, runs: number): number {
   );
 }
 
-// A large, realistic article: the fixture repeated to a substantial size.
-const largeArticle = `${ada}\n`.repeat(60);
+/** A large, realistic article: the fixture repeated to a substantial size. */
+const largeArticle = Effect.map(readFixture("ada-lovelace.txt"), (ada) => `${ada}\n`.repeat(60));
 
-describe("performance floor", () => {
-  it.effect(`parses a large article (${largeArticle.length} chars) fast`, () =>
+layer(NodeServices.layer)("performance floor", (it) => {
+  it.effect("parses a large article fast", () =>
     Effect.gen(function* () {
+      const article = yield* largeArticle;
       // Warm up the JIT so the measurement reflects steady state.
-      Arr.makeBy(5, () => serialize(parse(largeArticle)));
-      const best = bestTime(() => parse(largeArticle), 0, 30);
+      Arr.makeBy(5, () => serialize(parse(article)));
+      const best = bestTime(() => parse(article), 0, 30);
 
-      yield* Console.log(`[perf] parse ${largeArticle.length} chars: best ${best.toFixed(2)} ms`);
+      yield* Console.log(`[perf] parse ${article.length} chars: best ${best.toFixed(2)} ms`);
 
       // Single-digit ms is the target (1.16 ms uncontended); 60 ms is the
       // regression ceiling — sized to clear the worst contended measurement
@@ -74,9 +70,12 @@ describe("performance floor", () => {
     }),
   );
 
-  it("round-trips the large article without error", () => {
-    expect(serialize(parse(largeArticle))).toBe(largeArticle);
-  });
+  it.effect("round-trips the large article without error", () =>
+    Effect.gen(function* () {
+      const article = yield* largeArticle;
+      expect(serialize(parse(article))).toBe(article);
+    }),
+  );
 });
 
 /** The best of `runs` timed parses of `src`, in ms, after a JIT warm-up. */

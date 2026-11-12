@@ -10,9 +10,8 @@
  * @module tests/wikitext-html-commons
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -20,47 +19,54 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Action, Commons, Core, Rest } from "../src/index.ts";
+import { readFixture } from "./helpers/fixtures.ts";
 
-const fixturesPath = fileURLToPath(new URL("./fixtures/douglas-adams.json", import.meta.url));
-const fixtures = Schema.decodeSync(
-  Schema.fromJsonString(
-    Schema.Struct({
-      wikitext: Schema.Unknown,
-      restPageMetadata: Schema.Unknown,
-      restParsedHtml: Schema.String,
-      commonsFileInfo: Schema.Unknown,
-    }),
-  ),
-)(readFileSync(fixturesPath, "utf-8"));
-
-/** Routes each stubbed call by a distinguishing substring of its request URL. */
-const fetch: typeof globalThis.fetch = async (input, init) => {
-  const request = new Request(input, init);
-  const url = request.url;
-  if (url.includes("action=query") && url.includes("prop=revisions")) {
-    return Response.json(fixtures.wikitext);
-  }
-  if (url.includes("prop=imageinfo")) {
-    return Response.json(fixtures.commonsFileInfo);
-  }
-  if (url.includes("/w/rest.php/v1/page/Douglas_Adams/html")) {
-    return new Response(fixtures.restParsedHtml, {
-      status: 200,
-      headers: { "content-type": "text/html; charset=utf-8" },
-    });
-  }
-  if (url.includes("/w/rest.php/v1/page/Douglas_Adams/bare")) {
-    return Response.json(fixtures.restPageMetadata);
-  }
-  return new Response("not found", { status: 404 });
-};
-
-/** The real client over the fixture-backed stub above, shared by every test in this file. */
-const clientLayer = Core.wikimediaClientLayer.pipe(
-  Layer.provide(
-    FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
-  ),
+/** The recorded responses, keyed by the API they came from. */
+const Fixtures = Schema.fromJsonString(
+  Schema.Struct({
+    wikitext: Schema.Unknown,
+    restPageMetadata: Schema.Unknown,
+    restParsedHtml: Schema.String,
+    commonsFileInfo: Schema.Unknown,
+  }),
 );
+
+/** The real client over a fetch stub backed by the recorded fixtures, shared by every test in this file. */
+const clientLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const fixtures = yield* Schema.decodeUnknownEffect(Fixtures)(
+      yield* readFixture("douglas-adams.json"),
+    );
+
+    /** Routes each stubbed call by a distinguishing substring of its request URL. */
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const url = request.url;
+      if (url.includes("action=query") && url.includes("prop=revisions")) {
+        return Response.json(fixtures.wikitext);
+      }
+      if (url.includes("prop=imageinfo")) {
+        return Response.json(fixtures.commonsFileInfo);
+      }
+      if (url.includes("/w/rest.php/v1/page/Douglas_Adams/html")) {
+        return new Response(fixtures.restParsedHtml, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      if (url.includes("/w/rest.php/v1/page/Douglas_Adams/bare")) {
+        return Response.json(fixtures.restPageMetadata);
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    return Core.wikimediaClientLayer.pipe(
+      Layer.provide(
+        FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
+      ),
+    );
+  }),
+).pipe(Layer.provideMerge(NodeServices.layer));
 
 layer(clientLayer)("wikitext + parsed HTML + Commons file URL for a real title", (it) => {
   it.effect("fetches Douglas Adams's wikitext via Action", () =>

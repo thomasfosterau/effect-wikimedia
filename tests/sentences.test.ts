@@ -5,10 +5,11 @@
  * @module tests/sentences
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import { expect } from "vite-plus/test";
 import {
   type Paragraph,
   paragraphs,
@@ -16,9 +17,7 @@ import {
   type Sentence,
   sentences,
 } from "../src/wikitext/index.ts";
-
-const fixture = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** The paragraphs of a wikitext source. */
 const paragraphsOf = (source: string): readonly Paragraph[] => paragraphs(parse(source));
@@ -37,7 +36,7 @@ function expectLocated(paragraph: Paragraph, all: readonly Sentence[]): void {
   });
 }
 
-describe("sentences", () => {
+layer(NodeServices.layer)("sentences", (it) => {
   it("splits a paragraph's plain text, markup stripped, at sentence ends", () => {
     const paragraph = only(
       "'''Douglas Adams''' was an English [[author]].  He wrote ''[[The Hitchhiker's Guide to the Galaxy|Hitchhiker]]''! Was it a radio series? Yes",
@@ -77,17 +76,19 @@ describe("sentences", () => {
     expect(sentences(paragraph, { locale: "en" })).toEqual([]);
   });
 
-  it("locates every sentence of the Ada Lovelace fixture's paragraphs", () => {
-    const all = paragraphsOf(fixture("ada-lovelace.txt"));
-    expect(all.length).toBeGreaterThan(0);
-    Arr.forEach(all, (paragraph) => {
-      const split = sentences(paragraph, { locale: "en" });
-      expectLocated(paragraph, split);
-      Arr.forEach(split, (s) => expect(s.text).toBe(s.text.trim()));
-    });
-    const first = Arr.flatMap(all, (paragraph) => sentences(paragraph, { locale: "en" }));
-    expect(first.length).toBeGreaterThan(all.length);
-  });
+  it.effect("locates every sentence of the Ada Lovelace fixture's paragraphs", () =>
+    Effect.gen(function* () {
+      const all = paragraphsOf(yield* readFixture("ada-lovelace.txt"));
+      expect(all.length).toBeGreaterThan(0);
+      Arr.forEach(all, (paragraph) => {
+        const split = sentences(paragraph, { locale: "en" });
+        expectLocated(paragraph, split);
+        Arr.forEach(split, (s) => expect(s.text).toBe(s.text.trim()));
+      });
+      const first = Arr.flatMap(all, (paragraph) => sentences(paragraph, { locale: "en" }));
+      expect(first.length).toBeGreaterThan(all.length);
+    }),
+  );
 
   it("throws a RangeError for a malformed locale tag, as Intl.Segmenter does", () => {
     expect(() => sentences(only("A."), { locale: "not a tag!" })).toThrow(RangeError);

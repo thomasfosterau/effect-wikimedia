@@ -25,9 +25,8 @@
  */
 
 import * as Struct from "effect/Struct";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { it, layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assertInstanceOf } from "@effect/vitest/utils";
 import { describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -54,11 +53,7 @@ import {
   WikidataLookup,
   wikidataLookupClientLayer,
 } from "../../src/reconciliation/index.ts";
-
-/** The recorded `wbgetentities` body for Q42 (Douglas Adams), as the wire carries it. */
-const q42Fixture = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
-  readFileSync(fileURLToPath(new URL("../fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
-);
+import { readFixtureJson } from "../helpers/fixtures.ts";
 
 // ── WikimediaClient stub ────────────────────────────────────────────────
 
@@ -615,7 +610,7 @@ const precisionTimeClaim = (precision?: number) => ({
   },
 });
 
-layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
+layer(Layer.merge(stubLookupLayer, NodeServices.layer))("WikidataLookup.enrich", (it) => {
   it.effect("returns the item fact first, then every curated authority as an Identifier fact", () =>
     Effect.gen(function* () {
       const { requests, provideStub } = stubClient({
@@ -701,6 +696,8 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
 
   it.effect("reads the calendar from the recorded Q42 fixture's calendar model", () =>
     Effect.gen(function* () {
+      // The recorded `wbgetentities` body for Q42 (Douglas Adams), as the wire carries it.
+      const q42Fixture = yield* readFixtureJson("wikidata-q42.json");
       const { provideStub } = stubClient({ "action=wbgetentities": { body: q42Fixture } });
       const facts = yield* loadFacts(provideStub, "Q42");
 

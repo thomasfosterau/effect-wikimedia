@@ -15,10 +15,9 @@
  * @module tests/dumps/multistream
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import unbzip2 from "unbzip2-stream";
-import { it } from "@effect/vitest";
+import { it, layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assertInstanceOf } from "@effect/vitest/utils";
 import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -28,13 +27,41 @@ import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
+import { fixturePath, readFixtureBytes } from "../helpers/fixtures.ts";
 
-const fixturePath = (name: string): string =>
-  fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
-
-const DUMP_PATH = fixturePath("multistream.xml.bz2");
-const DUMP_BZ2 = readFileSync(DUMP_PATH);
-const INDEX_BZ2 = fixturePath("multistream-index.txt.bz2");
+/** The multistream fixture: its dump bytes and path, its index stream, and range readers over them. */
+const fixtureFiles = Effect.fn("fixtureFiles")(function* () {
+  const dumpPath = yield* fixturePath("dumps/multistream.xml.bz2");
+  const dumpBytes = yield* readFixtureBytes("dumps/multistream.xml.bz2");
+  const indexPath = yield* fixturePath("dumps/multistream-index.txt.bz2");
+  const indexEntryStream = (): Stream.Stream<
+    Dumps.MultistreamIndexEntry,
+    Dumps.SourceError | Dumps.MultistreamIndexError
+  > =>
+    Dumps.fromFile(indexPath, { decompressor: () => unbzip2() }).pipe(
+      Dumps.multistreamIndexRecords,
+    );
+  const openRange = (range: Dumps.MultistreamRange) =>
+    Dumps.fromMultistreamRange(dumpPath, range, () => unbzip2());
+  /** Decompresses the fixture dump's bytes `[start, end)` alone and decodes them to page records. */
+  const pagesInRange = (
+    range: Dumps.MultistreamRange,
+  ): Effect.Effect<ReadonlyArray<Dumps.PageRevisionRecord>, Dumps.SourceError> =>
+    collect(
+      Stream.make(
+        new Uint8Array(
+          dumpBytes.subarray(
+            range.start,
+            Option.getOrElse(range.end, () => dumpBytes.length),
+          ),
+        ),
+      ).pipe(
+        Dumps.decompressWith(() => unbzip2()),
+        Dumps.pageRecords,
+      ),
+    );
+  return { dumpBytes, indexEntryStream, openRange, pagesInRange };
+});
 
 const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
   Stream.make(new TextEncoder().encode(text));
@@ -115,14 +142,11 @@ describe("decodeIndexLine", () => {
 
 // ── multistreamIndexRecords ──────────────────────────────────────────────
 
-describe("multistreamIndexRecords", () => {
+layer(NodeServices.layer)("multistreamIndexRecords", (it) => {
   it.effect("decodes the bzip2-compressed fixture index through fromFile", () =>
     Effect.gen(function* () {
-      const entries = yield* collect(
-        Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-          Dumps.multistreamIndexRecords,
-        ),
-      );
+      const { indexEntryStream } = yield* fixtureFiles();
+      const entries = yield* collect(indexEntryStream());
       expect(entries).toEqual([
         entry(1, 236, 10, "Ada Lovelace"),
         entry(2, 236, 12, "AT&T"),
@@ -270,43 +294,16 @@ describe("multistreamRanges", () => {
 
 // ── End to end: one range decoded on its own ─────────────────────────────
 
-/** Decompresses the fixture dump's bytes `[start, end)` alone and decodes them to page records. */
-const pagesInRange = (
-  range: Dumps.MultistreamRange,
-): Effect.Effect<ReadonlyArray<Dumps.PageRevisionRecord>, Dumps.SourceError> =>
-  collect(
-    Stream.make(
-      new Uint8Array(
-        DUMP_BZ2.subarray(
-          range.start,
-          Option.getOrElse(range.end, () => DUMP_BZ2.length),
-        ),
-      ),
-    ).pipe(
-      Dumps.decompressWith(() => unbzip2()),
-      Dumps.pageRecords,
-    ),
-  );
-
-/** Collects every entry of the fixture index. */
-const indexEntries = () =>
-  collect(
-    Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-      Dumps.multistreamIndexRecords,
-    ),
-  );
-
-describe("a multistream range decoded on its own", () => {
+layer(NodeServices.layer)("a multistream range decoded on its own", (it) => {
   it.effect.each([
-    { label: "without fileSize", fileSize: Option.none<number>(), lastEnd: null },
-    {
-      label: "with fileSize",
-      fileSize: Option.some(DUMP_BZ2.length),
-      lastEnd: DUMP_BZ2.length,
-    },
-  ])("yields exactly the pages the index lists for it ($label)", ({ fileSize, lastEnd }) =>
+    { label: "without fileSize", sized: false },
+    { label: "with fileSize", sized: true },
+  ])("yields exactly the pages the index lists for it ($label)", ({ sized }) =>
     Effect.gen(function* () {
-      const entries = yield* indexEntries();
+      const { dumpBytes, indexEntryStream, pagesInRange } = yield* fixtureFiles();
+      const fileSize = sized ? Option.some(dumpBytes.length) : Option.none<number>();
+      const lastEnd = sized ? dumpBytes.length : null;
+      const entries = yield* collect(indexEntryStream());
       const ranges = yield* collect(
         Stream.fromIterable(entries).pipe(
           Dumps.multistreamRanges(Option.isSome(fileSize) ? { fileSize: fileSize.value } : {}),
@@ -332,7 +329,8 @@ describe("a multistream range decoded on its own", () => {
     "decodes the header stream at offset 0, which the index doesn't list, to no records",
     () =>
       Effect.gen(function* () {
-        const [first] = yield* indexEntries();
+        const { indexEntryStream, pagesInRange } = yield* fixtureFiles();
+        const [first] = yield* collect(indexEntryStream());
         expect(first?.offset).toBeGreaterThan(0);
         expect(
           yield* pagesInRange({
@@ -348,8 +346,9 @@ describe("a multistream range decoded on its own", () => {
 
   it.effect("decodes the whole dump to the same pages as the ranges together", () =>
     Effect.gen(function* () {
+      const { dumpBytes } = yield* fixtureFiles();
       const whole = yield* collect(
-        Stream.make(new Uint8Array(DUMP_BZ2)).pipe(
+        Stream.make(new Uint8Array(dumpBytes)).pipe(
           Dumps.decompressWith(() => unbzip2()),
           Dumps.pageRecords,
         ),
@@ -367,22 +366,16 @@ describe("a multistream range decoded on its own", () => {
 
 // ── fromMultistreamRange: one range read straight from the file ──────────
 
-describe("fromMultistreamRange", () => {
+layer(NodeServices.layer)("fromMultistreamRange", (it) => {
   it.effect("reads each range of the dump file to the same pages as its sliced bytes", () =>
     Effect.gen(function* () {
-      const entries = yield* collect(
-        Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-          Dumps.multistreamIndexRecords,
-        ),
-      );
+      const { indexEntryStream, openRange, pagesInRange } = yield* fixtureFiles();
+      const entries = yield* collect(indexEntryStream());
       const ranges = yield* collect(Stream.fromIterable(entries).pipe(Dumps.multistreamRanges()));
       expect(ranges).toHaveLength(3);
       const fromFile = yield* Effect.forEach(
         ranges,
-        (range) =>
-          collect(
-            Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2()).pipe(Dumps.pageRecords),
-          ),
+        (range) => collect(openRange(range).pipe(Dumps.pageRecords)),
         { concurrency: "unbounded" },
       );
       expect(fromFile).toEqual(
@@ -401,24 +394,14 @@ describe("fromMultistreamRange", () => {
 
 // ── Random access, iteration and resume ──────────────────────────────────
 
-/** The fixture index as a stream of multistream index entries. */
-const indexEntryStream = (): Stream.Stream<
-  Dumps.MultistreamIndexEntry,
-  Dumps.SourceError | Dumps.MultistreamIndexError
-> =>
-  Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(Dumps.multistreamIndexRecords);
-
-/** Opens `range` of the fixture dump and decodes it with bzip2. */
-const openRange = (range: Dumps.MultistreamRange) =>
-  Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
-
 /** The titles of `records`, null for a page without one. */
 const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
   records.map((r) => Option.getOrNull(r.page.title));
 
-describe("random access and iteration over the fixture dump", () => {
+layer(NodeServices.layer)("random access and iteration over the fixture dump", (it) => {
   it.effect("finds the whole range holding a page by title, then reads just that range", () =>
     Effect.gen(function* () {
+      const { indexEntryStream, openRange } = yield* fixtureFiles();
       const found = yield* indexEntryStream().pipe(
         Dumps.findMultistreamRange(Dumps.byTitle("Category:Writers")),
       );
@@ -434,13 +417,14 @@ describe("random access and iteration over the fixture dump", () => {
     "finds by page id, closes the last range with fileSize, and gives None for a miss",
     () =>
       Effect.gen(function* () {
+        const { dumpBytes, indexEntryStream } = yield* fixtureFiles();
         const all = yield* collect(indexEntryStream());
         const lastId = all.at(-1)?.pageId ?? -1;
         const last = yield* indexEntryStream().pipe(
-          Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: DUMP_BZ2.length }),
+          Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: dumpBytes.length }),
         );
         expect(Option.map(last, (range) => [range.start, Option.getOrNull(range.end)])).toEqual(
-          Option.some([814, DUMP_BZ2.length]),
+          Option.some([814, dumpBytes.length]),
         );
         expect(
           yield* indexEntryStream().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Nope"))),
@@ -450,6 +434,7 @@ describe("random access and iteration over the fixture dump", () => {
 
   it.effect("counts every entry of the matched range, ones before the match included", () =>
     Effect.gen(function* () {
+      const { indexEntryStream } = yield* fixtureFiles();
       const first = yield* indexEntryStream().pipe(Dumps.findMultistreamRange(() => true));
       const ranges = yield* collect(indexEntryStream().pipe(Dumps.multistreamRanges()));
       const byLaterEntry = yield* indexEntryStream().pipe(
@@ -471,6 +456,7 @@ describe("random access and iteration over the fixture dump", () => {
 
   it.effect("decodes every range's pages in order, sequentially and concurrently", () =>
     Effect.gen(function* () {
+      const { indexEntryStream, openRange } = yield* fixtureFiles();
       const ranges = indexEntryStream().pipe(Dumps.multistreamRanges());
       const sequential = yield* collect(ranges.pipe(Dumps.multistreamPageRecords(openRange)));
       expect(titles(sequential)).toEqual([
@@ -490,6 +476,7 @@ describe("random access and iteration over the fixture dump", () => {
 
   it.effect("resumes from a checkpoint without opening the ranges before it", () =>
     Effect.gen(function* () {
+      const { indexEntryStream, openRange } = yield* fixtureFiles();
       const opened: number[] = [];
       const records = yield* collect(
         indexEntryStream().pipe(

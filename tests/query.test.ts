@@ -6,16 +6,17 @@
  */
 
 import * as Struct from "effect/Struct";
+import * as Digest from "effect/crypto/Digest";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "vite-plus/test";
 import {
   basicTemplateRenderers,
@@ -33,41 +34,47 @@ import {
   walk,
 } from "../src/wikitext/index.ts";
 import { NAMED_ENTITIES } from "../src/wikitext/entities.ts";
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** `JSON.stringify` through the `Schema` JSON boundary (encoding `Unknown` is the identity). */
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const ada = readFileSync(
-  fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),
-  "utf8",
-);
+const ada = readFixture("ada-lovelace.txt");
 
-describe("template extraction against a real infobox", () => {
-  const doc = parse(ada);
+layer(NodeServices.layer)("template extraction against a real infobox", (it) => {
+  const doc = Effect.map(ada, parse);
 
-  it("finds the infobox by (normalised) name", () => {
-    const boxes = findTemplates(doc, "infobox person");
-    expect(boxes).toHaveLength(1);
-    expect(templateName(boxes[0])).toBe("Infobox person");
-  });
+  it.effect("finds the infobox by (normalised) name", () =>
+    Effect.gen(function* () {
+      const boxes = findTemplates(yield* doc, "infobox person");
+      expect(boxes).toHaveLength(1);
+      expect(templateName(boxes[0])).toBe("Infobox person");
+    }),
+  );
 
-  it("extracts named parameter values", () => {
-    const box = findTemplates(doc, "Infobox person")[0];
-    expect(getParam(box, "name")).toEqual(Option.some("Ada Lovelace"));
-    expect(getParam(box, "birth_name")).toEqual(Option.some("Augusta Ada Byron"));
-    expect(getParam(box, "nationality")).toEqual(Option.some("British"));
-  });
+  it.effect("extracts named parameter values", () =>
+    Effect.gen(function* () {
+      const box = findTemplates(yield* doc, "Infobox person")[0];
+      expect(getParam(box, "name")).toEqual(Option.some("Ada Lovelace"));
+      expect(getParam(box, "birth_name")).toEqual(Option.some("Augusta Ada Byron"));
+      expect(getParam(box, "nationality")).toEqual(Option.some("British"));
+    }),
+  );
 
-  it("keeps nested-template values as their raw wikitext", () => {
-    const box = findTemplates(doc, "Infobox person")[0];
-    expect(getParam(box, "birth_date")).toEqual(Option.some("{{birth date|1815|12|10|df=y}}"));
-  });
+  it.effect("keeps nested-template values as their raw wikitext", () =>
+    Effect.gen(function* () {
+      const box = findTemplates(yield* doc, "Infobox person")[0];
+      expect(getParam(box, "birth_date")).toEqual(Option.some("{{birth date|1815|12|10|df=y}}"));
+    }),
+  );
 
-  it("finds nested templates too", () => {
-    // {{birth date|…}}, {{death date and age|…}}, {{sfn|…}}, etc. are nested.
-    expect(findTemplates(doc, "birth date")).toHaveLength(1);
-    expect(findTemplates(doc).length).toBeGreaterThan(5);
-  });
+  it.effect("finds nested templates too", () =>
+    Effect.gen(function* () {
+      // {{birth date|…}}, {{death date and age|…}}, {{sfn|…}}, etc. are nested.
+      expect(findTemplates(yield* doc, "birth date")).toHaveLength(1);
+      expect(findTemplates(yield* doc).length).toBeGreaterThan(5);
+    }),
+  );
 
   it("reads positional parameters by 1-based index", () => {
     const t = parse("{{convert|10|km|mi}}");
@@ -112,12 +119,14 @@ describe("normaliseTemplateName", () => {
 /** A node as `Tag@start`, for comparing traversal orders. */
 const tagAtStart = (n: Node) => `${Struct.get(n, "_tag")}@${n.span.start}`;
 
-describe("filter / walk", () => {
-  it("collects every wikilink at any depth", () => {
-    const doc = parse(ada);
-    const links = filter(doc, P.isTagged("Wikilink"));
-    expect(links.length).toBeGreaterThan(3);
-  });
+layer(NodeServices.layer)("filter / walk", (it) => {
+  it.effect("collects every wikilink at any depth", () =>
+    Effect.gen(function* () {
+      const doc = parse(yield* ada);
+      const links = filter(doc, P.isTagged("Wikilink"));
+      expect(links.length).toBeGreaterThan(3);
+    }),
+  );
 
   it("visits nested nodes in pre-order and can skip subtrees", () => {
     const doc = parse("a{{t|[[L]]}}b");
@@ -278,13 +287,6 @@ describe("strip to plain text: template renderers (#210)", () => {
     ).toBe("n&");
   });
 
-  it("restores the {{nowrap}} prose of the recorded Ada Lovelace article", () => {
-    const plain = stripToText(parse(ada));
-    const rendered = stripToText(parse(ada), { templates: basicTemplateRenderers });
-    expect(plain).toContain("including  and Michael Faraday.");
-    expect(rendered).toContain("including Charles Babbage and Michael Faraday.");
-  });
-
   it("applies to a single node and a bare fragment", () => {
     const doc = parse("{{nowrap|z}}");
     expect(stripToText(doc.children[0], { templates: basicTemplateRenderers })).toBe("z");
@@ -294,6 +296,20 @@ describe("strip to plain text: template renderers (#210)", () => {
 
 /** A fallback renderer that strips a fragment holding a hidden-prefix category link. */
 const templateFallback: TemplateRenderer = (_, { strip }) => strip(parse("[[Kategorie:Z]]f"));
+
+layer(NodeServices.layer)(
+  "strip to plain text: template renderers (#210), recorded article",
+  (it) => {
+    it.effect("restores the {{nowrap}} prose of the recorded Ada Lovelace article", () =>
+      Effect.gen(function* () {
+        const plain = stripToText(parse(yield* ada));
+        const rendered = stripToText(parse(yield* ada), { templates: basicTemplateRenderers });
+        expect(plain).toContain("including  and Michael Faraday.");
+        expect(rendered).toContain("including Charles Babbage and Michael Faraday.");
+      }),
+    );
+  },
+);
 
 describe("strip to plain text: file, category and interlanguage links (#208)", () => {
   it.each([
@@ -477,17 +493,22 @@ describe("strip to plain text: entities (#107)", () => {
     expect(stripEntities(src)).toBe("\u200f");
   });
 
-  it("holds exactly the names and text of HTML5's table", () => {
-    // A digest of the sorted entries, so a changed value or a renamed entry
-    // fails even though the round-trip test below reads its expectations from
-    // the table itself. The same digest comes from `character-entities` 2.0.2
-    // and from remex-html's `;`-terminated entries (#123's review).
-    const entries = Arr.sort(
-      NAMED_ENTITIES,
-      Order.mapInput(Order.String, ([name]: readonly [string, string]) => name),
-    );
-    expect(createHash("sha256").update(encodeJson(entries)).digest("hex")).toBe(
-      "083dc02ec806d6d630ad69cdcd3ebf4b3f04509f8ad00ad8772f8905d285beb4",
+  layer(Digest.layerWebCrypto)("the HTML5 entity table's digest", (it) => {
+    it.effect("holds exactly the names and text of HTML5's table", () =>
+      Effect.gen(function* () {
+        // A digest of the sorted entries, so a changed value or a renamed entry
+        // fails even though the round-trip test below reads its expectations from
+        // the table itself. The same digest comes from `character-entities` 2.0.2
+        // and from remex-html's `;`-terminated entries (#123's review).
+        const entries = Arr.sort(
+          NAMED_ENTITIES,
+          Order.mapInput(Order.String, ([name]: readonly [string, string]) => name),
+        );
+        const digest = yield* Digest.Digest.use((d) =>
+          d.digestHex(Digest.sha256, new TextEncoder().encode(encodeJson(entries))),
+        );
+        expect(digest).toBe("083dc02ec806d6d630ad69cdcd3ebf4b3f04509f8ad00ad8772f8905d285beb4");
+      }),
     );
   });
 
