@@ -111,6 +111,13 @@ describe("Wikidata id parsers", () => {
     expect(Wikidata.parsePropertyId("Q42")).toEqual(Option.none());
     expect(Wikidata.parseEntityId("L1-F1")).toEqual(Option.none());
   });
+
+  it("brand schemas check the id pattern when decoding", () => {
+    expect(Schema.decodeUnknownOption(Wikidata.ItemId)("Q42")).toEqual(Option.some("Q42"));
+    expect(Schema.decodeUnknownOption(Wikidata.ItemId)("Q42/../x")).toEqual(Option.none());
+    expect(Schema.decodeUnknownOption(Wikidata.PropertyId)("Q42")).toEqual(Option.none());
+    expect(Schema.decodeUnknownOption(Wikidata.LexemeId)("L0")).toEqual(Option.none());
+  });
 });
 
 // ── List caps (hand-built entities) ─────────────────────────────────────
