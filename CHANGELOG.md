@@ -1,5 +1,186 @@
 # @thomasfosterau/effect-wikimedia
 
+## 0.10.0
+
+### Minor Changes
+
+- 68a34a4: **Breaking:** Action now uses `Option` for absent values (#224).
+
+  - `getWikitext`, `getPageMetadata` and `parsePage` succeed with an `Option`, `None` where they succeeded with `null` (a page that doesn't exist upstream). So do their `normaliseWikitext`, `normalisePageMetadata` and `normaliseParse` steps.
+  - The optional fields of the results are `Option`s, `None` where they were `null`:
+    - `WikitextResult`'s `pageId`, `revisionId` and `timestamp`.
+    - Every `PageMetadata` field except `title`.
+    - `SearchResult`'s `pageId`, `snippet` and `wordCount`.
+    - `ParsedSection`'s `level` and `anchor`.
+    - `ParsedPage.pageId`.
+  - The `*Response` wire schemas are unchanged.
+
+- c3954c4: Typed leaves for the Action API's siteinfo response schemas (#224).
+
+  - `Core.lenient`, `Core.lenientField` and `Core.lenientArray` make a response-schema leaf lenient: a value of the wrong kind is dropped, or left `undefined` in place for an array element, instead of failing the decode.
+  - `Action.SiteinfoResponse` and `Action.MagicWordsResponse` now use them: namespace ids are `number`, and names, prefixes, magic-word names and aliases are `string`.
+  - The page metadata `fullurl` is `string`.
+
+  The `Type`s of those schemas narrow from `unknown`, so code that builds them by hand must now pass the typed values. That's breaking, hence `minor` on 0.x. Decoding a real response behaves as before.
+
+- d330d9a: **Breaking:** Commons now uses `Option` for absent values (#224).
+
+  - `Commons.filePathUrl` returns `Option<string>`, `None` for unusable input.
+  - `Commons.getFileInfo` succeeds with `Option<FileInfo>`, `None` when the file doesn't exist.
+  - `FileInfo`'s `url`, `descriptionUrl`, `width`, `height`, `mime` and `size` are `Option`s.
+
+- fd841db: Typed leaves for the Sparql and Commons response schemas (#224).
+
+  - `Sparql.SparqlResultsResponse`'s term fields (`type`, `value`, `datatype`, `xml:lang`) are now `string`, through `Core.lenientField`. A value of the wrong kind is dropped at decode, so `normaliseTerm` reads typed values.
+  - Commons' internal `imageinfo` schema reads `url`, `descriptionurl` and `mime` the same way.
+
+  The `Type` of `SparqlResultsResponse` narrows from `unknown`, so code that builds one by hand, or passes `normaliseTerm` a raw term, must now pass strings. That's breaking, hence `minor` on 0.x. Decoding a real response behaves as before.
+
+- fc962b5: **Breaking:** Core's validators and parsers (`normaliseWikimediaHost`, `normaliseTitle`, `sanitiseText`, `toNonNegativeInt`, `parseRetryAfterHeader`, `detectMaxlagSignal`) return `Option` instead of `T | null`, and `WikimediaRequest.maxlagSeconds` takes `Option.none()` rather than `null` to omit `maxlag`. `Reconciliation.itemToCandidate` takes a `WikidataItem` and returns one candidate (#224). MIGRATION.md has the details.
+- 232edec: Dumps: random access, iteration and resume over multistream dumps (#211, slice 3).
+
+  - `findMultistreamRange(match, options?)` scans an index entry stream for the whole `MultistreamRange` holding a page. Use it with `byTitle(title)` or `byPageId(id)`.
+  - `multistreamPageRecords(open, { concurrency? })` decodes each range's pages through a caller-supplied byte opener, so it stays platform-neutral.
+  - `fromCheckpoint(offset)` resumes a range stream at a recorded offset.
+
+- 502c6f8: Dumps: decode a multistream dump on a pool of workers (#211, slice 4).
+
+  - `Dumps.multistreamPageRecordsInWorkers({ concurrency })` sends each range to a worker as one `effect/rpc` request, and the records stream back.
+  - `Dumps.MultistreamRpcs` is the RPC contract, and `Dumps.multistreamWorkerHandlers(open)` is the worker side's handler layer.
+  - The caller supplies the platform: the worker entry file and the main side's `RpcClient.layerProtocolWorker` over their platform's `Worker` spawner. The README has a Node `worker_threads` recipe.
+  - `Dumps.MultistreamRangeFailed` is the error when a worker cannot read a range.
+  - `PageRef`, `Contributor`, `Revision`, `PageRevisionHit`, `PageRevisionError`, `PageRevisionRecord` and `MultistreamRange` are now `Schema`s, and their types derive from them, so the types are unchanged. An absent field is encoded as `null`.
+
+  **Breaking:** `Revision.minor` is renamed `isMinor`. It is the one field the schema form renames, to follow the package's lint rule that a boolean schema field takes an `is…`/`has…` prefix.
+
+- 65ea8b8: **Breaking:** the optional members of the Dumps options objects no longer accept an explicit `undefined` (#224).
+
+  `MultistreamRangesOptions.fileSize`, `MultistreamPageRecordsOptions.concurrency`, `FromFileOptions.start` / `end` and `FromHttpRangeOptions.endByte` / `userAgent` are now `?: T`, not `?: T | undefined`. Omit the key instead of passing `undefined`. For a value that may be absent, pass `x === undefined ? {} : { start: x }` rather than `{ start: x }`. Behaviour is otherwise unchanged.
+
+- 04fa1f4: **Breaking:** Dumps uses `Option` for absent values (#224).
+
+  - **`PageRef`:** `title`, `ns`, `id` and `redirect` are `Option`s.
+  - **`Contributor`:** `username`, `id` and `ip` are `Option`s.
+  - **`Revision`:** `parentId`, `timestamp`, `contributor`, `comment`, `model`, `format`, `text` and `sha1` are `Option`s. `Revision.id` is now a plain `number`: a hit always has one.
+  - **`PageRevisionError.page`:** always set, so now `PageRef` rather than `PageRef | null`.
+  - **`MultistreamRange.end`:** `Option<number>`, `None` for an open-ended last range.
+  - **Functions:** `decodeIndexLine` succeeds with `Option` (`None` for a blank line), and `stripFraming` / `decodeEntityLine` return `Option`.
+
+- 68c3f24: **Breaking:** Reconciliation uses `Option` for absent values (#224).
+
+  - `WikidataCandidate.label` and `description` are `Option`s.
+  - `normaliseLabelQuery`, `normaliseQid`, `normalisePropertyId`, `normaliseExternalIdValue`, `sanitiseCandidateText`, `normaliseTimeValue` and `normaliseCommonsImage` return `Option`.
+  - Each `ExternalIdAuthority.iri` returns an `Option`.
+  - `WikidataLookup.enrich` succeeds with `Option<WikidataFacts>`, `None` when the item doesn't exist.
+
+- 731c27a: **Breaking:** every absent value in `Rest.PageMetadata` and `Rest.RevisionMetadata` is now an `Option` instead of `null` (#224). In `PageMetadata` that's `pageId`, `key`, `contentModel`, `latestRevisionId`, `latestTimestamp` and `licenseUrl`. In `RevisionMetadata` it's `pageId`, `pageTitle`, `size`, `minor`, `timestamp`, `contentModel` and `licenseUrl`. Read them with `Option.getOrNull`, or `Option.match` for the `None` case. This is the first surface of the package-wide move to `Option`.
+- 1b56dbe: **Breaking:** Sparql uses `Option` for absent values (#224).
+
+  - `LiteralTerm.datatype` and `language`, `UnknownTerm.type` and `value`, and `SparqlResults.boolean`, the `ASK` answer, are `Option`s.
+  - `Sparql.literalKind(datatype, language)` takes `Option`s. A `Some` language, `Some("")` included, makes a literal `"monolingualtext"`.
+
+- 722fde2: **Breaking:** typed parameters for the response helpers, and typed leaves in the remaining response schemas (#224).
+
+  Response-schema leaves that a normaliser reads as a string, number or boolean are now `Core.lenientField(Schema.String | Schema.Number | Schema.Boolean)` instead of `Schema.optional(Schema.Unknown)`. A value of the wrong kind is dropped at decode, as it is for the schemas already converted. Decoding a real response behaves as before.
+
+  - `Action.WikitextResponse`, `Action.PageMetadataResponse`, `Action.SearchResponse` and `Action.ParseResponse`: page ids, revision ids, lengths and word counts are `number`; titles, timestamps, content models, languages, snippets, section lines and anchors and the `"*"` text are `string`. A section's `hLevel` is `number`, and a numeric string still decodes to one.
+  - `Rest.PageMetadataResponse` and `Rest.RevisionMetadataResponse`: ids and `size` are `number`, `minor` is `boolean`, and keys, titles, timestamps, content models and license URLs are `string`.
+
+  The `Type`s of those schemas narrow from `unknown`, so code that builds them by hand must now pass the typed values.
+
+  Helper signatures that took `unknown` now take the type their callers hold:
+
+  | Helper                                 | Before                   | After                    |
+  | -------------------------------------- | ------------------------ | ------------------------ |
+  | `Core.sanitiseText`                    | `(value: unknown)`       | `(value?: string)`       |
+  | `Core.toNonNegativeInt`                | `(value: unknown, max?)` | `(value?: number, max?)` |
+  | `Core.detectMaxlagSignal`              | `(body: unknown)`        | `(body: Schema.Json)`    |
+  | `Reconciliation.sanitiseCandidateText` | `(value: unknown)`       | `(value?: string)`       |
+  | `Reconciliation.normaliseTimeValue`    | `(raw: unknown)`         | `(raw: string)`          |
+  | `Reconciliation.normaliseCommonsImage` | `(raw: unknown)`         | `(raw: string)`          |
+
+  Their returns are unchanged. A value you hold as `unknown` must be decoded with a schema before it reaches them.
+
+  **Wikidata:** the entity reader takes parsed JSON instead of `unknown` (option (B) on #224).
+
+  - `decodeEntity` takes `Schema.Json`.
+  - `normaliseItem`, `normaliseStatement`, `normaliseSnak` and `normaliseDataValue` take `Schema.JsonObject`.
+  - `parseItemId`, `parsePropertyId`, `parseLexemeId` and `parseEntityId` take `string`.
+  - `WbGetEntitiesResponse` keeps each entity as `Schema.Json`, read by the same defensive reader as a dump line. A wrongly shaped container inside one entity now degrades that entity instead of failing the response.
+  - `Dumps` parses each entity line with `Schema.fromJsonString(Schema.Json)`. That costs about 11 µs per 4.5 KB line, and the hand reader itself is unchanged.
+
+- fc008e3: **Breaking:** `Wikidata.ItemId`, `PropertyId` and `LexemeId` now check their pattern (`Q`, `P` or `L` followed by digits, no leading zero) when decoding, and `.make` throws on anything else, instead of branding any string (#265). The `parse*Id` functions behave as before and are now built on these schemas.
+- afb849a: **Breaking:** Wikidata now uses `Option` for absent values (#224).
+
+  - `parseItemId`, `parsePropertyId`, `parseLexemeId` and `parseEntityId` return `Option` of the branded id: `None` for anything that is not one.
+  - `decodeEntity`, `normaliseItem`, `normaliseStatement` and `normaliseSnak` return `Option`: `None` where they returned `null`.
+  - `normaliseDataValue`'s `datatype` argument is an `Option<string>`.
+  - Every optional field of the typed model is an `Option`, `None` where it was `null`:
+    - `WikidataItem.type`, `Statement.id` and `Reference.hash`.
+    - Each snak's `datatype`.
+    - `WikibaseEntityIdValue.entityType`.
+    - `TimeValue`'s `precision`, `calendarModel`, `timezone`, `before` and `after`.
+    - `GlobeCoordinateValue`'s `latitude`, `longitude`, `altitude`, `precision` and `globe`.
+    - `QuantityValue`'s `unit`, `upperBound` and `lowerBound`.
+    - `MonolingualTextValue.language` and `UnknownValue.type`.
+    - `SearchHit`'s `label`, `description`, `matchType` and `matchText`.
+  - The `Wb*Response` wire schemas are unchanged.
+  - `Reconciliation`'s stored `DateFact` keeps `null` for an absent `precision` or `calendar`.
+
+- ccf40ef: Add `Wikitext.citations(doc, options?)`, the citation view over the AST (#209, slice 4). It returns every `<ref>`, at any depth.
+
+  - Each `Citation` has its `name` and `group` (as `Option`s) and the document's own `Tag`.
+  - `body` is the ref's content parsed with `parse`'s `offset`, so its spans index the page.
+  - `templates` lists the citation templates in the body: `Citation`, `Cite …`, and any `options.names`.
+  - `reuse` marks a bodiless `<ref name=… />`, and `definition` points to the first citation that defines that name in its group.
+
+  New types: `Citation`, `CitationsOptions`.
+
+- 05bb363: **Breaking:** the Wikitext AST uses `Option` for its optional fields (#224).
+
+  These fields are now `Option`s, `None` where they were `undefined`:
+
+  - `Param.name`: `None` for a positional parameter.
+  - `Argument.default`.
+  - `ExternalLink.label`.
+  - `Tag.rawContent` and `Tag.closeRaw`.
+  - `TableCaption.attrs` and `TableCell.attrs`.
+  - `TableRow.open`: `None` for an implicit row.
+
+  Code that builds nodes by hand must pass `Option`s. `serialize(parse(s)) === s` still holds, and `parse(source, { offset })` keeps the `Option`s while it shifts spans.
+
+- 041e426: **Breaking:** the Wikitext options objects drop `| undefined` from their optional members (#224).
+
+  `ParseOptions.offset`, `CitationsOptions.names`, `InfoboxesOptions.names`, `RedirectTargetOptions.aliases` and `StripToTextOptions.templates`, `.templateFallback` and `.hiddenLinkPrefixes` are now `?: T`, not `?: T | undefined`: omit a member rather than pass `undefined` for it.
+
+- 7fdca5e: **Breaking:** Wikitext's queries use `Option` for absent values (#224).
+
+  - `paramName` returns `Option<string>`: `None` for a positional parameter, where it returned `null`.
+  - `getParam` returns `Option<string>`: `None` for a missing parameter, where it returned `undefined`.
+  - `redirectTarget` returns `Option<string>`: `None` when the input is not a redirect, where it returned `null`.
+  - A `TemplateRenderer`'s `param` callback returns `Option<string>`, so a renderer reads it with `Option.getOrElse(param(1), () => "")` rather than `param(1) ?? ""`.
+
+  The AST's own optional fields (`Param.name`, `Tag.rawContent`, …) are unchanged here.
+
+- b854aaa: Add `Wikitext.paragraphs(input, options?)`, the paragraph view over the AST (#209, slice 6). It finds the runs of prose lines. A blank line ends one, and so does a block-level line: a list item, a `----` rule, a preformatted line, or a line holding a table or a heading. Each `Paragraph` has its nodes (fresh per-line `Text`, line breaks included; other nodes are the document's own), its span and its trimmed text. New type: `Paragraph`.
+- 0b3d5b9: `Wikitext.parse(source, { offset })` parses a fragment of a larger text, such as a `<ref>` body taken out of its page (#209, slice 4, step one). Every span, `Document.span` included, is shifted by `offset`, so the spans index the larger text. `Document.source` stays the parsed text. Without the option, nothing changes. An offset that isn't a non-negative safe integer throws a `RangeError`. New type: `ParseOptions`.
+- 74ff2e9: Wikitext: `sentences(paragraph, { locale })`, the sentence view over a paragraph (#209, slice 7).
+
+  It cuts a `Paragraph`'s plain text with the runtime's `Intl.Segmenter` for the given locale, and gives each sentence trimmed with its offsets in the paragraph's `text`. The view adds no splitting rules of its own, so an abbreviation such as `Mr.` ends a sentence.
+
+- 070b3de: Add the table views over the AST (#209, slice 5).
+
+  - `Wikitext.tableGrid(table)` lays a table's cells out on a grid, expanding `rowspan` and `colspan` as a browser does. Spans are clamped to 1–1000 / 1–65534, and `rowspan=0` runs to the last row. Each slot points back at its own `TableCell`, with `origin` marking where the span starts.
+  - `Wikitext.tableRecords(table, options?)` reads the rows as records. The keys come from the first all-header row, or are column numbers when there is none. A row's leading `!` cell becomes its `rowHeader`.
+
+  New types: `GridCell`, `TableRecord`.
+
+### Patch Changes
+
+- ad27256: Action: `getSiteTextConfig(host)` fetches a wiki's `hiddenLinkPrefixes` and `redirectAliases` in one siteinfo request (#220). `getHiddenLinkPrefixes` and `getRedirectAliases` each make one request of their own. The new call is backed by `SiteTextConfigResponse` and `normaliseSiteTextConfig`, and the two existing calls are unchanged.
+- d60d2c2: Brand the package's tagged error classes (`InvalidRequest`, `RequestFailed`, `RateLimited`, `InvalidQuery`, `LookupFailed`, `MultistreamIndexError`, `MultistreamRangeFailed`, `SourceError`) with a `{ readonly brand: unique symbol }` second type argument, so TypeScript no longer treats structurally identical errors as interchangeable. Patch, not minor: the runtime shape and constructors are unchanged, and only code that relied on assigning a structurally compatible plain object to one of these error types stops compiling.
+- 37a779e: Wire schemas decode ids, sizes and counts with `Schema.Int` (and heading levels with `Schema.Finite`), so a fractional, NaN or infinite value now degrades to absent instead of decoding (#224).
+
 ## 0.9.0
 
 ### Minor Changes
