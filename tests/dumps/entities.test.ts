@@ -144,27 +144,28 @@ describe("decodeEntityLine", () => {
 
 // ── Pure predicates ──────────────────────────────────────────────────────
 
-const q42 = Wikidata.decodeEntity(
-  parseJson(
-    '{"type":"item","id":"Q42","claims":{"P569":[{"mainsnak":{"snaktype":"value","property":"P569","datatype":"time","datavalue":{"type":"string","value":"x"}},"type":"statement","rank":"normal"}]},"sitelinks":{"enwiki":{"site":"enwiki","title":"Douglas Adams"}}}',
+const q42 = Option.getOrElse(
+  Wikidata.decodeEntity(
+    parseJson(
+      '{"type":"item","id":"Q42","claims":{"P569":[{"mainsnak":{"snaktype":"value","property":"P569","datatype":"time","datavalue":{"type":"string","value":"x"}},"type":"statement","rank":"normal"}]},"sitelinks":{"enwiki":{"site":"enwiki","title":"Douglas Adams"}}}',
+    ),
   ),
+  () => expect.unreachable("fixture decode failed"),
 );
 
 describe("predicates", () => {
   it("hasType", () => {
-    expect(q42 && Dumps.hasType(q42, "item")).toBe(true);
-    expect(q42 && Dumps.hasType(q42, "property")).toBe(false);
+    expect(Dumps.hasType(q42, "item")).toBe(true);
+    expect(Dumps.hasType(q42, "property")).toBe(false);
   });
 
   it("hasClaim (valid + missing + malformed property)", () => {
-    if (q42 === null) return expect.unreachable("fixture decode failed");
     expect(Dumps.hasClaim(q42, "P569")).toBe(true);
     expect(Dumps.hasClaim(q42, "P31")).toBe(false);
     expect(Dumps.hasClaim(q42, "not-a-property")).toBe(false);
   });
 
   it("hasSitelink", () => {
-    if (q42 === null) return expect.unreachable("fixture decode failed");
     expect(Dumps.hasSitelink(q42, "enwiki")).toBe(true);
     expect(Dumps.hasSitelink(q42, "dewiki")).toBe(false);
     // Inherited names are never sitelinks (#164).

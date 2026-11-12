@@ -14,6 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
@@ -82,24 +83,28 @@ const claimValue = <K extends Wikidata.DataValue["_tag"]>(
 ): Extract<Wikidata.DataValue, { _tag: K }> =>
   dataValueOfKind(valueOf(item?.claims[property]?.[0]?.mainsnak), tag);
 
+/** Decodes a raw entity, failing the test when `decodeEntity` rejects it. */
+const decoded = (raw: unknown): Wikidata.WikidataItem =>
+  Option.getOrElse(Wikidata.decodeEntity(raw), () => expect.unreachable("entity rejected"));
+
 // ── Branded id parsers ──────────────────────────────────────────────────
 
 describe("Wikidata id parsers", () => {
   it("validates and upper-cases Q / P / L ids", () => {
-    expect(Wikidata.parseItemId("q42")).toBe("Q42");
-    expect(Wikidata.parsePropertyId(" p31 ")).toBe("P31");
-    expect(Wikidata.parseLexemeId("L1")).toBe("L1");
-    expect(Wikidata.parseEntityId("Q5")).toBe("Q5");
-    expect(Wikidata.parseEntityId("P569")).toBe("P569");
+    expect(Wikidata.parseItemId("q42")).toEqual(Option.some("Q42"));
+    expect(Wikidata.parsePropertyId(" p31 ")).toEqual(Option.some("P31"));
+    expect(Wikidata.parseLexemeId("L1")).toEqual(Option.some("L1"));
+    expect(Wikidata.parseEntityId("Q5")).toEqual(Option.some("Q5"));
+    expect(Wikidata.parseEntityId("P569")).toEqual(Option.some("P569"));
   });
 
   it("rejects non-ids and cross-kind ids", () => {
-    expect(Wikidata.parseItemId("P31")).toBeNull();
-    expect(Wikidata.parseItemId("Q0")).toBeNull();
-    expect(Wikidata.parseItemId("Q42x")).toBeNull();
-    expect(Wikidata.parsePropertyId("Q42")).toBeNull();
-    expect(Wikidata.parseEntityId("L1-F1")).toBeNull();
-    expect(Wikidata.parseEntityId(42)).toBeNull();
+    expect(Wikidata.parseItemId("P31")).toEqual(Option.none());
+    expect(Wikidata.parseItemId("Q0")).toEqual(Option.none());
+    expect(Wikidata.parseItemId("Q42x")).toEqual(Option.none());
+    expect(Wikidata.parsePropertyId("Q42")).toEqual(Option.none());
+    expect(Wikidata.parseEntityId("L1-F1")).toEqual(Option.none());
+    expect(Wikidata.parseEntityId(42)).toEqual(Option.none());
   });
 });
 
@@ -125,22 +130,22 @@ describe("Wikidata sitelink caps", () => {
   });
 
   it("does not count a dropped (title-less) sitelink towards the cap", () => {
-    const item = Wikidata.decodeEntity({
+    const item = decoded({
       id: "Q1",
       sitelinks: { untitledwiki: { site: "untitledwiki" }, ...sitelinks(cap) },
     });
-    const keys = R.keys(item?.sitelinks ?? {});
+    const keys = R.keys(item.sitelinks);
     expect(keys).toHaveLength(cap);
     expect(keys).not.toContain("untitledwiki");
   });
 
   it("keeps at most MAX_LIST_ENTRIES valid badges per sitelink, the first in order", () => {
     const badges = ["not-an-item", ...Array.from({ length: badgeCap + 5 }, (_, i) => `Q${i + 1}`)];
-    const item = Wikidata.decodeEntity({
+    const item = decoded({
       id: "Q1",
       sitelinks: { enwiki: { site: "enwiki", title: "Page", badges } },
     });
-    const kept = item?.sitelinks.enwiki?.badges ?? [];
+    const kept = item.sitelinks.enwiki?.badges ?? [];
     expect(kept).toHaveLength(badgeCap);
     expect(kept[0]).toBe("Q1");
     expect(kept.at(-1)).toBe(`Q${badgeCap}`);
@@ -193,8 +198,7 @@ describe("Wikidata.decodeEntity on containers of the wrong kind (#147)", () => {
   ];
 
   it.each(malformed)("keeps a best-effort item for %s instead of throwing", (_, fields) => {
-    const item = Wikidata.decodeEntity({ type: "item", id: "Q1", ...fields });
-    expect(item?.id).toBe("Q1");
+    expect(decoded({ type: "item", id: "Q1", ...fields }).id).toBe("Q1");
   });
 
   it("drops only the unusable entries, keeping the rest of the item", () => {
@@ -212,32 +216,34 @@ describe("Wikidata.decodeEntity on containers of the wrong kind (#147)", () => {
         ],
       },
     });
-    expect(item).toEqual({
-      id: "Q1",
-      type: "item",
-      labels: { en: "One" },
-      descriptions: {},
-      aliases: { en: ["Uno"] },
-      sitelinks: { enwiki: { site: "enwiki", title: "One", badges: [] } },
-      claims: {
-        P31: [
-          {
-            id: null,
-            rank: "normal",
-            mainsnak: { _tag: "somevalue", property: "P31", datatype: null },
-            qualifiers: {},
-            references: [],
-          },
-          {
-            id: null,
-            rank: "normal",
-            mainsnak: { _tag: "novalue", property: "P31", datatype: null },
-            qualifiers: {},
-            references: [],
-          },
-        ],
-      },
-    });
+    expect(item).toEqual(
+      Option.some({
+        id: "Q1",
+        type: Option.some("item"),
+        labels: { en: "One" },
+        descriptions: {},
+        aliases: { en: ["Uno"] },
+        sitelinks: { enwiki: { site: "enwiki", title: "One", badges: [] } },
+        claims: {
+          P31: [
+            {
+              id: Option.none(),
+              rank: "normal",
+              mainsnak: { _tag: "somevalue", property: "P31", datatype: Option.none() },
+              qualifiers: {},
+              references: [],
+            },
+            {
+              id: Option.none(),
+              rank: "normal",
+              mainsnak: { _tag: "novalue", property: "P31", datatype: Option.none() },
+              qualifiers: {},
+              references: [],
+            },
+          ],
+        },
+      }),
+    );
   });
 });
 
@@ -245,7 +251,7 @@ describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
   // JSON decoding makes `__proto__` an own key, as a dump line or a decoded
   // `wbgetentities` body would carry it.
   const parseJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
-  const item = Wikidata.decodeEntity(
+  const item = decoded(
     parseJson(
       '{"id":"Q1"' +
         ',"labels":{"__proto__":{"value":"Proto"},"en":{"value":"En"}}' +
@@ -259,7 +265,7 @@ describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
     "drops the key from %s, keeping the map's prototype and its other entries",
     (map) => {
       const value: R.ReadonlyRecord<string, string | readonly string[] | Wikidata.Sitelink> =
-        item?.[map] ?? {};
+        item[map];
       expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
       expect(R.keys(value)).toEqual([map === "sitelinks" ? "enwiki" : "en"]);
       expect(value["title"]).toBeUndefined();
@@ -273,7 +279,7 @@ describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
       (i) => `"site${i}wiki":{"title":"P${i}"}`,
     ).join(",");
     const raw = parseJson(`{"id":"Q1","sitelinks":{"__proto__":{"title":"Proto"},${sitelinks}}}`);
-    const keys = R.keys(Wikidata.decodeEntity(raw)?.sitelinks ?? {});
+    const keys = R.keys(decoded(raw).sitelinks);
     expect(keys).toHaveLength(Wikidata.MAX_SITELINKS);
     expect(keys.at(-1)).toBe(`site${Wikidata.MAX_SITELINKS - 1}wiki`);
   });
@@ -303,7 +309,7 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     expect(item).toBeDefined();
     if (item === undefined) return expect.unreachable("Q42 missing");
     expect(item.id).toBe("Q42");
-    expect(item.type).toBe("item");
+    expect(item.type).toEqual(Option.some("item"));
     expect(item.labels.en).toBe("Douglas Adams");
     expect(item.descriptions.en).toContain("science fiction");
     expect(item.aliases.en).toContain("Douglas Noel Adams");
@@ -318,7 +324,7 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     expect(statement?.rank).toBe("preferred");
     const value = claimValue(Q42, "P31", "wikibase-entityid");
     expect(value.id).toBe("Q5");
-    expect(value.entityType).toBe("item");
+    expect(value.entityType).toEqual(Option.some("item"));
     // Qualifier (P805) and the date-of-birth reference are present and typed.
     expect(statement?.qualifiers.P805?.[0]?._tag).toBe("value");
     expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]?._tag).toBe("value");
@@ -329,17 +335,18 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
     const time = claimValue(Q42, "P569", "time");
     expect(time.time).toBe("+1952-03-11T00:00:00Z");
-    expect(time.precision).toBe(11);
-    expect(time.calendarModel).toBe("http://www.wikidata.org/entity/Q1985727");
+    expect(time.precision).toEqual(Option.some(11));
+    expect(time.calendarModel).toEqual(Option.some("http://www.wikidata.org/entity/Q1985727"));
   });
 
   it("decodes a globecoordinate value", async () => {
     const { layer } = load();
     const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
     const coord = claimValue(Q42, "P625", "globecoordinate");
-    expect(coord.latitude).toBeCloseTo(52.2053);
-    expect(coord.longitude).toBeCloseTo(0.1218);
-    expect(coord.globe).toBe("http://www.wikidata.org/entity/Q2");
+    expect(Option.getOrNull(coord.latitude)).toBeCloseTo(52.2053);
+    expect(Option.getOrNull(coord.longitude)).toBeCloseTo(0.1218);
+    expect(coord.altitude).toEqual(Option.none());
+    expect(coord.globe).toEqual(Option.some("http://www.wikidata.org/entity/Q2"));
   });
 
   it("decodes a quantity value with unit and bounds (raw decimal strings)", async () => {
@@ -347,9 +354,9 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
     const quantity = claimValue(Q42, "P2048", "quantity");
     expect(quantity.amount).toBe("+1.96");
-    expect(quantity.unit).toBe("http://www.wikidata.org/entity/Q11573");
-    expect(quantity.upperBound).toBe("+1.97");
-    expect(quantity.lowerBound).toBe("+1.95");
+    expect(quantity.unit).toEqual(Option.some("http://www.wikidata.org/entity/Q11573"));
+    expect(quantity.upperBound).toEqual(Option.some("+1.97"));
+    expect(quantity.lowerBound).toEqual(Option.some("+1.95"));
   });
 
   it("decodes a monolingualtext value", async () => {
@@ -357,7 +364,7 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
     const text = claimValue(Q42, "P1813", "monolingualtext");
     expect(text.text).toBe("Douglas Adams");
-    expect(text.language).toBe("en");
+    expect(text.language).toEqual(Option.some("en"));
   });
 
   it("splits a string datavalue by datatype: external-id vs plain string", async () => {
@@ -381,7 +388,7 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     const { layer } = load();
     const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
     const unknown = claimValue(Q42, "P9999", "unknown");
-    expect(unknown.type).toBe("future-datatype-not-yet-modelled");
+    expect(unknown.type).toEqual(Option.some("future-datatype-not-yet-modelled"));
     // The raw payload is preserved for inspection.
     expect(unknown.value).toEqual({ some: "shape", the: "decoder", does: "not know" });
   });
@@ -447,10 +454,10 @@ describe("Wikidata.searchEntities", () => {
     expect(result).toEqual([
       {
         id: "Q42",
-        label: "Douglas Adams",
-        description: "English writer",
-        matchType: "label",
-        matchText: "Douglas Adams",
+        label: Option.some("Douglas Adams"),
+        description: Option.some("English writer"),
+        matchType: Option.some("label"),
+        matchText: Option.some("Douglas Adams"),
       },
     ]);
     expect(urls[0]).toContain("action=wbsearchentities");

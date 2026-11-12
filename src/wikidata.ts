@@ -36,6 +36,7 @@
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -66,47 +67,47 @@ export type EntityId = ItemId | PropertyId | LexemeId;
 
 /**
  * Validates a Wikidata **item** id (`Q` + digits) and upper-cases it.
- * Returns the branded id or `null`. The strict character class is the
+ * Returns the branded id, or `None` for anything else. The strict character class is the
  * injection guard: an id echoed from an untrusted response may be slotted
  * back into a request or persisted downstream, so it must be exclusively
  * `Q` plus digits — never a slash, dot, or path-escaping byte.
  */
-export function parseItemId(raw: unknown): ItemId | null {
-  if (!P.isString(raw)) return null;
+export function parseItemId(raw: unknown): Option.Option<ItemId> {
+  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `Q` + digits form the brand names.
-  return /^Q[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as ItemId) : null;
+  return /^Q[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as ItemId) : Option.none();
 }
 
-/** Validates a Wikidata **property** id (`P` + digits); returns the branded id or `null`. */
-export function parsePropertyId(raw: unknown): PropertyId | null {
-  if (!P.isString(raw)) return null;
+/** Validates a Wikidata **property** id (`P` + digits); returns the branded id or `None`. */
+export function parsePropertyId(raw: unknown): Option.Option<PropertyId> {
+  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `P` + digits form the brand names.
-  return /^P[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as PropertyId) : null;
+  return /^P[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as PropertyId) : Option.none();
 }
 
-/** Validates a Wikidata **lexeme** id (`L` + digits); returns the branded id or `null`. */
-export function parseLexemeId(raw: unknown): LexemeId | null {
-  if (!P.isString(raw)) return null;
+/** Validates a Wikidata **lexeme** id (`L` + digits); returns the branded id or `None`. */
+export function parseLexemeId(raw: unknown): Option.Option<LexemeId> {
+  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `L` + digits form the brand names.
-  return /^L[1-9]\d{0,18}$/.test(cleaned) ? (cleaned as LexemeId) : null;
+  return /^L[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as LexemeId) : Option.none();
 }
 
 /**
  * Validates any entity id, dispatching on the leading letter. Returns the
- * appropriate branded id, or `null` for anything that is not a plain
+ * appropriate branded id, or `None` for anything that is not a plain
  * `Q`/`P`/`L` id (lexeme forms / senses like `L1-F1` are intentionally out
- * of scope and degrade to `null`).
+ * of scope and degrade to `None`).
  */
-export function parseEntityId(raw: unknown): EntityId | null {
-  if (!P.isString(raw)) return null;
+export function parseEntityId(raw: unknown): Option.Option<EntityId> {
+  if (!P.isString(raw)) return Option.none();
   const head = raw.trim().charAt(0).toUpperCase();
   if (head === "Q") return parseItemId(raw);
   if (head === "P") return parsePropertyId(raw);
   if (head === "L") return parseLexemeId(raw);
-  return null;
+  return Option.none();
 }
 
 // ── Field bounds (defence in depth over untrusted response text) ─────────
@@ -135,23 +136,21 @@ export const MAX_SITELINKS = 2000;
 /** The most ids `wbgetentities` accepts per request (Wikibase's documented limit). */
 export const MAX_IDS_PER_REQUEST = 50;
 
-/** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
-function sanitiseText(value: unknown): string | null {
-  if (!P.isString(value)) return null;
-  const trimmed = value.trim();
-  return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
+/** Trims and length-clamps an untrusted free-text value; `None` for anything unusable. */
+function sanitiseText(value: unknown): Option.Option<string> {
+  return toBoundedString(value, MAX_TEXT_FIELD_LENGTH);
 }
 
-/** A finite number passed through untouched, or `null`. */
-function toFiniteNumber(value: unknown): number | null {
-  return P.isNumber(value) && Number.isFinite(value) ? value : null;
+/** A finite number passed through untouched, or `None`. */
+function toFiniteNumber(value: unknown): Option.Option<number> {
+  return P.isNumber(value) && Number.isFinite(value) ? Option.some(value) : Option.none();
 }
 
-/** A short raw string (calendar / globe / unit IRI, amount), trimmed and bounded, or `null`. */
-function toBoundedString(value: unknown, max = 2000): string | null {
-  if (!P.isString(value)) return null;
+/** A short raw string (calendar / globe / unit IRI, amount), trimmed and bounded, or `None`. */
+function toBoundedString(value: unknown, max = 2000): Option.Option<string> {
+  if (!P.isString(value)) return Option.none();
   const trimmed = value.trim();
-  return Str.isEmpty(trimmed) ? null : trimmed.slice(0, max);
+  return Str.isEmpty(trimmed) ? Option.none() : Option.some(trimmed.slice(0, max));
 }
 
 // ── The datavalue union ──────────────────────────────────────────────────
@@ -169,10 +168,10 @@ export interface WikibaseEntityIdValue {
   readonly id: EntityId;
   /**
    * The raw `entity-type` discriminator (`"item"`, `"property"`, `"lexeme"`,
-   * …), trimmed; `null` when Wikibase sent none. It is not checked against
+   * …), trimmed; `None` when Wikibase sent none. It is not checked against
    * {@link WikibaseEntityIdValue.id}'s prefix.
    */
-  readonly entityType: string | null;
+  readonly entityType: Option.Option<string>;
 }
 
 /**
@@ -197,66 +196,66 @@ export interface TimeValue {
    * Wikibase's precision code, saying how much of {@link TimeValue.time} is
    * meaningful: `9` year, `10` month, `11` day, `12` hour, `13` minute, `14`
    * second; `8` decade, `7` century, `6` millennium, and `5` down to `0` for
-   * 10⁴ to 10⁹ years. `null` when absent or not a finite number; it is not
+   * 10⁴ to 10⁹ years. `None` when absent or not a finite number; it is not
    * range-checked.
    */
-  readonly precision: number | null;
+  readonly precision: Option.Option<number>;
   /**
    * The calendar model's entity IRI, such as
    * `http://www.wikidata.org/entity/Q1985727` (proleptic Gregorian) or
    * `…/Q1985786` (proleptic Julian), saying which calendar
-   * {@link TimeValue.time} is written in. `null` when absent; the IRI is not
+   * {@link TimeValue.time} is written in. `None` when absent; the IRI is not
    * validated.
    */
-  readonly calendarModel: string | null;
+  readonly calendarModel: Option.Option<string>;
   /**
    * The time zone offset from UTC, in minutes. Wikibase does not use it yet
-   * and normally sends `0`; `null` when absent or not a finite number.
+   * and normally sends `0`; `None` when absent or not a finite number.
    */
-  readonly timezone: number | null;
+  readonly timezone: Option.Option<number>;
   /**
    * How far the true time may lie before {@link TimeValue.time}, in units
    * of {@link TimeValue.precision}. Wikibase does not use it yet and
-   * normally sends `0`; `null` when absent or not a finite number.
+   * normally sends `0`; `None` when absent or not a finite number.
    */
-  readonly before: number | null;
+  readonly before: Option.Option<number>;
   /**
    * How far the true time may lie after {@link TimeValue.time}, in units
    * of {@link TimeValue.precision}. Wikibase does not use it yet and
-   * normally sends `0`; `null` when absent or not a finite number.
+   * normally sends `0`; `None` when absent or not a finite number.
    */
-  readonly after: number | null;
+  readonly after: Option.Option<number>;
 }
 
 /**
  * A geographic coordinate (`globecoordinate`). `globe` is the globe entity
- * IRI (Earth = `Q2`). Every field may be `null`, so a `globecoordinate`
+ * IRI (Earth = `Q2`). Every field but `_tag` may be `None`, so a `globecoordinate`
  * datavalue never degrades to {@link UnknownValue}.
  */
 export interface GlobeCoordinateValue {
   /** Discriminates this value in the {@link DataValue} union: Wikibase's datavalue `type`. */
   readonly _tag: "globecoordinate";
-  /** The latitude in decimal degrees, north positive; `null` when absent or not a finite number. */
-  readonly latitude: number | null;
-  /** The longitude in decimal degrees, east positive; `null` when absent or not a finite number. */
-  readonly longitude: number | null;
+  /** The latitude in decimal degrees, north positive; `None` when absent or not a finite number. */
+  readonly latitude: Option.Option<number>;
+  /** The longitude in decimal degrees, east positive; `None` when absent or not a finite number. */
+  readonly longitude: Option.Option<number>;
   /**
-   * The altitude, which Wikibase has never used and sends as `null`; `null`
-   * also when it is not a finite number.
+   * The altitude, which Wikibase has never used and sends as `null`; `None`
+   * then and when it is not a finite number.
    */
-  readonly altitude: number | null;
+  readonly altitude: Option.Option<number>;
   /**
    * How precise the coordinate is, in degrees (`0.0002777…` is one
-   * arcsecond). `null` when Wikibase sent none, as on some older
+   * arcsecond). `None` when Wikibase sent none, as on some older
    * statements, or it is not a finite number.
    */
-  readonly precision: number | null;
+  readonly precision: Option.Option<number>;
   /**
    * The entity IRI of the body the coordinate is on, such as
    * `http://www.wikidata.org/entity/Q2` (Earth) or `…/Q405` (the Moon).
-   * `null` when absent; the IRI is not validated.
+   * `None` when absent; the IRI is not validated.
    */
-  readonly globe: string | null;
+  readonly globe: Option.Option<string>;
 }
 
 /**
@@ -277,20 +276,20 @@ export interface QuantityValue {
   readonly amount: string;
   /**
    * The unit's entity IRI, such as `http://www.wikidata.org/entity/Q11573`
-   * (metre), or `"1"` for a dimensionless count. `null` when absent; the IRI
+   * (metre), or `"1"` for a dimensionless count. `None` when absent; the IRI
    * is not validated.
    */
-  readonly unit: string | null;
+  readonly unit: Option.Option<string>;
   /**
    * The upper bound of the amount's uncertainty, as a signed decimal string in
-   * the same unit; `null` when the statement gives no bounds.
+   * the same unit; `None` when the statement gives no bounds.
    */
-  readonly upperBound: string | null;
+  readonly upperBound: Option.Option<string>;
   /**
    * The lower bound of the amount's uncertainty, as a signed decimal string in
-   * the same unit; `null` when the statement gives no bounds.
+   * the same unit; `None` when the statement gives no bounds.
    */
-  readonly lowerBound: string | null;
+  readonly lowerBound: Option.Option<string>;
 }
 
 /** A language-tagged text (`monolingualtext`). */
@@ -304,9 +303,9 @@ export interface MonolingualTextValue {
   readonly text: string;
   /**
    * The text's language code as Wikibase sent it (`"en"`, `"pt-br"`), trimmed;
-   * `null` when absent. It is not validated.
+   * `None` when absent. It is not validated.
    */
-  readonly language: string | null;
+  readonly language: Option.Option<string>;
 }
 
 /**
@@ -362,10 +361,10 @@ export interface UnknownValue {
   readonly _tag: "unknown";
   /**
    * The datavalue's raw `type` string, untrimmed (`"time"` for a time value
-   * whose payload was unusable, or a type this module does not know); `null`
+   * whose payload was unusable, or a type this module does not know); `None`
    * when `type` was absent or not a string.
    */
-  readonly type: string | null;
+  readonly type: Option.Option<string>;
   /**
    * The datavalue's `value` payload exactly as decoded from the response:
    * not trimmed, bounded or checked, and `undefined` when absent. Treat it
@@ -395,10 +394,10 @@ export interface ValueSnak {
   readonly property: PropertyId;
   /**
    * The property's datatype (`"wikibase-item"`, `"external-id"`, `"time"`,
-   * …), trimmed; `null` when the snak carried none. It is what splits a
+   * …), trimmed; `None` when the snak carried none. It is what splits a
    * `string` datavalue into {@link ExternalIdValue} or {@link StringValue}.
    */
-  readonly datatype: string | null;
+  readonly datatype: Option.Option<string>;
   /**
    * The asserted value; an unrecognised or unusable datavalue is an
    * {@link UnknownValue}, never absent.
@@ -419,9 +418,9 @@ export interface SomeValueSnak {
   readonly property: PropertyId;
   /**
    * The property's datatype (`"wikibase-item"`, `"time"`, …), trimmed;
-   * `null` when the snak carried none.
+   * `None` when the snak carried none.
    */
-  readonly datatype: string | null;
+  readonly datatype: Option.Option<string>;
 }
 
 /**
@@ -436,9 +435,9 @@ export interface NoValueSnak {
   readonly property: PropertyId;
   /**
    * The property's datatype (`"wikibase-item"`, `"time"`, …), trimmed;
-   * `null` when the snak carried none.
+   * `None` when the snak carried none.
    */
-  readonly datatype: string | null;
+  readonly datatype: Option.Option<string>;
 }
 
 /** A single snak — the property + value assertion at the heart of every statement. */
@@ -457,9 +456,9 @@ export type StatementRank = "preferred" | "normal" | "deprecated";
 export interface Reference {
   /**
    * Wikibase's hash of the reference's snaks, which identifies it within the
-   * statement (and is shared by identical references); `null` when absent.
+   * statement (and is shared by identical references); `None` when absent.
    */
-  readonly hash: string | null;
+  readonly hash: Option.Option<string>;
   /**
    * The reference's snaks keyed by property id (`"P248"` stated in, `"P854"`
    * reference URL, …), in Wikibase's order. Unusable snaks and invalid
@@ -471,8 +470,8 @@ export interface Reference {
 
 /** A single claim on an item: a main snak, its rank, and its qualifiers and references. */
 export interface Statement {
-  /** The statement GUID (`Q42$...`), trimmed; `null` when absent. */
-  readonly id: string | null;
+  /** The statement GUID (`Q42$...`), trimmed; `None` when absent. */
+  readonly id: Option.Option<string>;
   /** The statement's rank; a missing or unrecognised rank reads as `"normal"`. */
   readonly rank: StatementRank;
   /** The statement's main assertion: the property and its value, some value or no value. */
@@ -525,9 +524,9 @@ export interface WikidataItem {
   readonly id: EntityId;
   /**
    * The entity kind (`"item"`, `"property"`, `"lexeme"`), as Wikibase
-   * reports it; `null` when absent.
+   * reports it; `None` when absent.
    */
-  readonly type: string | null;
+  readonly type: Option.Option<string>;
   /**
    * The label in each language, keyed by language code (`"en"`, `"de"`).
    * From {@link getEntities}, only the requested languages are present
@@ -717,10 +716,15 @@ function entriesOf(raw: unknown): ReadonlyArray<readonly [string, unknown]> {
 
 /** What {@link normaliseDataValue} dispatches on: the datavalue's own `type`, plus its payload. */
 interface DataValueInput {
-  readonly type: string | null;
+  /**
+   * The raw `type`, or `""` when it is absent or not a string: the matcher
+   * compares it to literals, and `""` is no Wikibase type, so it falls through
+   * to {@link UnknownValue}.
+   */
+  readonly type: string;
   readonly value: unknown;
   readonly fields: RawFields;
-  readonly datatype: string | null;
+  readonly datatype: Option.Option<string>;
   readonly unknown: UnknownValue;
 }
 
@@ -730,24 +734,26 @@ interface DataValueInput {
  */
 const matchDataValue = Match.type<DataValueInput>().pipe(
   Match.when({ type: "wikibase-entityid" }, ({ fields, unknown }): DataValue => {
-    const id = parseEntityId(fields["id"]);
-    if (id === null) return unknown;
     const entityType = sanitiseText(fields["entity-type"]);
-    return { _tag: "wikibase-entityid", id, entityType };
+    return Option.match(parseEntityId(fields["id"]), {
+      onNone: () => unknown,
+      onSome: (id): DataValue => ({ _tag: "wikibase-entityid", id, entityType }),
+    });
   }),
-  Match.when({ type: "time" }, ({ fields, unknown }): DataValue => {
-    const time = toBoundedString(fields["time"], 64);
-    if (time === null) return unknown;
-    return {
-      _tag: "time",
-      time,
-      precision: toFiniteNumber(fields["precision"]),
-      calendarModel: toBoundedString(fields["calendarmodel"]),
-      timezone: toFiniteNumber(fields["timezone"]),
-      before: toFiniteNumber(fields["before"]),
-      after: toFiniteNumber(fields["after"]),
-    };
-  }),
+  Match.when({ type: "time" }, ({ fields, unknown }): DataValue =>
+    Option.match(toBoundedString(fields["time"], 64), {
+      onNone: () => unknown,
+      onSome: (time): DataValue => ({
+        _tag: "time",
+        time,
+        precision: toFiniteNumber(fields["precision"]),
+        calendarModel: toBoundedString(fields["calendarmodel"]),
+        timezone: toFiniteNumber(fields["timezone"]),
+        before: toFiniteNumber(fields["before"]),
+        after: toFiniteNumber(fields["after"]),
+      }),
+    }),
+  ),
   Match.when({ type: "globecoordinate" }, ({ fields }): DataValue => ({
     _tag: "globecoordinate",
     latitude: toFiniteNumber(fields["latitude"]),
@@ -756,29 +762,37 @@ const matchDataValue = Match.type<DataValueInput>().pipe(
     precision: toFiniteNumber(fields["precision"]),
     globe: toBoundedString(fields["globe"]),
   })),
-  Match.when({ type: "quantity" }, ({ fields, unknown }): DataValue => {
-    const amount = toBoundedString(fields["amount"], 64);
-    if (amount === null) return unknown;
-    return {
-      _tag: "quantity",
-      amount,
-      unit: toBoundedString(fields["unit"]),
-      upperBound: toBoundedString(fields["upperBound"], 64),
-      lowerBound: toBoundedString(fields["lowerBound"], 64),
-    };
-  }),
-  Match.when({ type: "monolingualtext" }, ({ fields, unknown }): DataValue => {
-    const text = sanitiseText(fields["text"]);
-    if (text === null) return unknown;
-    return { _tag: "monolingualtext", text, language: sanitiseText(fields["language"]) };
-  }),
-  Match.when({ type: "string" }, ({ value, datatype, unknown }): DataValue => {
-    const str = sanitiseText(value);
-    if (str === null) return unknown;
-    return datatype === "external-id"
-      ? { _tag: "external-id", value: str }
-      : { _tag: "string", value: str };
-  }),
+  Match.when({ type: "quantity" }, ({ fields, unknown }): DataValue =>
+    Option.match(toBoundedString(fields["amount"], 64), {
+      onNone: () => unknown,
+      onSome: (amount): DataValue => ({
+        _tag: "quantity",
+        amount,
+        unit: toBoundedString(fields["unit"]),
+        upperBound: toBoundedString(fields["upperBound"], 64),
+        lowerBound: toBoundedString(fields["lowerBound"], 64),
+      }),
+    }),
+  ),
+  Match.when({ type: "monolingualtext" }, ({ fields, unknown }): DataValue =>
+    Option.match(sanitiseText(fields["text"]), {
+      onNone: () => unknown,
+      onSome: (text): DataValue => ({
+        _tag: "monolingualtext",
+        text,
+        language: sanitiseText(fields["language"]),
+      }),
+    }),
+  ),
+  Match.when({ type: "string" }, ({ value, datatype, unknown }): DataValue =>
+    Option.match(sanitiseText(value), {
+      onNone: () => unknown,
+      onSome: (str): DataValue =>
+        Option.contains(datatype, "external-id")
+          ? { _tag: "external-id", value: str }
+          : { _tag: "string", value: str },
+    }),
+  ),
   Match.orElse(({ unknown }): DataValue => unknown),
 );
 
@@ -788,13 +802,13 @@ const matchDataValue = Match.type<DataValueInput>().pipe(
  * consulted to split a `string` datavalue into {@link ExternalIdValue} vs
  * {@link StringValue}. Any `type` this function doesn't recognise — or a
  * recognised `type` whose payload is unusable — degrades to
- * {@link UnknownValue}; this function never returns `null` and never throws.
+ * {@link UnknownValue}; this function always returns a value and never throws.
  */
-export function normaliseDataValue(raw: RawDataValue, datatype: string | null): DataValue {
-  const type = P.isString(raw.type) ? raw.type : null;
+export function normaliseDataValue(raw: RawDataValue, datatype: Option.Option<string>): DataValue {
+  const type = P.isString(raw.type) ? Option.some(raw.type) : Option.none();
   const value = raw.value;
   return matchDataValue({
-    type,
+    type: Option.getOrElse(type, () => ""),
     value,
     fields: fieldsOf(value),
     datatype,
@@ -802,32 +816,33 @@ export function normaliseDataValue(raw: RawDataValue, datatype: string | null): 
   });
 }
 
-/** Normalises one raw snak into the typed {@link Snak}; `null` when it carries no valid property. */
-export function normaliseSnak(raw: RawSnak): Snak | null {
-  const property = parsePropertyId(raw.property);
-  if (property === null) return null;
-  const datatype = sanitiseText(raw.datatype);
-  const snaktype = raw.snaktype;
-  if (snaktype === "novalue") return { _tag: "novalue", property, datatype };
-  if (snaktype === "somevalue") return { _tag: "somevalue", property, datatype };
-  // Otherwise it is a value snak. Wikibase always sends snaktype "value"
-  // explicitly, but if a datavalue is somehow absent (or, in an unvalidated
-  // dump line, not an object) we fall back to "somevalue" rather than
-  // inventing an empty value.
-  if (!P.isObject(raw.datavalue)) return { _tag: "somevalue", property, datatype };
-  return { _tag: "value", property, datatype, value: normaliseDataValue(raw.datavalue, datatype) };
+/** Normalises one raw snak into the typed {@link Snak}; `None` when it carries no valid property. */
+export function normaliseSnak(raw: RawSnak): Option.Option<Snak> {
+  return Option.map(parsePropertyId(raw.property), (property): Snak => {
+    const datatype = sanitiseText(raw.datatype);
+    const snaktype = raw.snaktype;
+    if (snaktype === "novalue") return { _tag: "novalue", property, datatype };
+    if (snaktype === "somevalue") return { _tag: "somevalue", property, datatype };
+    // Otherwise it is a value snak. Wikibase always sends snaktype "value"
+    // explicitly, but if a datavalue is somehow absent (or, in an unvalidated
+    // dump line, not an object) we fall back to "somevalue" rather than
+    // inventing an empty value.
+    if (!P.isObject(raw.datavalue)) return { _tag: "somevalue", property, datatype };
+    const value = normaliseDataValue(raw.datavalue, datatype);
+    return { _tag: "value", property, datatype, value };
+  });
 }
 
 /**
- * Keeps, in order, the first `max` items that `f` maps to a non-`null`
- * value. `f` is not called once `max` are kept, so a hostile list costs one
+ * Keeps, in order, the first `max` items that `f` maps to a `Some`, unwrapped.
+ * `f` is not called once `max` are kept, so a hostile list costs one
  * comparison per surplus entry.
  */
-function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => B | null): B[] {
+function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => Option.Option<B>): B[] {
   return Arr.reduce(items, Arr.empty<B>(), (kept, item) => {
     if (kept.length < max) {
       const usable = f(item);
-      if (usable !== null) kept.push(usable);
+      if (Option.isSome(usable)) kept.push(usable.value);
     }
     return kept;
   });
@@ -835,7 +850,7 @@ function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => B | n
 
 /**
  * Builds a record from the entries of `raw` (see `entriesOf`: none unless it
- * is an object, and never a `__proto__` key) that `f` maps to a non-`null`
+ * is an object, and never a `__proto__` key) that `f` maps to a `Some`
  * `[key, value]`, keeping at most `max` of them, in order; `f` is not called
  * once `max` are kept. The record is built with `R.fromEntries`, so every
  * key is an own property.
@@ -843,59 +858,55 @@ function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => B | n
 function keepUsableEntries<B>(
   raw: unknown,
   max: number,
-  f: (key: string, value: unknown) => readonly [string, B] | null,
+  f: (key: string, value: unknown) => Option.Option<readonly [string, B]>,
 ) {
   const kept: (readonly [string, B])[] = [];
   Arr.forEach(entriesOf(raw), ([key, value]) => {
     if (kept.length >= max) return;
     const entry = f(key, value);
-    if (entry !== null) kept.push(entry);
+    if (Option.isSome(entry)) kept.push(entry.value);
   });
   return R.fromEntries(kept);
 }
 
 /** Normalises a `{ property: snak[] }` block (qualifiers / reference snaks), dropping unusable snaks. */
 function normaliseSnakList(raw: unknown): Record<string, readonly Snak[]> {
-  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, snaks) => {
-    const validProperty = parsePropertyId(property);
-    if (validProperty === null) return null;
-    const list = keepUsable(objectsIn<RawSnak>(snaks), MAX_LIST_ENTRIES, normaliseSnak);
-    return Arr.isReadonlyArrayNonEmpty(list) ? [validProperty, list] : null;
-  });
+  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, snaks) =>
+    Option.flatMap(parsePropertyId(property), (validProperty) => {
+      const list = keepUsable(objectsIn<RawSnak>(snaks), MAX_LIST_ENTRIES, normaliseSnak);
+      return Arr.isReadonlyArrayNonEmpty(list)
+        ? Option.some([validProperty, list] as const)
+        : Option.none();
+    }),
+  );
 }
 
 function normaliseRank(raw: unknown): StatementRank {
   return raw === "preferred" || raw === "deprecated" ? raw : "normal";
 }
 
-/** Normalises one raw statement; `null` when its main snak carries no valid property. */
-export function normaliseStatement(raw: RawStatement): Statement | null {
-  if (!P.isObject(raw.mainsnak)) return null;
-  const mainsnak = normaliseSnak(raw.mainsnak);
-  if (mainsnak === null) return null;
-  const references = keepUsable(
-    objectsIn<RawReference>(raw.references),
-    MAX_LIST_ENTRIES,
-    (reference): Reference => ({
-      hash: sanitiseText(reference.hash),
-      snaks: normaliseSnakList(reference.snaks),
-    }),
-  );
-  return {
+/** Normalises one raw statement; `None` when its main snak carries no valid property. */
+export function normaliseStatement(raw: RawStatement): Option.Option<Statement> {
+  if (!P.isObject(raw.mainsnak)) return Option.none();
+  return Option.map(normaliseSnak(raw.mainsnak), (mainsnak): Statement => ({
     id: sanitiseText(raw.id),
     rank: normaliseRank(raw.rank),
     mainsnak,
     qualifiers: normaliseSnakList(raw.qualifiers),
-    references,
-  };
+    references: keepUsable(objectsIn<RawReference>(raw.references), MAX_LIST_ENTRIES, (reference) =>
+      Option.some<Reference>({
+        hash: sanitiseText(reference.hash),
+        snaks: normaliseSnakList(reference.snaks),
+      }),
+    ),
+  }));
 }
 
 /** Normalises a `{ lang: { value } }` term map into a flat `lang → value` map. */
 function normaliseTermMap(raw: unknown): LanguageMap {
-  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, term) => {
-    const value = sanitiseText(fieldsOf(term)["value"]);
-    return value === null ? null : [language, value];
-  });
+  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, term) =>
+    Option.map(sanitiseText(fieldsOf(term)["value"]), (value) => [language, value] as const),
+  );
 }
 
 function normaliseAliases(raw: unknown): Record<string, readonly string[]> {
@@ -905,7 +916,9 @@ function normaliseAliases(raw: unknown): Record<string, readonly string[]> {
       MAX_LIST_ENTRIES,
       (term) => sanitiseText(term.value),
     );
-    return Arr.isReadonlyArrayNonEmpty(values) ? [language, values] : null;
+    return Arr.isReadonlyArrayNonEmpty(values)
+      ? Option.some([language, values] as const)
+      : Option.none();
   });
 }
 
@@ -918,49 +931,53 @@ function normaliseBadges(raw: unknown): ItemId[] {
 function normaliseSitelinks(raw: unknown): Record<string, Sitelink> {
   return keepUsableEntries(raw, MAX_SITELINKS, (site, link) => {
     const fields = fieldsOf(link);
-    const title = sanitiseText(fields["title"]);
-    if (title === null) return null;
-    const sitelink: Sitelink = {
-      site: sanitiseText(fields["site"]) ?? site,
-      title,
-      badges: normaliseBadges(fields["badges"]),
-    };
-    return [site, sitelink];
+    return Option.map(sanitiseText(fields["title"]), (title) => {
+      const sitelink: Sitelink = {
+        site: Option.getOrElse(sanitiseText(fields["site"]), () => site),
+        title,
+        badges: normaliseBadges(fields["badges"]),
+      };
+      return [site, sitelink] as const;
+    });
   });
 }
 
 /**
- * Normalises one raw entity into a typed {@link WikidataItem}; `null` when
+ * Normalises one raw entity into a typed {@link WikidataItem}; `None` when
  * the entity carries no valid id or Wikibase flagged it `missing` (the item
  * does not exist upstream).
  */
-export function normaliseItem(raw: RawEntity): WikidataItem | null {
-  if (raw.missing !== undefined) return null;
-  const id = parseEntityId(raw.id);
-  if (id === null) return null;
-  const claims = keepUsableEntries(raw.claims, Number.POSITIVE_INFINITY, (property, statements) => {
-    const validProperty = parsePropertyId(property);
-    if (validProperty === null) return null;
-    return [
-      validProperty,
-      keepUsable(objectsIn<RawStatement>(statements), MAX_LIST_ENTRIES, normaliseStatement),
-    ];
-  });
-  return {
+export function normaliseItem(raw: RawEntity): Option.Option<WikidataItem> {
+  if (raw.missing !== undefined) return Option.none();
+  return Option.map(parseEntityId(raw.id), (id): WikidataItem => ({
     id,
     type: sanitiseText(raw.type),
     labels: normaliseTermMap(raw.labels),
     descriptions: normaliseTermMap(raw.descriptions),
     aliases: normaliseAliases(raw.aliases),
     sitelinks: normaliseSitelinks(raw.sitelinks),
-    claims,
-  };
+    claims: normaliseClaims(raw.claims),
+  }));
+}
+
+/** Normalises the `{ property: statement[] }` claims map, dropping invalid property keys. */
+function normaliseClaims(raw: unknown): Record<string, readonly Statement[]> {
+  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, statements) =>
+    Option.map(
+      parsePropertyId(property),
+      (validProperty) =>
+        [
+          validProperty,
+          keepUsable(objectsIn<RawStatement>(statements), MAX_LIST_ENTRIES, normaliseStatement),
+        ] as const,
+    ),
+  );
 }
 
 /**
  * Decodes one already-`JSON.parse`d entity object — an `wbgetentities`
  * entity, or a single line from a Wikidata JSON **dump** — into the typed
- * {@link WikidataItem} model. Returns `null` when the value is not an object,
+ * {@link WikidataItem} model. Returns `None` when the value is not an object,
  * carries no valid id, or Wikibase flagged it `missing`. Pure, total, and
  * lenient: it never throws on any `JSON.parse` output. A partial or
  * future-shaped object yields a best-effort item, and so does one whose
@@ -971,8 +988,8 @@ export function normaliseItem(raw: RawEntity): WikidataItem | null {
  * This is the entry point the {@link Dumps} entity-dump pipeline runs each
  * dump line through.
  */
-export function decodeEntity(raw: unknown): WikidataItem | null {
-  if (!P.isObjectOrArray(raw)) return null;
+export function decodeEntity(raw: unknown): Option.Option<WikidataItem> {
+  if (!P.isObjectOrArray(raw)) return Option.none();
   // SAFETY: every `RawEntity` field is optional and read defensively by
   // `normaliseItem`, so any non-null object (an array included) is a valid
   // input; a field of the wrong shape degrades rather than throws.
@@ -988,10 +1005,9 @@ export function decodeEntity(raw: unknown): WikidataItem | null {
  * does, `__proto__` keys dropped included.
  */
 export function normaliseEntities(response: WbGetEntitiesResponse): Record<string, WikidataItem> {
-  return keepUsableEntries(response.entities, Number.POSITIVE_INFINITY, (_, raw) => {
-    const item = decodeEntity(raw);
-    return item === null ? null : [item.id, item];
-  });
+  return keepUsableEntries(response.entities, Number.POSITIVE_INFINITY, (_, raw) =>
+    Option.map(decodeEntity(raw), (item) => [item.id, item] as const),
+  );
 }
 
 // ── wbgetentities (batched, 50-id chunking) ──────────────────────────────
@@ -1030,12 +1046,10 @@ export const getEntities = Effect.fn("Wikidata.getEntities")(function* (
     ids,
     // `unknown`: a JavaScript caller can pass anything, and the error reports
     // what it was given.
-    (id: unknown) => {
-      const parsed = parseEntityId(id);
-      return parsed === null
-        ? Effect.fail(new InvalidRequest({ kind: "entityId", value: String(id) }))
-        : Effect.succeed(parsed);
-    },
+    (id: unknown) =>
+      Effect.fromOption(parseEntityId(id)).pipe(
+        Effect.mapError(() => new InvalidRequest({ kind: "entityId", value: String(id) })),
+      ),
     { concurrency: 1 },
   );
   const client = yield* WikimediaClient;
@@ -1116,25 +1130,25 @@ export interface SearchHit {
   readonly id: EntityId;
   /**
    * The entity's label in the search language, trimmed and cut at 4,000
-   * UTF-16 code units; `null` when the entity has none to show.
+   * UTF-16 code units; `None` when the entity has none to show.
    */
-  readonly label: string | null;
+  readonly label: Option.Option<string>;
   /**
    * The entity's short description in the search language, trimmed and cut
-   * at 4,000 UTF-16 code units; `null` when it has none.
+   * at 4,000 UTF-16 code units; `None` when it has none.
    */
-  readonly description: string | null;
+  readonly description: Option.Option<string>;
   /**
    * How the search matched, as Wikibase reports it (such as `"label"` or
-   * `"alias"`); `null` when Wikibase did not say.
+   * `"alias"`); `None` when Wikibase did not say.
    */
-  readonly matchType: string | null;
+  readonly matchType: Option.Option<string>;
   /**
    * The matched text (a label or alias), which may differ from
    * {@link SearchHit.label} when an alias or another language matched;
-   * `null` when Wikibase did not say.
+   * `None` when Wikibase did not say.
    */
-  readonly matchText: string | null;
+  readonly matchText: Option.Option<string>;
 }
 
 /**
@@ -1142,17 +1156,15 @@ export interface SearchHit {
  * valid entity id and keeping at most {@link MAX_SEARCH_RESULTS}.
  */
 export function normaliseSearch(response: WbSearchResponse): readonly SearchHit[] {
-  return keepUsable(response.search ?? [], MAX_SEARCH_RESULTS, (hit): SearchHit | null => {
-    const id = parseEntityId(hit.id);
-    if (id === null) return null;
-    return {
+  return keepUsable(response.search ?? [], MAX_SEARCH_RESULTS, (hit) =>
+    Option.map(parseEntityId(hit.id), (id): SearchHit => ({
       id,
       label: sanitiseText(hit.label),
       description: sanitiseText(hit.description),
       matchType: sanitiseText(hit.match?.type),
       matchText: sanitiseText(hit.match?.text),
-    };
-  });
+    })),
+  );
 }
 
 /** Options for {@link searchEntities}. */
@@ -1181,8 +1193,9 @@ export const searchEntities = Effect.fn("Wikidata.searchEntities")(function* (
   options?: SearchEntitiesOptions,
   retry?: RetryOptions,
 ) {
-  const cleanedQuery = sanitiseText(query);
-  if (cleanedQuery === null) return yield* new InvalidRequest({ kind: "query", value: query });
+  const cleaned = sanitiseText(query);
+  if (Option.isNone(cleaned)) return yield* new InvalidRequest({ kind: "query", value: query });
+  const cleanedQuery = cleaned.value;
   const language = options?.language ?? "en";
   if (!LANGUAGE_PATTERN.test(language)) {
     return yield* new InvalidRequest({ kind: "language", value: language });

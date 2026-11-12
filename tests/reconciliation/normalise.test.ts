@@ -34,7 +34,7 @@ vi.mock(import("../../src/reconciliation/candidate.ts"), async (importOriginal) 
 /** A Q42-shaped item with one P18 (image) claim and nothing else. */
 const item: Wikidata.WikidataItem = {
   id: Wikidata.ItemId.make("Q42"),
-  type: "item",
+  type: Option.some("item"),
   labels: {},
   descriptions: {},
   aliases: {},
@@ -42,12 +42,12 @@ const item: Wikidata.WikidataItem = {
   claims: {
     P18: [
       {
-        id: null,
+        id: Option.none(),
         rank: "normal",
         mainsnak: {
           _tag: "value",
           property: Wikidata.PropertyId.make("P18"),
-          datatype: "commonsMedia",
+          datatype: Option.some("commonsMedia"),
           value: { _tag: "string", value: "Douglas adams portrait.jpg" },
         },
         qualifiers: {},
