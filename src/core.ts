@@ -374,10 +374,7 @@ export function normaliseTitle(raw: string): Option.Option<string> {
  * Commons file).
  */
 export function requireTitle(value: string, kind = "title"): Effect.Effect<string, InvalidRequest> {
-  return Option.match(normaliseTitle(value), {
-    onNone: () => Effect.fail(new InvalidRequest({ kind, value })),
-    onSome: Effect.succeed,
-  });
+  return Effect.fromOption(normaliseTitle(value), () => new InvalidRequest({ kind, value }));
 }
 
 /**

@@ -1,6 +1,26 @@
 import { recommended } from "@effect/tsgo/oxlint-presets";
 import effect from "@enfect/oxlint";
+import * as R from "effect/Record";
 import { defineConfig } from "vite-plus";
+
+/** The Oxlint config shape the presets share, named without depending on `oxlint` directly. */
+type OxlintConfig = typeof recommended;
+
+/**
+ * `config` with every rule it sets to `warn` raised to `error`: this package
+ * has no warn tier (#224), so a preset's advisory rules gate like the rest.
+ * A rule this config relaxes is turned `off` below, scoped, with its reason.
+ */
+const atError = (config: OxlintConfig): OxlintConfig => ({
+  ...config,
+  rules: R.map(config.rules ?? {}, (setting) =>
+    setting === "warn"
+      ? "error"
+      : Array.isArray(setting) && setting[0] === "warn"
+        ? ["error", ...setting.slice(1)]
+        : setting,
+  ),
+});
 
 /**
  * Vite+ configuration for the single package in this repository.
@@ -139,7 +159,7 @@ export default defineConfig({
     // which doesn't exist yet when `vp check` runs; `check:dist` type-checks it
     // after the build instead.
     ignorePatterns: ["**/dist/**", "api-docs/**", "coverage/**", "tests/dist-consumer/**"],
-    extends: [recommended, effect.configs.recommended],
+    extends: [atError(recommended), atError(effect.configs.recommended)],
     // Oxlint's default plugins plus the ones this codebase has code for:
     // `import` (ESM graph), `promise` (the Node stream adapters and tests),
     // `vitest` (the suite) and `jsdoc` (every export is documented).
@@ -150,23 +170,21 @@ export default defineConfig({
       perf: "error",
     },
     rules: {
-      // `casting-awareness` is an awareness prompt, not a defect rule: it
-      // fires on every `as`, including the narrowings the Fetch types
-      // structurally require. Stays visible as a warning.
-      "effect/casting-awareness": "warn",
-      // ---- Effect preset: rules this package's conventions cut across ------
-      // `prefer-option-over-null` also fires on `?: T | undefined`, which is
-      // the ONLY spelling of an optional member `exactOptionalPropertyTypes`
-      // lets a caller forward an optional of its own into (AGENTS.md), and on
-      // the `null` the Wikimedia APIs' JSON carries (decoded schemas mirror
-      // the wire). A bare `null` / `undefined` in a return type is still a
-      // finding to read; the options-object members are not.
-      "effect/prefer-option-over-null": "warn",
-      // `unknown` is the honest type at the boundaries this package sits on:
-      // a caught failure turned into an error's `description`, and the raw
-      // JSON a Wikimedia API returns before its schema decodes it.
-      "effect/no-unknown-parameters": "warn",
+      // Every rule is an error (#224): no warn tier and no disable comments.
+      // The only exceptions are the scoped overrides below, each a site the
+      // rule cannot apply to, with the reason beside it.
+      "effect/casting-awareness": "error",
+      "effect/prefer-option-over-null": "error",
+      "effect/no-unknown-parameters": "error",
+      // Effect 4 marks much of `effect/http`, `effect/rpc` and `@effect/vitest`
+      // `@stability unstable`, so this fires on nearly every client, worker
+      // and test call and reports the pinned API, not a defect. The owner's
+      // decision (#26) is that it is informational: a suggestion in
+      // tsconfig.json's language-service options, and off here, where Oxlint
+      // has no suggestion level. The sibling library repos do the same.
+      "effecttsgo/unstable-api-usage": "off",
       "vite-plus/prefer-vite-plus-imports": "error",
+      "effect/no-conditional-empty-object-spread": "error",
       // Effects run and get their layers at the edge (#224): in `src/` that is
       // the caller, in tests it is `@effect/vitest` (`it.effect`, `it.live`,
       // `layer(...)`), so no module, test or helper calls `Effect.provide`
@@ -183,17 +201,9 @@ export default defineConfig({
       // classes stay distinct types. No exceptions.
       "effecttsgo/schema-class-missing-brand": "error",
       "effect/effect-run-in-body": "error",
-      // ---- Oxlint categories: rules this package's conventions cut across --
-      // `_tag` is Effect's discriminator, on every tagged error and union this
-      // package defines and matches.
-      "no-underscore-dangle": "off",
-      // Type assertions are governed by the Effect rules above
-      // (`casting-awareness`, `require-safety-comment-for-type-assertion`),
-      // which ask for the `// SAFETY:` reason this rule cannot see.
-      "typescript/no-unsafe-type-assertion": "off",
-      // A generic read-as-`A` helper over raw JSON (`objectsIn<A>`) uses its
-      // type parameter once on purpose: the caller names the wire shape.
-      "typescript/no-unnecessary-type-parameters": "off",
+      "no-underscore-dangle": "error",
+      "typescript/no-unsafe-type-assertion": "error",
+      "typescript/no-unnecessary-type-parameters": "error",
       // Vitest's `expect(value, message)` takes a failure message.
       "vitest/valid-expect": ["error", { maxArgs: 2 }],
       // Tests assert through `expect…` helpers and `assert`.
@@ -239,6 +249,14 @@ export default defineConfig({
           // escape the stream. `Effect.try` there would need an
           // `Effect.runSync` (effect-run-in-body).
           "effect/avoid-try-catch": "off",
+          // `asNodeDuplex` checks a caller's decompressor with Node's
+          // `stream.isReadable` / `isWritable` before returning it as a
+          // `Duplex`. Those take a `Readable` / `Writable`, not the
+          // structural `NodeDuplexLike` the caller supplies, so the value has
+          // to be viewed as a `Duplex` to be checked at all; a guard typed
+          // `stream is Duplex` would need the same assertion inside it (#265).
+          "effect/casting-awareness": "off",
+          "typescript/no-unsafe-type-assertion": "off",
         },
       },
       // The wikitext parser's cursor drivers (`seek`, `repeatWhile`; #174):
@@ -251,15 +269,6 @@ export default defineConfig({
         files: ["src/wikitext/cursor.ts"],
         rules: {
           "effect/imperative-loops": "off",
-        },
-      },
-      // The perf test logs its measured timings to the CI log; it is
-      // synchronous and runs no Effect, so there is no Console service to log
-      // through.
-      {
-        files: ["tests/perf.test.ts"],
-        rules: {
-          "effect/use-console-service": "off",
         },
       },
       // The two test files whose subject is Node itself. `sources.test.ts`
@@ -284,27 +293,9 @@ export default defineConfig({
           "effect/avoid-node-imports": "off",
         },
       },
-      // Test-only relaxations. Tests read fixtures, write temp dumps and run
-      // `bzip2` through `FileSystem`, `Path` and `ChildProcessSpawner`
-      // (`tests/helpers/fixtures.ts`, `NodeServices.layer`), so the platform
-      // rules apply to them unrelaxed.
       {
         files: ["tests/**"],
         rules: {
-          // The suite has no type assertions left (#224): a node lookup goes
-          // through `tests/helpers/nodes.ts`'s refinements, a stub decodes
-          // with the caller's schema. Held at error so none comes back; the
-          // global `warn` stays for the `src/` sites still to go.
-          "effect/casting-awareness": "error",
-          // Tests narrow a union with `if (!guard) return expect.unreachable(…)`
-          // and then assert on the narrowed value; that return and the
-          // assertions after it are the idiom, not a missing return or a
-          // skipped assertion.
-          "typescript/consistent-return": "off",
-          "vitest/no-conditional-expect": "off",
-          // A helper sits next to the one test that reads it, inside that
-          // test's `describe`, so the test reads top to bottom.
-          "unicorn/consistent-function-scoping": "off",
           // `@effect/vitest`'s `layer(...)` hands each block its own `it`,
           // which carries the block's services, so a block's `it` shadows the
           // module's by design (#224).
