@@ -89,16 +89,16 @@ export {
 } from "./entities.ts";
 export {
   classifyTag,
-  type Contributor,
+  Contributor,
   decodeXmlEntities,
   incrementalRecords,
   onlyRevisions,
-  type PageRef,
-  type PageRevisionError,
-  type PageRevisionHit,
-  type PageRevisionRecord,
+  PageRef,
+  PageRevisionError,
+  PageRevisionHit,
+  PageRevisionRecord,
   pageRecords,
-  type Revision,
+  Revision,
   skipRedirects,
   tagName,
   tokenizeXml,
@@ -115,12 +115,19 @@ export {
   type MultistreamIndexEntry,
   MultistreamIndexError,
   type MultistreamPageRecordsOptions,
-  type MultistreamRange,
+  MultistreamRange,
   type MultistreamRangesOptions,
   multistreamIndexRecords,
   multistreamPageRecords,
   multistreamRanges,
 } from "./multistream.ts";
+export {
+  MultistreamRangeFailed,
+  type MultistreamPageRecordsInWorkersOptions,
+  MultistreamRpcs,
+  multistreamPageRecordsInWorkers,
+  multistreamWorkerHandlers,
+} from "./workers.ts";
 export {
   type Decompressor,
   decompressWith,
