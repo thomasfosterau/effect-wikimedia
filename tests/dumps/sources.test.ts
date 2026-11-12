@@ -71,9 +71,12 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 const noop = (): void => undefined;
 
 /** The failure a fake stage, source or fetch body raises; its `message` is what a test asserts on. */
-class FakeFailure extends Schema.TaggedError<FakeFailure>()("FakeFailure", {
-  message: Schema.String,
-}) {}
+class FakeFailure extends Schema.TaggedError<FakeFailure, { readonly brand: unique symbol }>()(
+  "FakeFailure",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Collects what `process` emits as `event` until the test finishes, when the

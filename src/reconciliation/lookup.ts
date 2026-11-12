@@ -63,7 +63,10 @@ const DEFAULT_LANGUAGE = "en";
 const ENTITY_PROPS = ["labels", "descriptions", "claims"] as const;
 
 /** A bad input the caller supplied — fix the input, don't retry. */
-export class InvalidQuery extends Schema.TaggedError<InvalidQuery>()("InvalidQuery", {
+export class InvalidQuery extends Schema.TaggedError<
+  InvalidQuery,
+  { readonly brand: unique symbol }
+>()("InvalidQuery", {
   /**
    * Which input was rejected. `"label"`: a `searchByLabel` label that is
    * empty or whitespace-only. `"property"`: a `searchByIdentifier` property
@@ -79,7 +82,10 @@ export class InvalidQuery extends Schema.TaggedError<InvalidQuery>()("InvalidQue
 }) {}
 
 /** An upstream transport / decode failure (network, 5xx, malformed body). */
-export class LookupFailed extends Schema.TaggedError<LookupFailed>()("LookupFailed", {
+export class LookupFailed extends Schema.TaggedError<
+  LookupFailed,
+  { readonly brand: unique symbol }
+>()("LookupFailed", {
   /**
    * A human-readable account of the failure, for logs rather than parsing.
    * It is the `description` of the underlying `Core.RequestFailed`, or a

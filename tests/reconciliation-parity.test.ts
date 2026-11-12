@@ -29,10 +29,10 @@ import { Wikidata } from "../src/index.ts";
 import { readFixtureJson } from "./helpers/fixtures.ts";
 
 /** The recorded fixture lacks an entity the parity checks read. */
-class FixtureEntityMissing extends Schema.TaggedError<FixtureEntityMissing>()(
-  "FixtureEntityMissing",
-  { id: Schema.String },
-) {}
+class FixtureEntityMissing extends Schema.TaggedError<
+  FixtureEntityMissing,
+  { readonly brand: unique symbol }
+>()("FixtureEntityMissing", { id: Schema.String }) {}
 
 const decodeQ42 = Effect.fnUntraced(function* () {
   const fixture = yield* readFixtureJson("wikidata-q42.json");

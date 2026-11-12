@@ -26,7 +26,10 @@ import { fixturePath } from "../helpers/fixtures.ts";
 import { inProcessWorkers } from "../helpers/workers.ts";
 
 /** The worker's `open` failing, as a disk read can. */
-class DiskGone extends Schema.TaggedError<DiskGone>()("DiskGone", { message: Schema.String }) {}
+class DiskGone extends Schema.TaggedError<DiskGone, { readonly brand: unique symbol }>()(
+  "DiskGone",
+  { message: Schema.String },
+) {}
 
 /** The multistream fixture's range listing and range opener, over the fixture paths. */
 const multistream = Effect.fn("multistream")(function* () {

@@ -178,6 +178,10 @@ export default defineConfig({
       // `Schema.Finite`), never a `Schema.Number` that admits NaN and
       // Infinity (#224). No exceptions.
       "effecttsgo/schema-number": "error",
+      // Every Schema class and tagged error carries a `{ readonly brand: unique
+      // symbol }` second type argument (#224), so structurally identical
+      // classes stay distinct types. No exceptions.
+      "effecttsgo/schema-class-missing-brand": "error",
       "effect/effect-run-in-body": "error",
       // ---- Oxlint categories: rules this package's conventions cut across --
       // `_tag` is Effect's discriminator, on every tagged error and union this
