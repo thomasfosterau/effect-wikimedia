@@ -172,6 +172,8 @@ export default defineConfig({
       // `layer(...)`), so no module, test or helper calls `Effect.provide`
       // inside a program or `Effect.run*` itself. No exceptions.
       "effecttsgo/strict-effect-provide": "error",
+      // Decode with the typed decoders (`decodeEffect`, `decodeSync`, `decodeOption`) so the input is checked against the schema's Encoded type (#224).
+      "effecttsgo/prefer-typed-schema-decoder": "error",
       "effect/effect-run-in-body": "error",
       // ---- Oxlint categories: rules this package's conventions cut across --
       // `_tag` is Effect's discriminator, on every tagged error and union this

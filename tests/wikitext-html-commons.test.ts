@@ -34,9 +34,7 @@ const Fixtures = Schema.fromJsonString(
 /** The real client over a fetch stub backed by the recorded fixtures, shared by every test in this file. */
 const clientLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const fixtures = yield* Schema.decodeUnknownEffect(Fixtures)(
-      yield* readFixture("douglas-adams.json"),
-    );
+    const fixtures = yield* Schema.decodeEffect(Fixtures)(yield* readFixture("douglas-adams.json"));
 
     /** Routes each stubbed call by a distinguishing substring of its request URL. */
     const fetch: typeof globalThis.fetch = async (input, init) => {
