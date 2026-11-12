@@ -103,6 +103,12 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
     - `MonolingualTextValue.language` and `UnknownValue.type`.
   - `SearchHit`'s `label`, `description`, `matchType` and `matchText`.
 - `getEntities` still resolves to a record keyed by id, so absence there is still "no key".
+- The entity reader takes parsed JSON rather than `unknown`:
+  - `decodeEntity(raw: Schema.Json)`.
+  - `normaliseItem`, `normaliseStatement`, `normaliseSnak` and `normaliseDataValue` take a `Schema.JsonObject`.
+  - The id parsers take a `string`.
+  - Decode a value you hold as `unknown` first, for example with `Schema.decodeUnknownOption(Schema.Json)`.
+- `WbGetEntitiesResponse.entities` holds each entity as parsed JSON. An entity with a container of the wrong kind now yields a best-effort item, as a dump line does, rather than failing the whole response.
 
 **Wikitext**
 

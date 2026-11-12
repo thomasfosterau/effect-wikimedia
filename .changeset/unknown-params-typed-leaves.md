@@ -23,3 +23,11 @@ Helper signatures that took `unknown` now take the type their callers hold:
 | `Reconciliation.normaliseCommonsImage` | `(raw: unknown)`         | `(raw: string)`          |
 
 Their returns are unchanged. A value you hold as `unknown` must be decoded with a schema before it reaches them.
+
+**Wikidata:** the entity reader takes parsed JSON instead of `unknown` (option (B) on #224).
+
+- `decodeEntity` takes `Schema.Json`.
+- `normaliseItem`, `normaliseStatement`, `normaliseSnak` and `normaliseDataValue` take `Schema.JsonObject`.
+- `parseItemId`, `parsePropertyId`, `parseLexemeId` and `parseEntityId` take `string`.
+- `WbGetEntitiesResponse` keeps each entity as `Schema.Json`, read by the same defensive reader as a dump line. A wrongly shaped container inside one entity now degrades that entity instead of failing the response.
+- `Dumps` parses each entity line with `Schema.fromJsonString(Schema.Json)`. That costs about 11 µs per 4.5 KB line, and the hand reader itself is unchanged.
