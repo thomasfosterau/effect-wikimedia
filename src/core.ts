@@ -416,15 +416,15 @@ export const lenientArray = <S extends Schema.Top>(schema: S) =>
 export const MAX_TEXT_FIELD_LENGTH = 4000;
 
 /** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
-export function sanitiseText(value: unknown): string | null {
-  if (!P.isString(value)) return null;
+export function sanitiseText(value?: string): string | null {
+  if (value === undefined) return null;
   const trimmed = value.trim();
   return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
 }
 
 /** A non-negative integer within a sane bound, or `null` for anything else. */
-export function toNonNegativeInt(value: unknown, max = Number.MAX_SAFE_INTEGER): number | null {
-  if (!P.isNumber(value) || !Number.isFinite(value)) return null;
+export function toNonNegativeInt(value?: number, max = Number.MAX_SAFE_INTEGER): number | null {
+  if (value === undefined || !Number.isFinite(value)) return null;
   const int = Math.trunc(value);
   return int >= 0 && int <= max ? int : null;
 }
@@ -458,7 +458,7 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * exceeds {@link RetryOptions.maxDelaySeconds}), using this function's figure
  * only when the header is absent or an HTTP date.
  */
-export function detectMaxlagSignal(body: unknown): number | null {
+export function detectMaxlagSignal(body: Schema.Json): number | null {
   if (!P.isObjectOrArray(body) || !P.hasProperty(body, "error")) return null;
   const error = body.error;
   if (!P.isObjectOrArray(error) || !P.hasProperty(error, "code")) return null;

@@ -119,7 +119,7 @@ export function stripFraming(line: string): Option.Option<string> {
 }
 
 /** Parses a line's JSON text; `None` when it is not JSON. */
-const parseJson = Schema.decodeOption(Schema.fromJsonString(Schema.Unknown));
+const parseJson = Schema.decodeOption(Schema.fromJsonString(Schema.Json));
 
 /** Bounds an offending line for inclusion on a {@link DumpLineError}. */
 function boundRaw(text: string): string {

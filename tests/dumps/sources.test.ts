@@ -85,7 +85,7 @@ const forkTest = <A, E>(effect: Effect.Effect<A, E>): Promise<Fiber.Fiber<A, E>>
  */
 const collectProcessEvents = (event: "uncaughtException" | "unhandledRejection"): unknown[] => {
   const seen: unknown[] = [];
-  const listener = (reason: unknown) => seen.push(reason);
+  const listener: NodeJS.UnhandledRejectionListener = (reason) => seen.push(reason);
   process.on(event, listener);
   onTestFinished(() => void process.off(event, listener));
   return seen;
@@ -792,7 +792,7 @@ describe("interruption teardown", () => {
           await wait(5);
           return { done: false, value: new Uint8Array([pulled]) };
         },
-        return: (value?: unknown) => Promise.resolve({ done: true as const, value }),
+        return: () => Promise.resolve({ done: true as const, value: undefined }),
       }),
     };
     const fiber = await forkTest(Stream.runDrain(Dumps.fromNodeReadable(() => source)));

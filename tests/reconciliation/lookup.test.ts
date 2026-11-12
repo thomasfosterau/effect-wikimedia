@@ -623,7 +623,7 @@ describe("WikidataLookup.enrich", () => {
   });
 
   it("maps the calendar model to gregorian, julian or null", async () => {
-    const timeClaim = (calendarmodel: unknown) => ({
+    const timeClaim = (calendarmodel: string | number | undefined) => ({
       mainsnak: {
         snaktype: "value",
         property: "P569",
@@ -686,7 +686,7 @@ describe("WikidataLookup.enrich", () => {
   });
 
   it("reports a missing or out-of-range precision as null", async () => {
-    const timeClaim = (precision: unknown) => ({
+    const timeClaim = (precision: number | undefined) => ({
       mainsnak: {
         snaktype: "value",
         property: "P569",

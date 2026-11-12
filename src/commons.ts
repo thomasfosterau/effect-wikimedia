@@ -17,7 +17,6 @@
 
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Str from "effect/String";
 import * as Schema from "effect/Schema";
@@ -85,19 +84,19 @@ const ImageInfoEntry = Schema.Struct({
   /** The file description page's URL, which {@link FileInfo.descriptionUrl} re-validates. */
   descriptionurl: lenientField(Schema.String),
   /** The width in pixels. */
-  width: Schema.optional(Schema.Unknown),
+  width: lenientField(Schema.Number),
   /** The height in pixels. */
-  height: Schema.optional(Schema.Unknown),
+  height: lenientField(Schema.Number),
   /** The MIME type. */
   mime: lenientField(Schema.String),
   /** The size in bytes. */
-  size: Schema.optional(Schema.Unknown),
+  size: lenientField(Schema.Number),
 });
 type ImageInfoEntry = typeof ImageInfoEntry.Type;
 
 /** Lenient schema for one `query.pages[*]` entry carrying `imageinfo`. */
 const FileInfoPage = Schema.Struct({
-  title: Schema.optional(Schema.Unknown),
+  title: lenientField(Schema.String),
   missing: Schema.optional(Schema.Unknown),
   imageinfo: Schema.optional(Schema.Array(ImageInfoEntry)),
 });
@@ -156,7 +155,7 @@ function toWikimediaMediaUrl(value: string | undefined): Option.Option<string> {
 
 /** A `FileInfoPage` carrying a real title that Wikimedia didn't flag as missing. */
 function isUsableFilePage(page: FileInfoPage): boolean {
-  return P.isString(page.title) && page.missing === undefined;
+  return page.title !== undefined && page.missing === undefined;
 }
 
 function normaliseFileInfo(response: FileInfoResponse, title: string): Option.Option<FileInfo> {
@@ -164,7 +163,7 @@ function normaliseFileInfo(response: FileInfoResponse, title: string): Option.Op
   if (page === undefined) return Option.none();
   const entry: ImageInfoEntry = page.imageinfo?.[0] ?? {};
   return Option.some({
-    title: P.isString(page.title) ? page.title : title,
+    title: page.title ?? title,
     url: toWikimediaMediaUrl(entry.url),
     descriptionUrl: toWikimediaMediaUrl(entry.descriptionurl),
     width: Option.fromNullOr(toNonNegativeInt(entry.width, 100_000)),

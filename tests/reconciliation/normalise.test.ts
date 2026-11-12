@@ -22,7 +22,7 @@ vi.mock(import("../../src/reconciliation/candidate.ts"), async (importOriginal) 
   const original = await importOriginal();
   return {
     ...original,
-    normaliseCommonsImage: vi.fn<typeof original.normaliseCommonsImage>((raw: unknown) => {
+    normaliseCommonsImage: vi.fn<typeof original.normaliseCommonsImage>((raw) => {
       return Option.map(original.normaliseCommonsImage(raw), (image) => ({
         ...image,
         helperOnly: "leaked",

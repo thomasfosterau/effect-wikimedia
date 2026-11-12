@@ -72,24 +72,21 @@ export type EntityId = ItemId | PropertyId | LexemeId;
  * back into a request or persisted downstream, so it must be exclusively
  * `Q` plus digits — never a slash, dot, or path-escaping byte.
  */
-export function parseItemId(raw: unknown): Option.Option<ItemId> {
-  if (!P.isString(raw)) return Option.none();
+export function parseItemId(raw: string): Option.Option<ItemId> {
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `Q` + digits form the brand names.
   return /^Q[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as ItemId) : Option.none();
 }
 
 /** Validates a Wikidata **property** id (`P` + digits); returns the branded id or `None`. */
-export function parsePropertyId(raw: unknown): Option.Option<PropertyId> {
-  if (!P.isString(raw)) return Option.none();
+export function parsePropertyId(raw: string): Option.Option<PropertyId> {
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `P` + digits form the brand names.
   return /^P[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as PropertyId) : Option.none();
 }
 
 /** Validates a Wikidata **lexeme** id (`L` + digits); returns the branded id or `None`. */
-export function parseLexemeId(raw: unknown): Option.Option<LexemeId> {
-  if (!P.isString(raw)) return Option.none();
+export function parseLexemeId(raw: string): Option.Option<LexemeId> {
   const cleaned = raw.trim().toUpperCase();
   // SAFETY: the pattern admits exactly the `L` + digits form the brand names.
   return /^L[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as LexemeId) : Option.none();
@@ -101,8 +98,7 @@ export function parseLexemeId(raw: unknown): Option.Option<LexemeId> {
  * `Q`/`P`/`L` id (lexeme forms / senses like `L1-F1` are intentionally out
  * of scope and degrade to `None`).
  */
-export function parseEntityId(raw: unknown): Option.Option<EntityId> {
-  if (!P.isString(raw)) return Option.none();
+export function parseEntityId(raw: string): Option.Option<EntityId> {
   const head = raw.trim().charAt(0).toUpperCase();
   if (head === "Q") return parseItemId(raw);
   if (head === "P") return parsePropertyId(raw);
@@ -137,17 +133,17 @@ export const MAX_SITELINKS = 2000;
 export const MAX_IDS_PER_REQUEST = 50;
 
 /** Trims and length-clamps an untrusted free-text value; `None` for anything unusable. */
-function sanitiseText(value: unknown): Option.Option<string> {
+function sanitiseText(value?: Schema.Json): Option.Option<string> {
   return toBoundedString(value, MAX_TEXT_FIELD_LENGTH);
 }
 
 /** A finite number passed through untouched, or `None`. */
-function toFiniteNumber(value: unknown): Option.Option<number> {
+function toFiniteNumber(value?: Schema.Json): Option.Option<number> {
   return P.isNumber(value) && Number.isFinite(value) ? Option.some(value) : Option.none();
 }
 
 /** A short raw string (calendar / globe / unit IRI, amount), trimmed and bounded, or `None`. */
-function toBoundedString(value: unknown, max = 2000): Option.Option<string> {
+function toBoundedString(value: Schema.Json | undefined, max = 2000): Option.Option<string> {
   if (!P.isString(value)) return Option.none();
   const trimmed = value.trim();
   return Str.isEmpty(trimmed) ? Option.none() : Option.some(trimmed.slice(0, max));
@@ -563,154 +559,65 @@ export interface WikidataItem {
   readonly claims: Readonly<Record<string, readonly Statement[]>>;
 }
 
-// ── Lenient wire schemas (Unknown-heavy — never fail on shape drift) ─────
-
-/** The `{ type, value }` datavalue envelope; `value` is left `Unknown` — its shape varies by `type`. */
-const RawDataValue = Schema.Struct({
-  /** The datavalue kind (`"time"`, `"quantity"`, …), which picks the {@link DataValue} member. */
-  type: Schema.optional(Schema.Unknown),
-  /** The payload, whose shape depends on `type`; kept whole on an {@link UnknownValue}. */
-  value: Schema.optional(Schema.Unknown),
-});
-type RawDataValue = typeof RawDataValue.Type;
-
-const RawSnak = Schema.Struct({
-  /** `"value"`, `"somevalue"` or `"novalue"`: which {@link Snak} member the snak becomes. */
-  snaktype: Schema.optional(Schema.Unknown),
-  /** The property id the snak is about (`"P31"`); a snak without a valid one is dropped. */
-  property: Schema.optional(Schema.Unknown),
-  /** The property's datatype (`"external-id"`, `"time"`, …). */
-  datatype: Schema.optional(Schema.Unknown),
-  /** The value of a `"value"` snak; absent on `"somevalue"` and `"novalue"` snaks. */
-  datavalue: Schema.optional(RawDataValue),
-});
-type RawSnak = typeof RawSnak.Type;
-
-const RawSnakList = Schema.Record(Schema.String, Schema.Array(RawSnak));
-
-const RawReference = Schema.Struct({
-  /** Wikibase's hash of the reference's snaks. */
-  hash: Schema.optional(Schema.Unknown),
-  /** The reference's snaks keyed by property id. */
-  snaks: Schema.optional(RawSnakList),
-});
-type RawReference = typeof RawReference.Type;
-
-const RawStatement = Schema.Struct({
-  /** The statement GUID (`"Q42$…"`). */
-  id: Schema.optional(Schema.Unknown),
-  /** `"preferred"`, `"normal"` or `"deprecated"`; anything else reads as `"normal"`. */
-  rank: Schema.optional(Schema.Unknown),
-  /** The main assertion; a statement without a usable one is dropped. */
-  mainsnak: Schema.optional(RawSnak),
-  /** Qualifier snaks keyed by property id. */
-  qualifiers: Schema.optional(RawSnakList),
-  /** The references backing the statement. */
-  references: Schema.optional(Schema.Array(RawReference)),
-});
-type RawStatement = typeof RawStatement.Type;
-
-const RawTermValue = Schema.Struct({
-  /**
-   * The term's language code, which normally repeats its key in the
-   * enclosing map; with language fallback it names the language the term
-   * came from.
-   */
-  language: Schema.optional(Schema.Unknown),
-  /** The term itself: a label, a description or one alias. */
-  value: Schema.optional(Schema.Unknown),
-});
-
-const RawSitelink = Schema.Struct({
-  /** The wiki's global site id (`"enwiki"`), which repeats its key in `sitelinks`. */
-  site: Schema.optional(Schema.Unknown),
-  /** The linked page's title; a sitelink without one is dropped. */
-  title: Schema.optional(Schema.Unknown),
-  /** The badge item ids awarded to the page. */
-  badges: Schema.optional(Schema.Array(Schema.Unknown)),
-});
-type RawSitelink = typeof RawSitelink.Type;
-
-const RawEntity = Schema.Struct({
-  /** The entity id (`"Q42"`); an entity without a valid one is dropped. */
-  id: Schema.optional(Schema.Unknown),
-  /** The entity kind (`"item"`, `"property"`, `"lexeme"`). */
-  type: Schema.optional(Schema.Unknown),
-  /**
-   * Present (as `""`) when the requested id does not exist: Wikibase answers
-   * `{ id, missing: "" }`, keyed under the id. Such an entity is dropped.
-   */
-  missing: Schema.optional(Schema.Unknown),
-  /** The labels, keyed by language code. */
-  labels: Schema.optional(Schema.Record(Schema.String, RawTermValue)),
-  /** The descriptions, keyed by language code. */
-  descriptions: Schema.optional(Schema.Record(Schema.String, RawTermValue)),
-  /** The aliases, keyed by language code. */
-  aliases: Schema.optional(Schema.Record(Schema.String, Schema.Array(RawTermValue))),
-  /** The sitelinks, keyed by global site id. */
-  sitelinks: Schema.optional(Schema.Record(Schema.String, RawSitelink)),
-  /** The statements, keyed by property id. */
-  claims: Schema.optional(Schema.Record(Schema.String, Schema.Array(RawStatement))),
-});
-type RawEntity = typeof RawEntity.Type;
+// ── The wire shape: parsed JSON, read defensively ─────────────────────────
 
 /**
  * Lenient schema for the `wbgetentities` response envelope: the decode step
- * {@link getEntities} runs before {@link normaliseEntities}. Every field is
- * optional and every leaf `Unknown`, so a partial, extended or
- * future-shaped response decodes, but a container of the wrong kind (an
- * `entities` that is not an object, a statement list that is not an array,
- * `null` where an object is expected) fails the decode, which
- * {@link getEntities} reports as a `RequestFailed`. Read the typed
- * {@link WikidataItem}s that {@link normaliseEntities} builds from it, not
- * these fields.
+ * {@link getEntities} runs before {@link normaliseEntities}. Each entity is
+ * kept as parsed JSON and read by the same defensive reader as a dump line
+ * ({@link decodeEntity}), so a partial, extended or future-shaped entity,
+ * or one with a container of the wrong kind inside it, yields a best-effort
+ * item rather than a failure. Only a body or `entities` of the wrong kind
+ * fails the decode, which {@link getEntities} reports as a `RequestFailed`.
+ * Read the typed {@link WikidataItem}s that {@link normaliseEntities} builds
+ * from it, not these fields.
  */
 export const WbGetEntitiesResponse = Schema.Struct({
   /**
-   * The entities, keyed by id; a requested id that does not exist still has
-   * an entry, flagged `missing`.
+   * The entities, keyed by id, as parsed JSON; a requested id that does not
+   * exist still has an entry, flagged `missing`.
    */
-  entities: Schema.optional(Schema.Record(Schema.String, RawEntity)),
+  entities: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
 });
 export type WbGetEntitiesResponse = typeof WbGetEntitiesResponse.Type;
 
-// ── Normalisers: lenient wire shape → honest typed model ─────────────────
+// ── Normalisers: parsed JSON → honest typed model ────────────────────────
 
-/**
- * A JSON object's fields before any is decoded: a datavalue payload as the
- * wire carries it. Each field is read through a guard or a sanitiser.
- */
-const RawFields = Schema.Record(Schema.String, Schema.Unknown);
-type RawFields = typeof RawFields.Type;
+/** The fields of a value that is not a JSON object: none. */
+const NO_FIELDS: Schema.JsonObject = {};
 
-/** The fields of a datavalue payload that is not an object: none. */
-const NO_FIELDS: RawFields = {};
+/** Whether a JSON value is an object (not an array or `null`). */
+const isJsonObject = (value?: Schema.Json): value is Schema.JsonObject =>
+  P.isObject(value) && !Array.isArray(value);
 
-/** Reads a datavalue payload's fields defensively: none unless it is an object. */
-function fieldsOf(value: unknown): RawFields {
-  return P.isObject(value) ? value : NO_FIELDS;
+/** A JSON value's fields: none unless it is an object. */
+function fieldsOf(value?: Schema.Json): Schema.JsonObject {
+  return isJsonObject(value) ? value : NO_FIELDS;
+}
+
+/** A JSON value as a string, or `None` when it is not one. */
+function stringOf(value?: Schema.Json): Option.Option<string> {
+  return P.isString(value) ? Option.some(value) : Option.none();
 }
 
 /**
- * The objects in a list, each read as `A`; none when `raw` is not an array.
- * {@link decodeEntity} runs on unvalidated JSON, where a statement list can
- * be a number and an entry `null` (#147).
+ * The objects in a JSON list; none when `raw` is not an array. A dump line
+ * is unvalidated, so a statement list can be a number and an entry `null`
+ * (#147).
  */
-function objectsIn<A>(raw: unknown): readonly A[] {
-  if (!Array.isArray(raw)) return [];
-  // Only objects pass, read as `A`: every raw wire type is a struct of
-  // optional fields its normaliser reads defensively.
-  return Arr.filter(raw, (entry: unknown): entry is A => P.isObject(entry));
+function objectsIn(raw?: Schema.Json): readonly Schema.JsonObject[] {
+  return Array.isArray(raw) ? Arr.filter(raw, isJsonObject) : [];
 }
 
 /**
- * The own entries of a keyed map; none when `raw` is not an object (#147). A
- * `__proto__` key is dropped: assigning it to the plain object a normaliser
- * builds would replace that object's prototype rather than add an entry, and
- * no language code, site id, property id or entity id is spelled so (#164).
+ * The own entries of a JSON object; none when `raw` is not an object (#147).
+ * A `__proto__` key is dropped: assigning it to the plain object a
+ * normaliser builds would replace that object's prototype rather than add an
+ * entry, and no language code, site id, property id or entity id is spelled
+ * so (#164).
  */
-function entriesOf(raw: unknown): ReadonlyArray<readonly [string, unknown]> {
-  if (!P.isObject(raw)) return [];
+function entriesOf(raw?: Schema.Json): ReadonlyArray<readonly [string, Schema.Json]> {
+  if (!isJsonObject(raw)) return [];
   return Arr.filter(R.toEntries(raw), ([key]) => key !== "__proto__");
 }
 
@@ -722,8 +629,10 @@ interface DataValueInput {
    * to {@link UnknownValue}.
    */
   readonly type: string;
-  readonly value: unknown;
-  readonly fields: RawFields;
+  /** The datavalue object itself, whose `value` is the payload. */
+  readonly raw: Schema.JsonObject;
+  /** The payload's fields, when it is an object. */
+  readonly fields: Schema.JsonObject;
   readonly datatype: Option.Option<string>;
   readonly unknown: UnknownValue;
 }
@@ -735,7 +644,7 @@ interface DataValueInput {
 const matchDataValue = Match.type<DataValueInput>().pipe(
   Match.when({ type: "wikibase-entityid" }, ({ fields, unknown }): DataValue => {
     const entityType = sanitiseText(fields["entity-type"]);
-    return Option.match(parseEntityId(fields["id"]), {
+    return Option.match(Option.flatMap(stringOf(fields["id"]), parseEntityId), {
       onNone: () => unknown,
       onSome: (id): DataValue => ({ _tag: "wikibase-entityid", id, entityType }),
     });
@@ -784,8 +693,8 @@ const matchDataValue = Match.type<DataValueInput>().pipe(
       }),
     }),
   ),
-  Match.when({ type: "string" }, ({ value, datatype, unknown }): DataValue =>
-    Option.match(sanitiseText(value), {
+  Match.when({ type: "string" }, ({ raw, datatype, unknown }): DataValue =>
+    Option.match(sanitiseText(raw["value"]), {
       onNone: () => unknown,
       onSome: (str): DataValue =>
         Option.contains(datatype, "external-id")
@@ -797,40 +706,48 @@ const matchDataValue = Match.type<DataValueInput>().pipe(
 );
 
 /**
- * Normalises a raw datavalue into the typed {@link DataValue} union.
- * `datatype` (the *property's* datatype, from the enclosing snak) is only
- * consulted to split a `string` datavalue into {@link ExternalIdValue} vs
- * {@link StringValue}. Any `type` this function doesn't recognise — or a
- * recognised `type` whose payload is unusable — degrades to
- * {@link UnknownValue}; this function always returns a value and never throws.
+ * Normalises a parsed `{ type, value }` datavalue into the typed
+ * {@link DataValue} union. `datatype` (the *property's* datatype, from the
+ * enclosing snak) is only consulted to split a `string` datavalue into
+ * {@link ExternalIdValue} vs {@link StringValue}. Any `type` this function
+ * doesn't recognise — or a recognised `type` whose payload is unusable —
+ * degrades to {@link UnknownValue}; this function always returns a value and
+ * never throws.
  */
-export function normaliseDataValue(raw: RawDataValue, datatype: Option.Option<string>): DataValue {
-  const type = P.isString(raw.type) ? Option.some(raw.type) : Option.none();
-  const value = raw.value;
+export function normaliseDataValue(
+  raw: Schema.JsonObject,
+  datatype: Option.Option<string>,
+): DataValue {
+  const type = stringOf(raw["type"]);
+  const value = raw["value"];
   return matchDataValue({
     type: Option.getOrElse(type, () => ""),
-    value,
+    raw,
     fields: fieldsOf(value),
     datatype,
     unknown: { _tag: "unknown", type, value },
   });
 }
 
-/** Normalises one raw snak into the typed {@link Snak}; `None` when it carries no valid property. */
-export function normaliseSnak(raw: RawSnak): Option.Option<Snak> {
-  return Option.map(parsePropertyId(raw.property), (property): Snak => {
-    const datatype = sanitiseText(raw.datatype);
-    const snaktype = raw.snaktype;
-    if (snaktype === "novalue") return { _tag: "novalue", property, datatype };
-    if (snaktype === "somevalue") return { _tag: "somevalue", property, datatype };
-    // Otherwise it is a value snak. Wikibase always sends snaktype "value"
-    // explicitly, but if a datavalue is somehow absent (or, in an unvalidated
-    // dump line, not an object) we fall back to "somevalue" rather than
-    // inventing an empty value.
-    if (!P.isObject(raw.datavalue)) return { _tag: "somevalue", property, datatype };
-    const value = normaliseDataValue(raw.datavalue, datatype);
-    return { _tag: "value", property, datatype, value };
-  });
+/** Normalises one parsed snak into the typed {@link Snak}; `None` when it carries no valid property. */
+export function normaliseSnak(raw: Schema.JsonObject): Option.Option<Snak> {
+  return Option.map(
+    Option.flatMap(stringOf(raw["property"]), parsePropertyId),
+    (property): Snak => {
+      const datatype = sanitiseText(raw["datatype"]);
+      const snaktype = raw["snaktype"];
+      if (snaktype === "novalue") return { _tag: "novalue", property, datatype };
+      if (snaktype === "somevalue") return { _tag: "somevalue", property, datatype };
+      // Otherwise it is a value snak. Wikibase always sends snaktype "value"
+      // explicitly, but if a datavalue is somehow absent (or, in an unvalidated
+      // dump line, not an object) we fall back to "somevalue" rather than
+      // inventing an empty value.
+      const datavalue = raw["datavalue"];
+      if (!isJsonObject(datavalue)) return { _tag: "somevalue", property, datatype };
+      const value = normaliseDataValue(datavalue, datatype);
+      return { _tag: "value", property, datatype, value };
+    },
+  );
 }
 
 /**
@@ -856,9 +773,9 @@ function keepUsable<A, B>(items: Iterable<A>, max: number, f: (item: A) => Optio
  * key is an own property.
  */
 function keepUsableEntries<B>(
-  raw: unknown,
   max: number,
-  f: (key: string, value: unknown) => Option.Option<readonly [string, B]>,
+  f: (key: string, value: Schema.Json) => Option.Option<readonly [string, B]>,
+  raw?: Schema.Json,
 ) {
   const kept: (readonly [string, B])[] = [];
   Arr.forEach(entriesOf(raw), ([key, value]) => {
@@ -870,130 +787,145 @@ function keepUsableEntries<B>(
 }
 
 /** Normalises a `{ property: snak[] }` block (qualifiers / reference snaks), dropping unusable snaks. */
-function normaliseSnakList(raw: unknown): Record<string, readonly Snak[]> {
-  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, snaks) =>
-    Option.flatMap(parsePropertyId(property), (validProperty) => {
-      const list = keepUsable(objectsIn<RawSnak>(snaks), MAX_LIST_ENTRIES, normaliseSnak);
-      return Arr.isReadonlyArrayNonEmpty(list)
-        ? Option.some([validProperty, list] as const)
-        : Option.none();
-    }),
+function normaliseSnakList(raw?: Schema.Json): Record<string, readonly Snak[]> {
+  return keepUsableEntries(
+    Number.POSITIVE_INFINITY,
+    (property, snaks) =>
+      Option.flatMap(parsePropertyId(property), (validProperty) => {
+        const list = keepUsable(objectsIn(snaks), MAX_LIST_ENTRIES, normaliseSnak);
+        return Arr.isReadonlyArrayNonEmpty(list)
+          ? Option.some([validProperty, list] as const)
+          : Option.none();
+      }),
+    raw,
   );
 }
 
-function normaliseRank(raw: unknown): StatementRank {
+function normaliseRank(raw?: Schema.Json): StatementRank {
   return raw === "preferred" || raw === "deprecated" ? raw : "normal";
 }
 
-/** Normalises one raw statement; `None` when its main snak carries no valid property. */
-export function normaliseStatement(raw: RawStatement): Option.Option<Statement> {
-  if (!P.isObject(raw.mainsnak)) return Option.none();
-  return Option.map(normaliseSnak(raw.mainsnak), (mainsnak): Statement => ({
-    id: sanitiseText(raw.id),
-    rank: normaliseRank(raw.rank),
-    mainsnak,
-    qualifiers: normaliseSnakList(raw.qualifiers),
-    references: keepUsable(objectsIn<RawReference>(raw.references), MAX_LIST_ENTRIES, (reference) =>
+/** Normalises one parsed statement; `None` when its main snak carries no valid property. */
+export function normaliseStatement(raw: Schema.JsonObject): Option.Option<Statement> {
+  const mainsnak = raw["mainsnak"];
+  if (!isJsonObject(mainsnak)) return Option.none();
+  return Option.map(normaliseSnak(mainsnak), (snak): Statement => ({
+    id: sanitiseText(raw["id"]),
+    rank: normaliseRank(raw["rank"]),
+    mainsnak: snak,
+    qualifiers: normaliseSnakList(raw["qualifiers"]),
+    references: keepUsable(objectsIn(raw["references"]), MAX_LIST_ENTRIES, (reference) =>
       Option.some<Reference>({
-        hash: sanitiseText(reference.hash),
-        snaks: normaliseSnakList(reference.snaks),
+        hash: sanitiseText(reference["hash"]),
+        snaks: normaliseSnakList(reference["snaks"]),
       }),
     ),
   }));
 }
 
 /** Normalises a `{ lang: { value } }` term map into a flat `lang → value` map. */
-function normaliseTermMap(raw: unknown): LanguageMap {
-  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, term) =>
-    Option.map(sanitiseText(fieldsOf(term)["value"]), (value) => [language, value] as const),
+function normaliseTermMap(raw?: Schema.Json): LanguageMap {
+  return keepUsableEntries(
+    Number.POSITIVE_INFINITY,
+    (language, term) =>
+      Option.map(sanitiseText(fieldsOf(term)["value"]), (value) => [language, value] as const),
+    raw,
   );
 }
 
-function normaliseAliases(raw: unknown): Record<string, readonly string[]> {
-  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (language, terms) => {
-    const values = keepUsable(
-      objectsIn<{ readonly value?: unknown }>(terms),
-      MAX_LIST_ENTRIES,
-      (term) => sanitiseText(term.value),
-    );
-    return Arr.isReadonlyArrayNonEmpty(values)
-      ? Option.some([language, values] as const)
-      : Option.none();
-  });
+function normaliseAliases(raw?: Schema.Json): Record<string, readonly string[]> {
+  return keepUsableEntries(
+    Number.POSITIVE_INFINITY,
+    (language, terms) => {
+      const values = keepUsable(objectsIn(terms), MAX_LIST_ENTRIES, (term) =>
+        sanitiseText(term["value"]),
+      );
+      return Arr.isReadonlyArrayNonEmpty(values)
+        ? Option.some([language, values] as const)
+        : Option.none();
+    },
+    raw,
+  );
 }
 
 /** Keeps the first {@link MAX_LIST_ENTRIES} badges that are valid item ids. */
-function normaliseBadges(raw: unknown): ItemId[] {
-  return keepUsable(Array.isArray(raw) ? raw : [], MAX_LIST_ENTRIES, parseItemId);
+function normaliseBadges(raw?: Schema.Json): ItemId[] {
+  return keepUsable(Array.isArray(raw) ? raw : [], MAX_LIST_ENTRIES, (badge: Schema.Json) =>
+    Option.flatMap(stringOf(badge), parseItemId),
+  );
 }
 
 /** Keeps the first {@link MAX_SITELINKS} sitelinks that carry a title. */
-function normaliseSitelinks(raw: unknown): Record<string, Sitelink> {
-  return keepUsableEntries(raw, MAX_SITELINKS, (site, link) => {
-    const fields = fieldsOf(link);
-    return Option.map(sanitiseText(fields["title"]), (title) => {
-      const sitelink: Sitelink = {
-        site: Option.getOrElse(sanitiseText(fields["site"]), () => site),
-        title,
-        badges: normaliseBadges(fields["badges"]),
-      };
-      return [site, sitelink] as const;
-    });
-  });
+function normaliseSitelinks(raw?: Schema.Json): Record<string, Sitelink> {
+  return keepUsableEntries(
+    MAX_SITELINKS,
+    (site, link) => {
+      const fields = fieldsOf(link);
+      return Option.map(sanitiseText(fields["title"]), (title) => {
+        const sitelink: Sitelink = {
+          site: Option.getOrElse(sanitiseText(fields["site"]), () => site),
+          title,
+          badges: normaliseBadges(fields["badges"]),
+        };
+        return [site, sitelink] as const;
+      });
+    },
+    raw,
+  );
 }
 
 /**
- * Normalises one raw entity into a typed {@link WikidataItem}; `None` when
- * the entity carries no valid id or Wikibase flagged it `missing` (the item
- * does not exist upstream).
+ * Normalises one parsed entity object into a typed {@link WikidataItem};
+ * `None` when the entity carries no valid id or Wikibase flagged it
+ * `missing` (the item does not exist upstream).
  */
-export function normaliseItem(raw: RawEntity): Option.Option<WikidataItem> {
-  if (raw.missing !== undefined) return Option.none();
-  return Option.map(parseEntityId(raw.id), (id): WikidataItem => ({
+export function normaliseItem(raw: Schema.JsonObject): Option.Option<WikidataItem> {
+  if (raw["missing"] !== undefined) return Option.none();
+  return Option.map(Option.flatMap(stringOf(raw["id"]), parseEntityId), (id): WikidataItem => ({
     id,
-    type: sanitiseText(raw.type),
-    labels: normaliseTermMap(raw.labels),
-    descriptions: normaliseTermMap(raw.descriptions),
-    aliases: normaliseAliases(raw.aliases),
-    sitelinks: normaliseSitelinks(raw.sitelinks),
-    claims: normaliseClaims(raw.claims),
+    type: sanitiseText(raw["type"]),
+    labels: normaliseTermMap(raw["labels"]),
+    descriptions: normaliseTermMap(raw["descriptions"]),
+    aliases: normaliseAliases(raw["aliases"]),
+    sitelinks: normaliseSitelinks(raw["sitelinks"]),
+    claims: normaliseClaims(raw["claims"]),
   }));
 }
 
 /** Normalises the `{ property: statement[] }` claims map, dropping invalid property keys. */
-function normaliseClaims(raw: unknown): Record<string, readonly Statement[]> {
-  return keepUsableEntries(raw, Number.POSITIVE_INFINITY, (property, statements) =>
-    Option.map(
-      parsePropertyId(property),
-      (validProperty) =>
-        [
-          validProperty,
-          keepUsable(objectsIn<RawStatement>(statements), MAX_LIST_ENTRIES, normaliseStatement),
-        ] as const,
-    ),
+function normaliseClaims(raw?: Schema.Json): Record<string, readonly Statement[]> {
+  return keepUsableEntries(
+    Number.POSITIVE_INFINITY,
+    (property, statements) =>
+      Option.map(
+        parsePropertyId(property),
+        (validProperty) =>
+          [
+            validProperty,
+            keepUsable(objectsIn(statements), MAX_LIST_ENTRIES, normaliseStatement),
+          ] as const,
+      ),
+    raw,
   );
 }
 
 /**
- * Decodes one already-`JSON.parse`d entity object — an `wbgetentities`
- * entity, or a single line from a Wikidata JSON **dump** — into the typed
- * {@link WikidataItem} model. Returns `None` when the value is not an object,
- * carries no valid id, or Wikibase flagged it `missing`. Pure, total, and
- * lenient: it never throws on any `JSON.parse` output. A partial or
- * future-shaped object yields a best-effort item, and so does one whose
- * nested containers are the wrong kind: a map or list that is not an object
- * or array reads as empty, a statement, snak, reference, term or sitelink
- * that is not an object is dropped, and a `datavalue` that is not an object
- * makes its snak `somevalue`. A `__proto__` key in any keyed map is dropped.
- * This is the entry point the {@link Dumps} entity-dump pipeline runs each
- * dump line through.
+ * Decodes one parsed JSON entity — a `wbgetentities` entity, or a single
+ * line from a Wikidata JSON **dump** — into the typed {@link WikidataItem}
+ * model. Returns `None` when the value is not a JSON object, carries no
+ * valid id, or Wikibase flagged it `missing`. Pure, total, and lenient: it
+ * never throws on any JSON value. A partial or future-shaped object yields a
+ * best-effort item, and so does one whose nested containers are the wrong
+ * kind: a map or list that is not an object or array reads as empty, a
+ * statement, snak, reference, term or sitelink that is not an object is
+ * dropped, and a `datavalue` that is not an object makes its snak
+ * `somevalue`. A `__proto__` key in any keyed map is dropped. This is the
+ * entry point the {@link Dumps} entity-dump pipeline runs each dump line
+ * through; it reads the parsed JSON by hand rather than through a schema,
+ * which would roughly double the per-line cost of a dump (#224).
  */
-export function decodeEntity(raw: unknown): Option.Option<WikidataItem> {
-  if (!P.isObjectOrArray(raw)) return Option.none();
-  // SAFETY: every `RawEntity` field is optional and read defensively by
-  // `normaliseItem`, so any non-null object (an array included) is a valid
-  // input; a field of the wrong shape degrades rather than throws.
-  return normaliseItem(raw as RawEntity);
+export function decodeEntity(raw: Schema.Json): Option.Option<WikidataItem> {
+  return isJsonObject(raw) ? normaliseItem(raw) : Option.none();
 }
 
 /**
@@ -1005,8 +937,10 @@ export function decodeEntity(raw: unknown): Option.Option<WikidataItem> {
  * does, `__proto__` keys dropped included.
  */
 export function normaliseEntities(response: WbGetEntitiesResponse): Record<string, WikidataItem> {
-  return keepUsableEntries(response.entities, Number.POSITIVE_INFINITY, (_, raw) =>
-    Option.map(decodeEntity(raw), (item) => [item.id, item] as const),
+  return keepUsableEntries(
+    Number.POSITIVE_INFINITY,
+    (_, raw) => Option.map(decodeEntity(raw), (item) => [item.id, item] as const),
+    response.entities,
   );
 }
 
@@ -1044,11 +978,9 @@ export const getEntities = Effect.fn("Wikidata.getEntities")(function* (
 ) {
   const validated = yield* Effect.forEach(
     ids,
-    // `unknown`: a JavaScript caller can pass anything, and the error reports
-    // what it was given.
-    (id: unknown) =>
+    (id) =>
       Effect.fromOption(parseEntityId(id)).pipe(
-        Effect.mapError(() => new InvalidRequest({ kind: "entityId", value: String(id) })),
+        Effect.mapError(() => new InvalidRequest({ kind: "entityId", value: id })),
       ),
     { concurrency: 1 },
   );
@@ -1090,20 +1022,20 @@ export const MAX_SEARCH_RESULTS = 50;
 
 const RawSearchHit = Schema.Struct({
   /** The matched entity's id (`"Q42"`); a hit without a valid one is dropped. */
-  id: Schema.optional(Schema.Unknown),
+  id: Schema.optional(Schema.Json),
   /** The entity's label in the display language. */
-  label: Schema.optional(Schema.Unknown),
+  label: Schema.optional(Schema.Json),
   /** The entity's description in the display language. */
-  description: Schema.optional(Schema.Unknown),
+  description: Schema.optional(Schema.Json),
   /** Which term the query matched. */
   match: Schema.optional(
     Schema.Struct({
       /** The kind of term matched (`"label"`, `"alias"`, …). */
-      type: Schema.optional(Schema.Unknown),
+      type: Schema.optional(Schema.Json),
       /** The matched term's language code. */
-      language: Schema.optional(Schema.Unknown),
+      language: Schema.optional(Schema.Json),
       /** The matched term's text. */
-      text: Schema.optional(Schema.Unknown),
+      text: Schema.optional(Schema.Json),
     }),
   ),
 });
@@ -1157,7 +1089,7 @@ export interface SearchHit {
  */
 export function normaliseSearch(response: WbSearchResponse): readonly SearchHit[] {
   return keepUsable(response.search ?? [], MAX_SEARCH_RESULTS, (hit) =>
-    Option.map(parseEntityId(hit.id), (id): SearchHit => ({
+    Option.map(Option.flatMap(stringOf(hit.id), parseEntityId), (id): SearchHit => ({
       id,
       label: sanitiseText(hit.label),
       description: sanitiseText(hit.description),

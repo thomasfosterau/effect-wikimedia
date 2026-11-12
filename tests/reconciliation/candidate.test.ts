@@ -12,6 +12,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import {
@@ -27,14 +28,14 @@ import {
   normaliseTimeValue,
   wikidataEntityIri,
 } from "../../src/reconciliation/index.ts";
-import { Core, Reconciliation } from "../../src/index.ts";
+import { Core, Reconciliation, Wikidata } from "../../src/index.ts";
 
 describe("normaliseLabelQuery", () => {
   it("trims and collapses internal whitespace", () => {
     expect(Option.getOrNull(normaliseLabelQuery("  Douglas   Adams \n"))).toBe("Douglas Adams");
   });
 
-  it("returns null for whitespace-only or non-string input", () => {
+  it("returns null for whitespace-only or missing input", () => {
     expect(Option.getOrNull(normaliseLabelQuery("   "))).toBeNull();
     // SAFETY: deliberately ill-typed — a JS caller can pass anything, and
     // the validator re-checks at runtime.
@@ -104,10 +105,9 @@ describe("sanitiseCandidateText", () => {
     expect(Option.getOrNull(sanitiseCandidateText("  hello   world \n"))).toBe("hello world");
   });
 
-  it("returns null for whitespace-only or non-string input", () => {
+  it("returns null for whitespace-only or missing input", () => {
     expect(Option.getOrNull(sanitiseCandidateText("   "))).toBeNull();
     expect(Option.getOrNull(sanitiseCandidateText(undefined))).toBeNull();
-    expect(Option.getOrNull(sanitiseCandidateText(42))).toBeNull();
   });
 
   it("clamps an over-long value to the max field length", () => {
@@ -300,7 +300,6 @@ describe("normaliseTimeValue", () => {
   it("rejects anything that isn't a Wikidata-shaped timestamp", () => {
     expect(Option.getOrNull(normaliseTimeValue("yesterday"))).toBeNull();
     expect(Option.getOrNull(normaliseTimeValue("1952-03-11"))).toBeNull();
-    expect(Option.getOrNull(normaliseTimeValue(42))).toBeNull();
   });
 });
 
@@ -325,7 +324,6 @@ describe("normaliseCommonsImage", () => {
     expect(Option.getOrNull(normaliseCommonsImage("evil#name.jpg"))).toBeNull();
     expect(Option.getOrNull(normaliseCommonsImage("a?b.jpg"))).toBeNull();
     expect(Option.getOrNull(normaliseCommonsImage(""))).toBeNull();
-    expect(Option.getOrNull(normaliseCommonsImage(null))).toBeNull();
   });
 
   it.each([
@@ -373,5 +371,38 @@ describe("normaliseCommonsImage", () => {
     expect(Option.getOrNull(normaliseCommonsImage("Smile \u{1F600}.jpg"))?.iri).toBe(
       "https://commons.wikimedia.org/wiki/Special:FilePath/Smile%20%F0%9F%98%80.jpg",
     );
+  });
+});
+
+// The validators take `string` now; a non-string is stopped where the wire
+// is decoded, before it can reach them. These pin that boundary.
+describe("non-string wire values never reach the validators", () => {
+  const p569 = (value: Schema.Json) =>
+    Wikidata.decodeEntity({
+      id: "Q1",
+      claims: {
+        P569: [{ mainsnak: { snaktype: "value", property: "P569", datavalue: value } }],
+      },
+    });
+  const mainValue = (item: Option.Option<Wikidata.WikidataItem>) =>
+    Option.flatMap(item, (i) =>
+      Option.fromNullishOr(i.claims["P569"]?.[0]?.mainsnak).pipe(
+        Option.flatMap((snak) =>
+          P.isTagged(snak, "value") ? Option.some(snak.value._tag) : Option.none(),
+        ),
+      ),
+    );
+
+  it("a non-string time degrades to an unknown datavalue", () => {
+    expect(mainValue(p569({ type: "time", value: { time: 42 } }))).toEqual(Option.some("unknown"));
+  });
+
+  it("a null image filename degrades to an unknown datavalue", () => {
+    expect(mainValue(p569({ type: "string", value: null }))).toEqual(Option.some("unknown"));
+  });
+
+  it("a non-string search label is None, so no candidate text is built from it", () => {
+    const [hit] = Wikidata.normaliseSearch({ search: [{ id: "Q1", label: 42 }] });
+    expect(hit?.label).toEqual(Option.none());
   });
 });

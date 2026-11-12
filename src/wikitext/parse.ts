@@ -1555,7 +1555,7 @@ function shiftSpans<A>(value: A, by: number): A {
   if (Array.isArray(value)) {
     // SAFETY: each element is replaced by a copy of the same shape, so the
     // array keeps its type.
-    return Arr.map(value, (item: unknown) => shiftSpans(item, by)) as A;
+    return Arr.map(value, (item) => shiftSpans(item, by)) as A;
   }
   if (Option.isOption(value)) {
     // SAFETY: an `Option` field (`Param.name`, `Argument.default`, …) is

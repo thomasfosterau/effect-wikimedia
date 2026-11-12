@@ -84,7 +84,7 @@ const claimValue = <K extends Wikidata.DataValue["_tag"]>(
   dataValueOfKind(valueOf(item?.claims[property]?.[0]?.mainsnak), tag);
 
 /** Decodes a raw entity, failing the test when `decodeEntity` rejects it. */
-const decoded = (raw: unknown): Wikidata.WikidataItem =>
+const decoded = (raw: Schema.Json): Wikidata.WikidataItem =>
   Option.getOrElse(Wikidata.decodeEntity(raw), () => expect.unreachable("entity rejected"));
 
 // ── Branded id parsers ──────────────────────────────────────────────────
@@ -104,7 +104,6 @@ describe("Wikidata id parsers", () => {
     expect(Wikidata.parseItemId("Q42x")).toEqual(Option.none());
     expect(Wikidata.parsePropertyId("Q42")).toEqual(Option.none());
     expect(Wikidata.parseEntityId("L1-F1")).toEqual(Option.none());
-    expect(Wikidata.parseEntityId(42)).toEqual(Option.none());
   });
 });
 
@@ -250,7 +249,7 @@ describe("Wikidata.decodeEntity on containers of the wrong kind (#147)", () => {
 describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
   // JSON decoding makes `__proto__` an own key, as a dump line or a decoded
   // `wbgetentities` body would carry it.
-  const parseJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
+  const parseJson = Schema.decodeSync(Schema.fromJsonString(Schema.Json));
   const item = decoded(
     parseJson(
       '{"id":"Q1"' +

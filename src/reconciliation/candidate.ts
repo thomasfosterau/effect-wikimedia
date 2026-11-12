@@ -69,36 +69,35 @@ export const MAX_LABEL_QUERY_LENGTH = 300;
  * Cleans an untrusted free-text value for a reconciliation candidate: trims
  * it, collapses each internal whitespace run to one space, and clamps it to
  * {@link MAX_CANDIDATE_TEXT_LENGTH} (2000) code units. Returns `None` for a
- * non-string or an empty / whitespace-only string, so callers can map
+ * missing (`undefined`) value or an empty / whitespace-only string, so callers can map
  * "nothing usable" to an absent field rather than an empty string.
  *
  * Differs from `Core.sanitiseText`, which only trims, keeps internal
  * whitespace and clamps to `Core.MAX_TEXT_FIELD_LENGTH` (4000).
  */
-export function sanitiseCandidateText(value: unknown): Option.Option<string> {
-  return collapseAndClamp(value, MAX_CANDIDATE_TEXT_LENGTH);
+export function sanitiseCandidateText(value?: string): Option.Option<string> {
+  return collapseAndClamp(MAX_CANDIDATE_TEXT_LENGTH, value);
 }
 
 /**
  * Trims `value`, collapses each internal whitespace run to one space and
- * clamps it to `max` code units; `None` for a non-string or a value with
+ * clamps it to `max` code units; `None` for `undefined` or a value with
  * nothing left.
  */
-function collapseAndClamp(value: unknown, max: number): Option.Option<string> {
-  if (!P.isString(value)) return Option.none();
+function collapseAndClamp(max: number, value?: string): Option.Option<string> {
+  if (value === undefined) return Option.none();
   const collapsed = value.replace(/\s+/g, " ").trim();
   return Str.isEmpty(collapsed) ? Option.none() : Option.some(collapsed.slice(0, max));
 }
 
 /**
  * Trims an untrusted short token (an external-id value, a Commons filename)
- * and returns it, or `None` for a non-string, an empty value, one over 256
+ * and returns it, or `None` for an empty value, one over 256
  * code units, or one holding an ASCII control character. A codepoint check
  * (not a literal-control-char regex) keeps this source file free of control
  * bytes.
  */
-function trimmedToken(raw: unknown): Option.Option<string> {
-  if (!P.isString(raw)) return Option.none();
+function trimmedToken(raw: string): Option.Option<string> {
   const trimmed = raw.trim();
   if (Str.isEmpty(trimmed) || trimmed.length > 256) return Option.none();
   const hasControl = Arr.some(Arr.fromIterable(trimmed), (char) => {
@@ -121,7 +120,7 @@ function trimmedToken(raw: unknown): Option.Option<string> {
  * text never reaches the request builder.
  */
 export function normaliseLabelQuery(raw: string): Option.Option<string> {
-  return collapseAndClamp(raw, MAX_LABEL_QUERY_LENGTH);
+  return collapseAndClamp(MAX_LABEL_QUERY_LENGTH, raw);
 }
 
 /**
@@ -135,7 +134,6 @@ export function normaliseLabelQuery(raw: string): Option.Option<string> {
  * intended position.
  */
 export function normaliseQid(raw: string): Option.Option<string> {
-  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
   return /^Q[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned) : Option.none();
 }
@@ -150,7 +148,6 @@ export function normaliseQid(raw: string): Option.Option<string> {
  * it must be exclusively `P` plus digits.
  */
 export function normalisePropertyId(raw: string): Option.Option<string> {
-  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toUpperCase();
   return /^P[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned) : Option.none();
 }
@@ -421,8 +418,7 @@ export const IMAGE_PROPERTIES: readonly string[] = ["P18"];
  * The strict pattern is the guard: a stored date is surfaced downstream,
  * so it must be exclusively a sign, digits, and the fixed separators.
  */
-export function normaliseTimeValue(raw: unknown): Option.Option<string> {
-  if (!P.isString(raw)) return Option.none();
+export function normaliseTimeValue(raw: string): Option.Option<string> {
   const trimmed = raw.trim();
   // Wikidata times are `±YYYYYYYYYYY-MM-DDThh:mm:ssZ` (year up to 16 digits).
   if (!/^[+-]\d{1,16}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(trimmed)) return Option.none();
@@ -442,7 +438,7 @@ export function normaliseTimeValue(raw: unknown): Option.Option<string> {
  * {@link ImageFact} `filename`) and `iri` is its `Special:FilePath` URL;
  * both are trusted.
  */
-export function normaliseCommonsImage(raw: unknown): Option.Option<{
+export function normaliseCommonsImage(raw: string): Option.Option<{
   /** The trimmed claim value as spelled: no `File:` prefix stripped, spaces not turned into underscores. */
   readonly filename: string;
   /** `https://commons.wikimedia.org/wiki/Special:FilePath/` plus `filename` percent-encoded as one path segment (a space becomes `%20`). */
