@@ -8,6 +8,7 @@
  * @module tests/dumps/xml
  */
 
+import * as Struct from "effect/Struct";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
@@ -234,7 +235,7 @@ describe("pageRecords pipeline", () => {
     expect(errors.length).toBe(1);
 
     const first = hits[0];
-    if (first?._tag !== "revision") return expect.unreachable("expected revision");
+    if (!P.isTagged(first, "revision")) return expect.unreachable("expected revision");
     expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091, null));
     expect(first.revision.id).toBe(100);
     expect(first.revision.isMinor).toBe(true);
@@ -245,7 +246,7 @@ describe("pageRecords pipeline", () => {
     expect(first.revision.text).toEqual(Option.some("'''Douglas Adams''' < check 1 & 2 > 0"));
 
     const second = hits[1];
-    if (second?._tag !== "revision") return expect.unreachable("expected revision");
+    if (!P.isTagged(second, "revision")) return expect.unreachable("expected revision");
     expect(second.revision.id).toBe(101);
     expect(second.revision.parentId).toEqual(Option.some(100));
     expect(second.revision.contributor).toEqual(
@@ -254,7 +255,7 @@ describe("pageRecords pipeline", () => {
     expect(second.revision.isMinor).toBe(false);
 
     const error = errors[0];
-    if (error?._tag !== "error") return expect.unreachable("expected error");
+    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.page).toEqual(pageRef("Category:Writers", 14, 200, null));
   });
@@ -281,7 +282,7 @@ describe("pageRecords pipeline", () => {
     const chunked = await collect(Dumps.pageRecords(perByte(xml)));
     expect(chunked).toEqual(whole);
     const hit = whole[0];
-    if (hit?._tag !== "revision") return expect.unreachable("expected revision");
+    if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
     expect(hit.page.title).toEqual(Option.some("Café 日本語"));
     expect(hit.revision.text).toEqual(Option.some("é 漢 & ok"));
   });
@@ -297,7 +298,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(truncated)));
     expect(records.length).toBe(1);
     const error = records[0];
-    if (error?._tag !== "error") return expect.unreachable("expected error");
+    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("truncated");
     expect(error.page).toEqual(pageRef("T", 0, 1, null));
@@ -310,7 +311,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(xml)));
     expect(records.length).toBe(1);
     const error = records[0];
-    if (error?._tag !== "error") return expect.unreachable("expected error");
+    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toContain("not closed");
     expect(error.page).toEqual(pageRef("A", 0, 1, null));
@@ -322,9 +323,9 @@ describe("pageRecords pipeline", () => {
       "<revision><id>8</id><text>x</text>" +
       "<revision><id>9</id><timestamp>t</timestamp><text>y</text></revision></page></mediawiki>";
     const records = await collect(Dumps.pageRecords(bytesOf(xml)));
-    expect(records.map((r) => r._tag)).toEqual(["error", "revision"]);
+    expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["error", "revision"]);
     const good = records[1];
-    if (good?._tag !== "revision") return expect.unreachable("expected revision");
+    if (!P.isTagged(good, "revision")) return expect.unreachable("expected revision");
     expect(good.revision.id).toBe(9);
   });
 
@@ -338,7 +339,7 @@ describe("pageRecords pipeline", () => {
     const records = await collect(Dumps.pageRecords(bytesOf(xml)));
     expect(records.length).toBe(1);
     const error = records[0];
-    if (error?._tag !== "error") return expect.unreachable("expected error");
+    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
     expect(error.reason).toBe("dumps/malformed-revision");
     expect(error.detail).toBe("revision field exceeds the 16777216-code-unit cap");
   });
@@ -349,12 +350,12 @@ describe("pageRecords pipeline", () => {
       `<revision><id>10</id><text>${text}</text></revision></page></mediawiki>`;
     // 16,777,216 code units of 3-byte UTF-8 (50 MB) is within the cap.
     const atCap = await collect(Dumps.pageRecords(bytesOf(revisionWith("€".repeat(16_777_216)))));
-    expect(atCap.map((r) => r._tag)).toEqual(["revision"]);
+    expect(atCap.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
     // 3,355,444 `&amp;` decode to that many characters but are 16,777,220 escaped code units.
     const escaped = await collect(
       Dumps.pageRecords(bytesOf(revisionWith("&amp;".repeat(3_355_444)))),
     );
-    expect(escaped.map((r) => r._tag)).toEqual(["error"]);
+    expect(escaped.map((r) => Struct.get(r, "_tag"))).toEqual(["error"]);
   });
 
   describe("a multi-slot revision (export schema 0.11) (#154)", () => {
@@ -367,9 +368,9 @@ describe("pageRecords pipeline", () => {
 
     it("reads model, format and text from the main slot (the issue's repro)", async () => {
       const records = await collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
-      expect(records.map((r) => r._tag)).toEqual(["revision"]);
+      expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
       const hit = records[0];
-      if (hit?._tag !== "revision") return expect.unreachable("expected revision");
+      if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
       expect(hit.revision).toMatchObject({
         id: 5,
         model: Option.some("wikitext"),
@@ -383,7 +384,7 @@ describe("pageRecords pipeline", () => {
       const records = await collect(
         Dumps.pageRecords(bytesOf(multiSlot("z".repeat(17 * 1024 * 1024)))),
       );
-      expect(records.map((r) => r._tag)).toEqual(["revision"]);
+      expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
     });
   });
 

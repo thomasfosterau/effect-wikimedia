@@ -1249,6 +1249,6 @@ describe("fromHttpRange", () => {
         Dumps.fromHttpRange("https://dumps.example.org/x.gz", { maxResumes: 0 }),
       ).pipe(Effect.provide(layer)),
     );
-    expect(exit._tag).toBe("Failure");
+    expect(exit).toMatchObject({ _tag: "Failure" });
   });
 });

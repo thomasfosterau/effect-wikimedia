@@ -7,6 +7,7 @@
  * @module tests/parse
  */
 
+import * as Struct from "effect/Struct";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
@@ -33,7 +34,7 @@ function only<T extends Node["_tag"]>(src: string, tag: T): Extract<Node, { _tag
   const doc = parse(src);
   const structural = doc.children.filter(P.not(P.isTagged("Text")));
   expect(structural.length, `expected one ${tag}`).toBe(1);
-  expect(structural[0]._tag).toBe(tag);
+  expect(structural[0]).toMatchObject({ _tag: tag });
   return firstNode(structural, tag);
 }
 
@@ -231,7 +232,7 @@ describe("html entities", () => {
   // are entities (#118).
   it("parses a named entity whose name has non-ASCII letters", () => {
     const doc = parse("a&רלמ;b&café;c");
-    expect(doc.children.map((n) => [n._tag, serializeNodes([n])])).toEqual([
+    expect(doc.children.map((n) => [Struct.get(n, "_tag"), serializeNodes([n])])).toEqual([
       ["Text", "a"],
       ["HtmlEntity", "&רלמ;"],
       ["Text", "b"],
@@ -448,7 +449,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
     const doc = parse(src);
     expect(serialize(doc)).toBe(src);
     walk(doc, (n) => {
-      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
         src.slice(n.span.start, n.span.end),
       );
     });
@@ -549,7 +550,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
     ).rows[0].cells;
     expect(cells).toHaveLength(2);
     expect(cells[0].attrs).toEqual(Option.none());
-    expect(cells[0].content.map((n) => n._tag)).toEqual(
+    expect(cells[0].content.map((n) => Struct.get(n, "_tag"))).toEqual(
       expect.arrayContaining(["Argument", "Wikilink", "Comment", "Tag"]),
     );
     expect(text(cells[1].content)).toBe(" w\n");
@@ -628,7 +629,7 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
     const doc = parse(src);
     expect(serialize(doc)).toBe(src);
     walk(doc, (n) => {
-      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
         src.slice(n.span.start, n.span.end),
       );
     });
@@ -699,7 +700,7 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
     const doc = parse(src);
     expect(serialize(doc)).toBe(src);
     walk(doc, (n) => {
-      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
         src.slice(n.span.start, n.span.end),
       );
     });
@@ -767,7 +768,7 @@ describe("wikitables: the -{ attribute guard (#158)", () => {
     const doc = parse(src);
     expect(serialize(doc)).toBe(src);
     walk(doc, (n) => {
-      expect(serializeNode(n), `${n._tag} @ ${n.span.start}`).toBe(
+      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
         src.slice(n.span.start, n.span.end),
       );
     });
@@ -810,7 +811,7 @@ describe("openers closed only at the page end (#179)", () => {
     expect(serialize(doc)).toBe(src);
     const structural = doc.children.filter(P.not(P.isTagged("Text")));
     expect(structural.length).toBe(1);
-    return [structural[0]._tag, structural[0].span.start, structural[0].span.end];
+    return [Struct.get(structural[0], "_tag"), structural[0].span.start, structural[0].span.end];
   }
 
   // Past the nesting limit (100), so the memos that make these linear are

@@ -24,6 +24,7 @@
  * @module tests/lookup
  */
 
+import * as Struct from "effect/Struct";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
@@ -748,7 +749,7 @@ describe("WikidataLookup.enrich", () => {
     const { layer } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
     const facts = await loadFacts(layer, "Q42");
 
-    expect(facts.facts.map((fact) => fact._tag)).toEqual([
+    expect(facts.facts.map((fact) => Struct.get(fact, "_tag"))).toEqual([
       "Item",
       ...Array.from({ length: 6 }, () => "Identifier"),
       "Date",

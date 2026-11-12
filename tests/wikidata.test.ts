@@ -8,6 +8,8 @@
  * @module tests/wikidata
  */
 
+import * as Struct from "effect/Struct";
+import * as P from "effect/Predicate";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
@@ -60,7 +62,10 @@ const run = <A, E>(
 
 /** Narrows a snak to its value snak, or fails the test. */
 const valueOf = (snak: Wikidata.Snak | undefined): Wikidata.DataValue => {
-  if (snak?._tag !== "value") return expect.unreachable(`expected a value snak, got ${snak?._tag}`);
+  if (!P.isTagged(snak, "value"))
+    return expect.unreachable(
+      `expected a value snak, got ${snak === undefined ? "nothing" : Struct.get(snak, "_tag")}`,
+    );
   return snak.value;
 };
 
@@ -70,8 +75,9 @@ const dataValueOfKind = <K extends Wikidata.DataValue["_tag"]>(
   tag: K,
 ): Extract<Wikidata.DataValue, { _tag: K }> => {
   const isKind = (v: Wikidata.DataValue): v is Extract<Wikidata.DataValue, { _tag: K }> =>
-    v._tag === tag;
-  if (!isKind(value)) return expect.unreachable(`expected ${tag}, got ${value._tag}`);
+    P.isTagged(v, tag);
+  if (!isKind(value))
+    return expect.unreachable(`expected ${tag}, got ${Struct.get(value, "_tag")}`);
   return value;
 };
 
@@ -325,8 +331,8 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
     expect(value.id).toBe("Q5");
     expect(value.entityType).toEqual(Option.some("item"));
     // Qualifier (P805) and the date-of-birth reference are present and typed.
-    expect(statement?.qualifiers.P805?.[0]?._tag).toBe("value");
-    expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]?._tag).toBe("value");
+    expect(statement?.qualifiers.P805?.[0]).toMatchObject({ _tag: "value" });
+    expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]).toMatchObject({ _tag: "value" });
   });
 
   it("decodes a time value with precision and calendar model", async () => {
@@ -379,8 +385,8 @@ describe("Wikidata.getEntities — recorded fixture round-trip", () => {
   it("decodes somevalue and novalue snaks", async () => {
     const { layer } = load();
     const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    expect(Q42?.claims.P1477?.[0]?.mainsnak._tag).toBe("somevalue");
-    expect(Q42?.claims.P40?.[0]?.mainsnak._tag).toBe("novalue");
+    expect(Q42?.claims.P1477?.[0]?.mainsnak).toMatchObject({ _tag: "somevalue" });
+    expect(Q42?.claims.P40?.[0]?.mainsnak).toMatchObject({ _tag: "novalue" });
   });
 
   it("degrades an unknown datatype to a typed Unknown member (never a decode failure)", async () => {

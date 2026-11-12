@@ -8,6 +8,8 @@
  * @module tests/sparql
  */
 
+import * as Struct from "effect/Struct";
+import * as P from "effect/Predicate";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
@@ -52,7 +54,10 @@ const SELECT = "SELECT ?item WHERE { ?item wdt:P31 wd:Q5 } LIMIT 10";
 const asLiteral = (
   term: Sparql.SparqlTerm | undefined,
 ): Extract<Sparql.SparqlTerm, { _tag: "literal" }> => {
-  if (term?._tag !== "literal") return expect.unreachable(`expected a literal, got ${term?._tag}`);
+  if (!P.isTagged(term, "literal"))
+    return expect.unreachable(
+      `expected a literal, got ${term === undefined ? "nothing" : Struct.get(term, "_tag")}`,
+    );
   return term;
 };
 
@@ -137,7 +142,7 @@ describe("Sparql.query — recorded fixture, term typing", () => {
   it("decodes uri and bnode terms", async () => {
     const { first } = await decodeFixture();
     expect(first?.item).toEqual({ _tag: "uri", value: "http://www.wikidata.org/entity/Q42" });
-    expect(first?.anon._tag).toBe("bnode");
+    expect(first?.anon).toMatchObject({ _tag: "bnode" });
   });
 
   it("decodes a language-tagged literal as monolingualtext", async () => {
@@ -196,7 +201,7 @@ describe("Sparql.literalKind", () => {
 describe("Sparql.normaliseTerm", () => {
   it("degrades an unrecognised term type to a typed Unknown member", () => {
     const term = Sparql.normaliseTerm({ type: "triple", value: "<< s p o >>" });
-    expect(term._tag).toBe("unknown");
+    expect(term).toMatchObject({ _tag: "unknown" });
     expect(term).toMatchObject({ _tag: "unknown", type: Option.some("triple") });
   });
 

@@ -98,15 +98,15 @@ describe("decodeEntityLine", () => {
 
   it("a valid entity line decodes to an entity record with its line number", () => {
     const record = Option.getOrNull(Dumps.decodeEntityLine('{"type":"item","id":"Q1"},', 5));
-    expect(record?._tag).toBe("entity");
-    if (record?._tag !== "entity") return expect.unreachable("expected entity");
+    expect(record).toMatchObject({ _tag: "entity" });
+    if (!P.isTagged(record, "entity")) return expect.unreachable("expected entity");
     expect(record.line).toBe(5);
     expect(record.item.id).toBe("Q1");
   });
 
   it("invalid JSON degrades to an invalid-json error element", () => {
     const record = Option.getOrNull(Dumps.decodeEntityLine("{ not json },", 3));
-    expect(record?._tag).toBe("error");
+    expect(record).toMatchObject({ _tag: "error" });
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/invalid-json");
     expect(record.line).toBe(3);
@@ -114,7 +114,7 @@ describe("decodeEntityLine", () => {
 
   it("valid JSON that is not an entity degrades to a not-an-entity error element", () => {
     const record = Option.getOrNull(Dumps.decodeEntityLine('{"foo":"bar"},', 4));
-    expect(record?._tag).toBe("error");
+    expect(record).toMatchObject({ _tag: "error" });
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
   });
@@ -124,7 +124,7 @@ describe("decodeEntityLine", () => {
   Arr.forEach(["null", "42", '"x"', "[]"], (body) => {
     it(`a JSON ${body} line degrades to a not-an-entity error element`, () => {
       const record = Option.getOrNull(Dumps.decodeEntityLine(`${body},`, 3));
-      expect(record?._tag).toBe("error");
+      expect(record).toMatchObject({ _tag: "error" });
       if (!isLineError(record)) return expect.unreachable("expected error");
       expect(record.reason).toBe("dumps/not-an-entity");
       expect(record.raw).toBe(body);
@@ -135,7 +135,7 @@ describe("decodeEntityLine", () => {
   // object has a valid id but is still not an entity (#122).
   it("an object Wikibase flagged missing degrades to a not-an-entity error element", () => {
     const record = Option.getOrNull(Dumps.decodeEntityLine('{"id":"Q42","missing":""},', 5));
-    expect(record?._tag).toBe("error");
+    expect(record).toMatchObject({ _tag: "error" });
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
     expect(record.raw).toBe('{"id":"Q42","missing":""}');

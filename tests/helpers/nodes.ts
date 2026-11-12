@@ -6,6 +6,7 @@
  * @module tests/helpers/nodes
  */
 
+import * as P from "effect/Predicate";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { expect } from "vite-plus/test";
@@ -18,7 +19,7 @@ export type NodeOf<T extends Node["_tag"]> = Extract<Node, { readonly _tag: T }>
 export const isNode =
   <T extends Node["_tag"]>(tag: T) =>
   (node: Node): node is NodeOf<T> =>
-    node._tag === tag;
+    P.isTagged(node, tag);
 
 /** The first node in `nodes` tagged `tag`, failing the test when there is none. */
 export const firstNode = <T extends Node["_tag"]>(nodes: readonly Node[], tag: T): NodeOf<T> =>

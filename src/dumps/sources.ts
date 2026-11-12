@@ -38,6 +38,7 @@ import { createReadStream } from "node:fs";
 import { compose, Duplex, isReadable, isWritable, Readable } from "node:stream";
 import { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { createGunzip } from "node:zlib";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -182,10 +183,10 @@ const openStage = (decompressor: Decompressor): Effect.Effect<Duplex, SourceErro
  * both sides, as it reads the stage with `read()` and waits for its `finish`.
  */
 const hasStreamState = (stream: Duplex): boolean =>
-  P.hasProperty(stream, "_readableState") &&
-  P.isObjectOrArray(stream._readableState) &&
-  P.hasProperty(stream, "_writableState") &&
-  P.isObjectOrArray(stream._writableState);
+  Arr.every(
+    ["_readableState", "_writableState"],
+    (key) => P.hasProperty(stream, key) && P.isObjectOrArray(stream[key]),
+  );
 
 /**
  * A failure inside a classic-stream adapter, raised in Node land where an
