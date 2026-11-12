@@ -84,13 +84,13 @@ const ImageInfoEntry = Schema.Struct({
   /** The file description page's URL, which {@link FileInfo.descriptionUrl} re-validates. */
   descriptionurl: lenientField(Schema.String),
   /** The width in pixels. */
-  width: lenientField(Schema.Number),
+  width: lenientField(Schema.Int),
   /** The height in pixels. */
-  height: lenientField(Schema.Number),
+  height: lenientField(Schema.Int),
   /** The MIME type. */
   mime: lenientField(Schema.String),
   /** The size in bytes. */
-  size: lenientField(Schema.Number),
+  size: lenientField(Schema.Int),
 });
 type ImageInfoEntry = typeof ImageInfoEntry.Type;
 

@@ -102,7 +102,7 @@ export class MultistreamIndexError extends Schema.TaggedError<MultistreamIndexEr
       "dumps/index-offset-past-file-size",
     ]),
     /** The 1-based number of the offending line, counted as for {@link MultistreamIndexEntry.line}. */
-    line: Schema.Number,
+    line: Schema.Int,
     /**
      * A short account for logs rather than parsing. For a malformed line it
      * is the line itself, cut to its first 500 UTF-16 code units (the cut can

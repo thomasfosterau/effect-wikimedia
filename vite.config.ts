@@ -174,6 +174,10 @@ export default defineConfig({
       "effecttsgo/strict-effect-provide": "error",
       // Decode with the typed decoders (`decodeEffect`, `decodeSync`, `decodeOption`) so the input is checked against the schema's Encoded type (#224).
       "effecttsgo/prefer-typed-schema-decoder": "error",
+      // Wire numbers are ids, counts and sizes: `Schema.Int` (or
+      // `Schema.Finite`), never a `Schema.Number` that admits NaN and
+      // Infinity (#224). No exceptions.
+      "effecttsgo/schema-number": "error",
       "effect/effect-run-in-body": "error",
       // ---- Oxlint categories: rules this package's conventions cut across --
       // `_tag` is Effect's discriminator, on every tagged error and union this
