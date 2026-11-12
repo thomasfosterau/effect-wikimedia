@@ -43,6 +43,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
@@ -254,22 +255,22 @@ const MAX_HOST_LENGTH = 100;
  * the SSRF guard: every request this package builds
  * targets `https://<validated host><fixed path>`, so a caller (or a value
  * threaded through from an untrusted source) can never redirect a request
- * to an arbitrary host. Returns `null` for anything else.
+ * to an arbitrary host. Returns `None` for anything else.
  */
-export function normaliseWikimediaHost(raw: string): string | null {
-  if (!P.isString(raw)) return null;
+export function normaliseWikimediaHost(raw: string): Option.Option<string> {
+  if (!P.isString(raw)) return Option.none();
   const cleaned = raw.trim().toLowerCase();
-  if (Str.isEmpty(cleaned) || cleaned.length > MAX_HOST_LENGTH) return null;
+  if (Str.isEmpty(cleaned) || cleaned.length > MAX_HOST_LENGTH) return Option.none();
   // Hostnames only: letters, digits, dot, hyphen. Rejects anything that
   // could smuggle a path, port, or credentials into the host position.
-  if (!/^[a-z0-9.-]+$/.test(cleaned)) return null;
-  if (HashSet.has(ALLOWED_HOSTS, cleaned)) return cleaned;
-  return Arr.some(
-    ALLOWED_HOST_SUFFIXES,
-    (suffix) => cleaned.endsWith(suffix) && cleaned.length > suffix.length,
-  )
-    ? cleaned
-    : null;
+  if (!/^[a-z0-9.-]+$/.test(cleaned)) return Option.none();
+  const allowed =
+    HashSet.has(ALLOWED_HOSTS, cleaned) ||
+    Arr.some(
+      ALLOWED_HOST_SUFFIXES,
+      (suffix) => cleaned.endsWith(suffix) && cleaned.length > suffix.length,
+    );
+  return allowed ? Option.some(cleaned) : Option.none();
 }
 
 /** Upper bound on a MediaWiki title / filename before validation. */
@@ -342,14 +343,16 @@ function hasSafeCodeUnits(title: string, index: number): boolean {
  * `Commons` strips `File:`, passes the stripped title. Titles that merely
  * contain dots (`Mr._Smith`, `A.B`, `...`) stay valid.
  */
-export function normaliseTitle(raw: string): string | null {
-  if (!P.isString(raw)) return null;
+export function normaliseTitle(raw: string): Option.Option<string> {
+  if (!P.isString(raw)) return Option.none();
   const collapsed = raw.trim().replace(/\s+/g, "_");
-  if (Str.isEmpty(collapsed) || collapsed.length > MAX_TITLE_LENGTH) return null;
-  if (!hasSafeCodeUnits(collapsed, 0)) return null;
-  if (/[|#<>[\]{}]/.test(collapsed)) return null;
-  if (isRelativePathTitle(collapsed)) return null;
-  return collapsed;
+  const valid =
+    !Str.isEmpty(collapsed) &&
+    collapsed.length <= MAX_TITLE_LENGTH &&
+    hasSafeCodeUnits(collapsed, 0) &&
+    !/[|#<>[\]{}]/.test(collapsed) &&
+    !isRelativePathTitle(collapsed);
+  return valid ? Option.some(collapsed) : Option.none();
 }
 
 /**
@@ -362,11 +365,10 @@ export function normaliseTitle(raw: string): string | null {
  * Commons file).
  */
 export function requireTitle(value: string, kind = "title"): Effect.Effect<string, InvalidRequest> {
-  const validated = normaliseTitle(value);
-  if (validated === null || validated.length > MAX_TITLE_LENGTH) {
-    return Effect.fail(new InvalidRequest({ kind, value }));
-  }
-  return Effect.succeed(validated);
+  return Option.match(normaliseTitle(value), {
+    onNone: () => Effect.fail(new InvalidRequest({ kind, value })),
+    onSome: Effect.succeed,
+  });
 }
 
 /**
@@ -415,18 +417,26 @@ export const lenientArray = <S extends Schema.Top>(schema: S) =>
 /** Upper bound on a free-text field copied from an untrusted response body. */
 export const MAX_TEXT_FIELD_LENGTH = 4000;
 
-/** Trims and length-clamps an untrusted free-text value; `null` for anything unusable. */
-export function sanitiseText(value?: string): string | null {
-  if (value === undefined) return null;
+/** Trims and length-clamps an untrusted free-text value; `None` when it is absent or blank. */
+export function sanitiseText(value?: string): Option.Option<string> {
+  if (value === undefined) return Option.none();
   const trimmed = value.trim();
-  return Str.isEmpty(trimmed) ? null : trimmed.slice(0, MAX_TEXT_FIELD_LENGTH);
+  return Str.isEmpty(trimmed)
+    ? Option.none()
+    : Option.some(trimmed.slice(0, MAX_TEXT_FIELD_LENGTH));
 }
 
-/** A non-negative integer within a sane bound, or `null` for anything else. */
-export function toNonNegativeInt(value?: number, max = Number.MAX_SAFE_INTEGER): number | null {
-  if (value === undefined || !Number.isFinite(value)) return null;
+/**
+ * Truncates a number to an integer and keeps it when it is between `0` and
+ * `max` inclusive; `None` when it is absent, not finite, or out of range.
+ */
+export function toNonNegativeInt(
+  value?: number,
+  max = Number.MAX_SAFE_INTEGER,
+): Option.Option<number> {
+  if (value === undefined || !Number.isFinite(value)) return Option.none();
   const int = Math.trunc(value);
-  return int >= 0 && int <= max ? int : null;
+  return int >= 0 && int <= max ? Option.some(int) : Option.none();
 }
 
 // ── Maxlag / retry-after etiquette ───────────────────────────────────────
@@ -434,15 +444,15 @@ export function toNonNegativeInt(value?: number, max = Number.MAX_SAFE_INTEGER):
 /**
  * Parses an HTTP `Retry-After` header value. Only the integer-seconds form
  * is supported (the HTTP-date form is rare from Wikimedia and not needed by
- * this package); returns `null` for anything else, including a missing
+ * this package); returns `None` for anything else, including a missing
  * header.
  */
-export function parseRetryAfterHeader(value: string | undefined | null): number | null {
-  if (!P.isString(value)) return null;
+export function parseRetryAfterHeader(value?: string): Option.Option<number> {
+  if (!P.isString(value)) return Option.none();
   const trimmed = value.trim();
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return Option.none();
   const seconds = Number(trimmed);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  return Number.isFinite(seconds) && seconds >= 0 ? Option.some(seconds) : Option.none();
 }
 
 /**
@@ -450,7 +460,7 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * JSON body is `{ error: { code: "maxlag", ... } }` (the REST/Parsoid surface
  * signals lag via HTTP status instead — see {@link parseRetryAfterHeader}).
  * Returns the etiquette-recommended backoff in seconds
- * ({@link DEFAULT_MAXLAG_SECONDS}) when detected, or `null` when the body
+ * ({@link DEFAULT_MAXLAG_SECONDS}) when detected, or `None` when the body
  * carries no maxlag signal. It reads only the body: MediaWiki also sends a
  * `Retry-After` header with this error (the larger of the request's `maxlag`
  * parameter and 5 seconds), and {@link WikimediaClient} waits for that header's
@@ -458,11 +468,14 @@ export function parseRetryAfterHeader(value: string | undefined | null): number 
  * exceeds {@link RetryOptions.maxDelaySeconds}), using this function's figure
  * only when the header is absent or an HTTP date.
  */
-export function detectMaxlagSignal(body: Schema.Json): number | null {
-  if (!P.isObjectOrArray(body) || !P.hasProperty(body, "error")) return null;
-  const error = body.error;
-  if (!P.isObjectOrArray(error) || !P.hasProperty(error, "code")) return null;
-  return error.code === "maxlag" ? DEFAULT_MAXLAG_SECONDS : null;
+export function detectMaxlagSignal(body: Schema.Json): Option.Option<number> {
+  const isMaxlag =
+    P.isObjectOrArray(body) &&
+    P.hasProperty(body, "error") &&
+    P.isObjectOrArray(body.error) &&
+    P.hasProperty(body.error, "code") &&
+    body.error.code === "maxlag";
+  return isMaxlag ? Option.some(DEFAULT_MAXLAG_SECONDS) : Option.none();
 }
 
 /** Bounds how many extra attempts / how long a single wait can be for {@link withMaxlagRetry}. */
@@ -556,11 +569,11 @@ export interface WikimediaRequest {
    */
   readonly params?: Record<string, string>;
   /**
-   * Seconds to send as `maxlag`, or `null` to omit the parameter entirely
-   * (some REST endpoints don't accept it). Defaults to
+   * Seconds to send as `maxlag`, or `Option.none()` to omit the parameter
+   * entirely (some REST endpoints don't accept it). Defaults to
    * {@link DEFAULT_MAXLAG_SECONDS}.
    */
-  readonly maxlagSeconds?: number | null;
+  readonly maxlagSeconds?: Option.Option<number>;
 }
 
 /**
@@ -576,9 +589,8 @@ export interface WikimediaRequest {
 function buildUrl(request: WikimediaRequest): string {
   const url = new URL(`https://${request.host}${request.path}`);
   const search = new URLSearchParams(request.params ?? {});
-  const maxlag =
-    request.maxlagSeconds === undefined ? DEFAULT_MAXLAG_SECONDS : request.maxlagSeconds;
-  if (maxlag !== null) search.set("maxlag", String(maxlag));
+  const maxlag = request.maxlagSeconds ?? Option.some(DEFAULT_MAXLAG_SECONDS);
+  if (Option.isSome(maxlag)) search.set("maxlag", String(maxlag.value));
   if (url.pathname === ACTION_API_PATH && !search.has("origin") && !search.has("crossorigin")) {
     search.set("origin", "*");
   }
@@ -593,8 +605,8 @@ function buildUrl(request: WikimediaRequest): string {
  * `429` / `503` path and the `maxlag` error-body path, so both honour the
  * server's figure the same way.
  */
-function retryAfterSeconds(retryAfterHeader: string | undefined): number {
-  return parseRetryAfterHeader(retryAfterHeader) ?? DEFAULT_MAXLAG_SECONDS;
+function retryAfterSeconds(retryAfterHeader?: string): number {
+  return Option.getOrElse(parseRetryAfterHeader(retryAfterHeader), () => DEFAULT_MAXLAG_SECONDS);
 }
 
 function describeHttpError(error: HttpClientError.HttpClientError): string {
@@ -648,11 +660,11 @@ export class WikimediaClient extends Context.Service<
  * Normalises `request.host`, failing with {@link InvalidRequest} for a host
  * outside the allowed Wikimedia families.
  */
-const validated = (request: WikimediaRequest): Effect.Effect<WikimediaRequest, InvalidRequest> => {
-  const host = normaliseWikimediaHost(request.host);
-  if (host === null) return Effect.fail(new InvalidRequest({ kind: "host", value: request.host }));
-  return Effect.succeed({ ...request, host });
-};
+const validated = (request: WikimediaRequest): Effect.Effect<WikimediaRequest, InvalidRequest> =>
+  Option.match(normaliseWikimediaHost(request.host), {
+    onNone: () => Effect.fail(new InvalidRequest({ kind: "host", value: request.host })),
+    onSome: (host) => Effect.succeed({ ...request, host }),
+  });
 
 /**
  * Builds the {@link WikimediaClient} service over an `HttpClient`, sending
@@ -716,7 +728,7 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
           Effect.fail(new RequestFailed({ description: describeHttpError(error) })),
         ),
       );
-      if (detectMaxlagSignal(body) !== null)
+      if (Option.isSome(detectMaxlagSignal(body)))
         return yield* new RateLimited({
           retryAfterSeconds: retryAfterSeconds(response.headers["retry-after"]),
         });

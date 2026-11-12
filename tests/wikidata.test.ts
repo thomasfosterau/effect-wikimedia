@@ -48,7 +48,7 @@ const stubWikidata = (handler: (url: URL) => Schema.Json) => {
 // ── Typed narrowing helpers (keep each assertion flat) ───────────────────
 
 /** Narrows a snak to its value snak, or fails the test. */
-const valueOf = (snak: Wikidata.Snak | undefined): Wikidata.DataValue => {
+const valueOf = (snak?: Wikidata.Snak): Wikidata.DataValue => {
   if (!P.isTagged(snak, "value"))
     return expect.unreachable(
       `expected a value snak, got ${snak === undefined ? "nothing" : Struct.get(snak, "_tag")}`,
@@ -70,11 +70,11 @@ const dataValueOfKind = <K extends Wikidata.DataValue["_tag"]>(
 
 /** The main snak's value of a given kind, for the first statement on a property. */
 const claimValue = <K extends Wikidata.DataValue["_tag"]>(
-  item: Wikidata.WikidataItem | undefined,
+  item: Wikidata.WikidataItem,
   property: string,
   tag: K,
 ): Extract<Wikidata.DataValue, { _tag: K }> =>
-  dataValueOfKind(valueOf(item?.claims[property]?.[0]?.mainsnak), tag);
+  dataValueOfKind(valueOf(item.claims[property]?.[0]?.mainsnak), tag);
 
 /** Decodes a raw entity, failing the test when `decodeEntity` rejects it. */
 const decoded = (raw: Schema.Json): Wikidata.WikidataItem =>

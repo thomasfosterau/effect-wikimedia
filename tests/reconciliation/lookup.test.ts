@@ -69,11 +69,11 @@ interface StubRoute {
 }
 
 /** The route key a request dispatches to, by its Action API `action` / `list` param. */
-function routeKeyFor(request: Core.WikimediaRequest): string | undefined {
-  if (request.params?.list === "search") return "list=search";
-  if (request.params?.action === "wbsearchentities") return "action=wbsearchentities";
-  if (request.params?.action === "wbgetentities") return "action=wbgetentities";
-  return undefined;
+function routeKeyFor(request: Core.WikimediaRequest): Option.Option<string> {
+  if (request.params?.list === "search") return Option.some("list=search");
+  if (request.params?.action === "wbsearchentities") return Option.some("action=wbsearchentities");
+  if (request.params?.action === "wbgetentities") return Option.some("action=wbgetentities");
+  return Option.none();
 }
 
 /** The routes the stub client answers and the requests it records, for one test. */
@@ -106,8 +106,9 @@ const stubWikimediaClient = Layer.succeed(Core.WikimediaClient, {
   ) {
     const { routes, requests } = yield* CurrentStub;
     requests.push(request);
-    const key = routeKeyFor(request);
-    const route = key === undefined ? undefined : routes[key];
+    const route = Option.getOrUndefined(
+      Option.flatMap(routeKeyFor(request), (key) => R.get(routes, key)),
+    );
     if (route?.fail) return yield* route.fail;
     // Decode the wire-shaped body with the caller's schema, as the real client does.
     return yield* Schema.decodeUnknownEffect(schema)(route?.body ?? {}).pipe(
@@ -687,14 +688,14 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
 
   it.effect("maps the calendar model to gregorian, julian or null", () =>
     Effect.gen(function* () {
-      const timeClaim = (calendarmodel: string | number | undefined) => ({
+      const timeClaim = (calendarmodel?: string | number) => ({
         mainsnak: {
           snaktype: "value",
           property: "P569",
           datatype: "time",
           datavalue: {
             type: "time",
-            // `timeClaim(undefined)` omits the key rather than sending `undefined`.
+            // `timeClaim()` omits the key rather than sending `undefined`.
             value: R.filter(
               { time: "+1452-04-15T00:00:00Z", precision: 11, calendarmodel },
               P.isNotUndefined,
@@ -718,7 +719,7 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
                     timeClaim("https://www.wikidata.org/entity/Q1985727"),
                     timeClaim("https://www.wikidata.org/entity/Q1985786"),
                     // No calendar model at all.
-                    timeClaim(undefined),
+                    timeClaim(),
                     // Another entity (Q12138, the non-proleptic Gregorian
                     // calendar item), a bare QID, another host, a page URL,
                     // and a non-string.
@@ -752,14 +753,14 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
 
   it.effect("reports a missing or out-of-range precision as null", () =>
     Effect.gen(function* () {
-      const timeClaim = (precision: number | undefined) => ({
+      const timeClaim = (precision?: number) => ({
         mainsnak: {
           snaktype: "value",
           property: "P569",
           datatype: "time",
           datavalue: {
             type: "time",
-            // `timeClaim(undefined)` omits the key rather than sending `undefined`.
+            // `timeClaim()` omits the key rather than sending `undefined`.
             value: R.filter({ time: "+1952-00-00T00:00:00Z", precision }, P.isNotUndefined),
           },
         },
@@ -771,13 +772,7 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
               Q1: {
                 id: "Q1",
                 claims: {
-                  P569: [
-                    timeClaim(9),
-                    timeClaim(undefined),
-                    timeClaim(15),
-                    timeClaim(9.5),
-                    timeClaim(-1),
-                  ],
+                  P569: [timeClaim(9), timeClaim(), timeClaim(15), timeClaim(9.5), timeClaim(-1)],
                 },
               },
             },

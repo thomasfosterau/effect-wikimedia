@@ -232,15 +232,15 @@ export interface RevisionMetadata {
 /** Normalises a `PageMetadataResponse`. Never `null` — a REST 404 surfaces as `RequestFailed` before decoding gets here. */
 export function normalisePageMetadata(response: PageMetadataResponse, title: string): PageMetadata {
   return {
-    pageId: Option.fromNullOr(toNonNegativeInt(response.id)),
-    key: Option.fromNullOr(sanitiseText(response.key)),
-    title: sanitiseText(response.title) ?? title,
-    contentModel: Option.fromNullOr(sanitiseText(response.content_model)),
-    latestRevisionId: Option.fromNullOr(toNonNegativeInt(response.latest?.id)),
+    pageId: toNonNegativeInt(response.id),
+    key: sanitiseText(response.key),
+    title: Option.getOrElse(sanitiseText(response.title), () => title),
+    contentModel: sanitiseText(response.content_model),
+    latestRevisionId: toNonNegativeInt(response.latest?.id),
     latestTimestamp: Option.map(Option.fromUndefinedOr(response.latest?.timestamp), (timestamp) =>
       timestamp.slice(0, 40),
     ),
-    licenseUrl: Option.fromNullOr(sanitiseText(response.license?.url)),
+    licenseUrl: sanitiseText(response.license?.url),
   };
 }
 
@@ -250,16 +250,16 @@ export function normaliseRevisionMetadata(
   revisionId: number,
 ): RevisionMetadata {
   return {
-    revisionId: toNonNegativeInt(response.id) ?? revisionId,
-    pageId: Option.fromNullOr(toNonNegativeInt(response.page?.id)),
-    pageTitle: Option.fromNullOr(sanitiseText(response.page?.title)),
-    size: Option.fromNullOr(toNonNegativeInt(response.size, 100_000_000)),
+    revisionId: Option.getOrElse(toNonNegativeInt(response.id), () => revisionId),
+    pageId: toNonNegativeInt(response.page?.id),
+    pageTitle: sanitiseText(response.page?.title),
+    size: toNonNegativeInt(response.size, 100_000_000),
     minor: Option.fromUndefinedOr(response.minor),
     timestamp: Option.map(Option.fromUndefinedOr(response.timestamp), (timestamp) =>
       timestamp.slice(0, 40),
     ),
-    contentModel: Option.fromNullOr(sanitiseText(response.content_model)),
-    licenseUrl: Option.fromNullOr(sanitiseText(response.license?.url)),
+    contentModel: sanitiseText(response.content_model),
+    licenseUrl: sanitiseText(response.license?.url),
   };
 }
 
@@ -283,7 +283,7 @@ export const getPageMetadata = Effect.fn("Rest.getPageMetadata")(function* (
     {
       host,
       path: `/w/rest.php/v1/page/${encodeURIComponent(validTitle)}/bare`,
-      maxlagSeconds: null,
+      maxlagSeconds: Option.none(),
     },
     PageMetadataResponse,
     retry ?? DEFAULT_RETRY_OPTIONS,
@@ -305,7 +305,7 @@ export const getRevisionMetadata = Effect.fn("Rest.getRevisionMetadata")(functio
   const validId = yield* requireRevisionId(revisionId);
   const client = yield* WikimediaClient;
   const response = yield* client.getJson(
-    { host, path: `/w/rest.php/v1/revision/${validId}/bare`, maxlagSeconds: null },
+    { host, path: `/w/rest.php/v1/revision/${validId}/bare`, maxlagSeconds: Option.none() },
     RevisionMetadataResponse,
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
@@ -332,7 +332,7 @@ export const getParsedHtml = Effect.fn("Rest.getParsedHtml")(function* (
     {
       host,
       path: `/w/rest.php/v1/page/${encodeURIComponent(validTitle)}/html`,
-      maxlagSeconds: null,
+      maxlagSeconds: Option.none(),
     },
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
@@ -347,7 +347,7 @@ export const getRevisionHtml = Effect.fn("Rest.getRevisionHtml")(function* (
   const validId = yield* requireRevisionId(revisionId);
   const client = yield* WikimediaClient;
   return yield* client.getText(
-    { host, path: `/w/rest.php/v1/revision/${validId}/html`, maxlagSeconds: null },
+    { host, path: `/w/rest.php/v1/revision/${validId}/html`, maxlagSeconds: Option.none() },
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
 });

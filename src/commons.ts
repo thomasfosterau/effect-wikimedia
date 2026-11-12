@@ -57,22 +57,22 @@ export interface FilePathOptions {
  * generated thumbnail instead of the original.
  */
 export function filePathUrl(filename: string, options?: FilePathOptions): Option.Option<string> {
-  const title = normaliseTitle(filename.replace(/^File:/i, ""));
-  if (title === null) return Option.none();
-  const url = new URL(
-    `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(title)}`,
-  );
-  if (options?.width !== undefined) {
-    if (
-      !Number.isInteger(options.width) ||
-      options.width <= 0 ||
-      options.width > MAX_THUMBNAIL_WIDTH
-    ) {
-      return Option.none();
+  return Option.flatMap(normaliseTitle(filename.replace(/^File:/i, "")), (title) => {
+    const url = new URL(
+      `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(title)}`,
+    );
+    if (options?.width !== undefined) {
+      if (
+        !Number.isInteger(options.width) ||
+        options.width <= 0 ||
+        options.width > MAX_THUMBNAIL_WIDTH
+      ) {
+        return Option.none();
+      }
+      url.searchParams.set("width", String(options.width));
     }
-    url.searchParams.set("width", String(options.width));
-  }
-  return Option.some(url.toString());
+    return Option.some(url.toString());
+  });
 }
 
 // ── File info (Action API imageinfo) ────────────────────────────────────
@@ -145,7 +145,7 @@ function isMediaUrl(url: URL): boolean {
 }
 
 /** A URL string re-validated against a fixed allowed-host set, or `None`. */
-function toWikimediaMediaUrl(value: string | undefined): Option.Option<string> {
+function toWikimediaMediaUrl(value?: string): Option.Option<string> {
   const candidate =
     value !== undefined && Str.isNonEmpty(value) && value.length <= 2000
       ? parseUrl(value)
@@ -166,10 +166,10 @@ function normaliseFileInfo(response: FileInfoResponse, title: string): Option.Op
     title: page.title ?? title,
     url: toWikimediaMediaUrl(entry.url),
     descriptionUrl: toWikimediaMediaUrl(entry.descriptionurl),
-    width: Option.fromNullOr(toNonNegativeInt(entry.width, 100_000)),
-    height: Option.fromNullOr(toNonNegativeInt(entry.height, 100_000)),
+    width: toNonNegativeInt(entry.width, 100_000),
+    height: toNonNegativeInt(entry.height, 100_000),
     mime: Option.map(Option.fromUndefinedOr(entry.mime), (mime) => mime.slice(0, 100)),
-    size: Option.fromNullOr(toNonNegativeInt(entry.size, 10_000_000_000)),
+    size: toNonNegativeInt(entry.size, 10_000_000_000),
   });
 }
 

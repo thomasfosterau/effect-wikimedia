@@ -36,7 +36,7 @@ describe("normaliseLabelQuery", () => {
     expect(Option.getOrNull(normaliseLabelQuery("  Douglas   Adams \n"))).toBe("Douglas Adams");
   });
 
-  it("returns null for whitespace-only input", () => {
+  it("returns None for whitespace-only input", () => {
     expect(Option.getOrNull(normaliseLabelQuery("   "))).toBeNull();
     expect(Option.getOrNull(normaliseLabelQuery("\t\n\u00a0"))).toBeNull();
   });
@@ -104,7 +104,7 @@ describe("sanitiseCandidateText", () => {
     expect(Option.getOrNull(sanitiseCandidateText("  hello   world \n"))).toBe("hello world");
   });
 
-  it("returns null for whitespace-only or missing input", () => {
+  it("returns None for whitespace-only or missing input", () => {
     expect(Option.getOrNull(sanitiseCandidateText("   "))).toBeNull();
     expect(Option.getOrNull(sanitiseCandidateText(undefined))).toBeNull();
   });
@@ -131,7 +131,7 @@ describe("candidate text names on the barrel", () => {
 
   it("keeps Core's looser bound and trim-only behaviour distinct", () => {
     expect(Core.MAX_TEXT_FIELD_LENGTH).toBe(4000);
-    expect(Core.sanitiseText("  a   b ")).toBe("a   b");
+    expect(Core.sanitiseText("  a   b ")).toEqual(Option.some("a   b"));
     expect(Option.getOrNull(Reconciliation.sanitiseCandidateText("  a   b "))).toBe("a b");
   });
 });

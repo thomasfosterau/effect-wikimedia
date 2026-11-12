@@ -38,9 +38,7 @@ const stubWdqs = (body: Schema.Json) => {
 const SELECT = "SELECT ?item WHERE { ?item wdt:P31 wd:Q5 } LIMIT 10";
 
 /** Narrows a term to a literal, or fails the test. */
-const asLiteral = (
-  term: Sparql.SparqlTerm | undefined,
-): Extract<Sparql.SparqlTerm, { _tag: "literal" }> => {
+const asLiteral = (term?: Sparql.SparqlTerm): Extract<Sparql.SparqlTerm, { _tag: "literal" }> => {
   if (!P.isTagged(term, "literal"))
     return expect.unreachable(
       `expected a literal, got ${term === undefined ? "nothing" : Struct.get(term, "_tag")}`,

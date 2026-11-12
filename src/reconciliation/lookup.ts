@@ -35,6 +35,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import {
   MAX_CANDIDATES,
@@ -228,7 +229,11 @@ const makeWikidataLookup = Effect.fnUntraced(function* () {
         props: ENTITY_PROPS,
       }),
     );
-    return qids.flatMap((qid) => itemToCandidate(entities[qid], qid, DEFAULT_LANGUAGE));
+    return Arr.getSomes(
+      Arr.map(qids, (qid) =>
+        Option.map(R.get(entities, qid), (item) => itemToCandidate(item, qid, DEFAULT_LANGUAGE)),
+      ),
+    );
   });
 
   const enrich = Effect.fn("WikidataLookup.enrich")(function* (qid: string) {
