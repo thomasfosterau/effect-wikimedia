@@ -56,12 +56,13 @@ const MAX_ROWSPAN = 65_534;
 
 /** A span attribute's value in `attrs` (its leading digits, as MediaWiki reads it), or `None`. */
 function spanAttribute(
-  attrs: string | undefined,
+  attrs: Option.Option<string>,
   name: "rowspan" | "colspan",
 ): Option.Option<number> {
-  if (attrs === undefined) return Option.none();
-  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*["']?\\s*(\\d+)`, "i").exec(attrs);
-  return Option.map(Option.fromUndefinedOr(match?.[1]), (digits) => Number.parseInt(digits, 10));
+  return Option.flatMap(attrs, (text) => {
+    const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*["']?\\s*(\\d+)`, "i").exec(text);
+    return Option.map(Option.fromUndefinedOr(match?.[1]), (digits) => Number.parseInt(digits, 10));
+  });
 }
 
 /**

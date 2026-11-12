@@ -99,9 +99,7 @@ export function citations(doc: Document, options?: CitationsOptions): readonly C
     const name = attribute(ref.raw, "name");
     const group = attribute(ref.raw, "group");
     const body = Option.map(
-      Option.filter(Option.fromUndefinedOr(ref.rawContent), (content) =>
-        Str.isNonEmpty(content.trim()),
-      ),
+      Option.filter(ref.rawContent, (content) => Str.isNonEmpty(content.trim())),
       (content) => parse(content, { offset: ref.span.start + ref.raw.length }),
     );
     return { ref, name, group, body, reuse: Option.isSome(name) && Option.isNone(body) };

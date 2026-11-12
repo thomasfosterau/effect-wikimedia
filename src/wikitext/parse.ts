@@ -660,14 +660,21 @@ const argument: WikiParser<Argument> = memoFailure(
         literal("}}}"),
       ),
     ),
-    ([[, , name, def], span]): Argument => ({ _tag: "Argument", span, name, default: def }),
+    ([[, , name, def], span]): Argument => ({
+      _tag: "Argument",
+      span,
+      name,
+      default: Option.fromUndefinedOr(def),
+    }),
   ),
 );
 
 const param: WikiParser<Param> = Parser.map(
   Parser.seq(paramName, Parser.optional(Parser.preceded(literal("="), templatePart))),
   ([first, value]): Param =>
-    value === undefined ? { name: undefined, value: first } : { name: first, value },
+    value === undefined
+      ? { name: Option.none(), value: first }
+      : { name: Option.some(first), value },
 );
 
 const template: WikiParser<Template> = memoFailure(
@@ -847,8 +854,8 @@ const trailingNewline = Parser.optional(literal("\n"));
  * wikilink's or a LanguageConverter rule's surroundings as attributes; #158).
  */
 interface CellSplit {
-  /** The attribute text, or `undefined` when no attribute `|` splits the cell. */
-  readonly attrs: string | undefined;
+  /** The attribute text, or `None` when no attribute `|` splits the cell. */
+  readonly attrs: Option.Option<string>;
   /** Where the cell's content starts. */
   readonly contentStart: number;
 }
@@ -863,15 +870,15 @@ function isAttrSplit(state: State, i: number): boolean {
 function splitCellAttrs(state: State, from: number, to: number): CellSplit {
   const src = state.input;
   const at = findTopLevel(state, from, to, isAttrSplit);
-  if (at >= to || src.charCodeAt(at) !== PIPE) return { attrs: undefined, contentStart: from };
-  return { attrs: src.slice(from, at), contentStart: at + 1 };
+  if (at >= to || src.charCodeAt(at) !== PIPE) return { attrs: Option.none(), contentStart: from };
+  return { attrs: Option.some(src.slice(from, at)), contentStart: at + 1 };
 }
 
 /** One `||`-separated piece of a cell or caption line (see `linePieces`). */
 interface LinePiece {
   readonly span: Span;
   readonly marker: string;
-  readonly attrs: string | undefined;
+  readonly attrs: Option.Option<string>;
   readonly content: Node[];
 }
 
@@ -1013,7 +1020,7 @@ interface TableBody {
 
 /** {@link tableRows}' running state: the body so far and the row still open. */
 interface TableBodyBuilder extends TableBody {
-  row: { start: number; open: string | undefined; cells: TableCell[] } | undefined;
+  row: { start: number; open: Option.Option<string>; cells: TableCell[] } | undefined;
 }
 
 /** Closes the open row (if any) at `end`. */
@@ -1031,7 +1038,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
         ({ start, open }) =>
         (body: TableBodyBuilder) => {
           flushRow(body, start);
-          body.row = { start, open, cells: [] };
+          body.row = { start, open: Option.some(open), cells: [] };
         },
       Captions:
         ({ captions }) =>
@@ -1045,7 +1052,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
       Cells:
         ({ cells }) =>
         (body: TableBodyBuilder) => {
-          body.row ??= { start: cells[0].span.start, open: undefined, cells: [] };
+          body.row ??= { start: cells[0].span.start, open: Option.none(), cells: [] };
           body.row.cells.push(...cells);
         },
     }),
@@ -1053,7 +1060,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
 
 /**
  * Groups a table's items into captions and rows. Cells before any `|-`, or
- * after a caption, open an implicit row (`open` undefined); each row runs to
+ * after a caption, open an implicit row (`open` `None`); each row runs to
  * the next `|-`, the next caption or the closing `|}` at `closeStart`. A
  * caption ends the row it interrupts, as an HTML parser closes the row at
  * the `<caption>` MediaWiki emits there and opens a new one for the next
@@ -1162,7 +1169,12 @@ const externalLink: WikiParser<ExternalLink> = memoFailure(
         literal("]"),
       ),
     ),
-    ([[, , url, label], span]): ExternalLink => ({ _tag: "ExternalLink", span, url, label }),
+    ([[, , url, label], span]): ExternalLink => ({
+      _tag: "ExternalLink",
+      span,
+      url,
+      label: Option.fromUndefinedOr(label),
+    }),
   ),
 );
 
@@ -1358,8 +1370,8 @@ const tag: WikiParser<Tag> = Parser.make((state) => {
     closing,
     selfClosing,
     raw,
-    rawContent: undefined,
-    closeRaw: undefined,
+    rawContent: Option.none(),
+    closeRaw: Option.none(),
   });
   if (closing || selfClosing || !EXTENSION_TAG_NAME.test(name)) return marker();
   // Extension tag: capture the body raw up to a matching close tag.
@@ -1371,7 +1383,7 @@ const tag: WikiParser<Tag> = Parser.make((state) => {
     return marker();
   }
   const [rawContent, closeRaw] = body;
-  return { ...marker(), rawContent, closeRaw };
+  return { ...marker(), rawContent: Option.some(rawContent), closeRaw: Option.some(closeRaw) };
 });
 
 /** The lower-cased tag name (see `tagName`) starting at `i`; `""` when there is none. */
@@ -1544,6 +1556,12 @@ function shiftSpans<A>(value: A, by: number): A {
     // SAFETY: each element is replaced by a copy of the same shape, so the
     // array keeps its type.
     return Arr.map(value, (item: unknown) => shiftSpans(item, by)) as A;
+  }
+  if (Option.isOption(value)) {
+    // SAFETY: an `Option` field (`Param.name`, `Argument.default`, …) is
+    // rebuilt as an `Option` of a same-shape copy, so it keeps its type; a
+    // spread copy would lose the `Option` prototype.
+    return Option.map(value, (wrapped: unknown) => shiftSpans(wrapped, by)) as A;
   }
   if (!P.isObject(value) || P.isFunction(value)) return value;
   const fields: R.ReadonlyRecord<string, unknown> = { ...value };

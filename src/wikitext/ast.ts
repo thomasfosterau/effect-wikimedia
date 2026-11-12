@@ -26,6 +26,7 @@
  */
 
 import * as HashSet from "effect/HashSet";
+import type * as Option from "effect/Option";
 
 /** A half-open source range in UTF-16 code-unit offsets: `[start, end)`. */
 export interface Span {
@@ -259,11 +260,11 @@ export interface Argument {
   /** The fragment between `{{{` and the first top-level `|` or `}}}`, verbatim. */
   readonly name: readonly Node[];
   /**
-   * The fragment after the first top-level `|`, up to `}}}`; `undefined`
+   * The fragment after the first top-level `|`, up to `}}}`; `None`
    * when there is no `|`, and empty for `{{{x|}}}`. A later `|` stays in it
    * as text, where MediaWiki would drop everything after it.
    */
-  readonly default: readonly Node[] | undefined;
+  readonly default: Option.Option<readonly Node[]>;
 }
 
 /**
@@ -276,10 +277,10 @@ export interface Argument {
 export interface Param {
   /**
    * The fragment before the first top-level `=`, whitespace included;
-   * `undefined` for a positional parameter. {@link paramName} reads it as
+   * `None` for a positional parameter. {@link paramName} reads it as
    * trimmed text.
    */
-  readonly name: readonly Node[] | undefined;
+  readonly name: Option.Option<readonly Node[]>;
   /**
    * The fragment after the first top-level `=` (the whole parameter when
    * positional), up to
@@ -342,9 +343,9 @@ export interface ExternalLink {
   readonly url: string;
   /**
    * Everything after the URL up to the closing `]`, separating whitespace
-   * included; `undefined` when `]` follows the URL directly.
+   * included; `None` when `]` follows the URL directly.
    */
-  readonly label: readonly Node[] | undefined;
+  readonly label: Option.Option<readonly Node[]>;
 }
 
 /**
@@ -401,11 +402,11 @@ export interface AutoLink {
  *   {@link EXTENSION_TAGS}) own their content: the text between the open
  *   and close tags is *not* parsed as wikitext but kept raw in
  *   {@link rawContent}. When no matching close is found the tag is
- *   open-only (`rawContent` and `closeRaw` are `undefined`).
+ *   open-only (`rawContent` and `closeRaw` are `None`).
  * - **Presentational tags** (`div`, `span`, `br`, `b`, … — anything else)
  *   are flat markers: a `<div>` and its `</div>` are two separate nodes and
  *   the content between them is parsed as ordinary wikitext. These always
- *   have `rawContent: undefined`.
+ *   have `rawContent` `None`.
  *
  * `raw` is the verbatim opening (or closing) tag text; it is the whole
  * serialization for a marker node.
@@ -436,12 +437,12 @@ export interface Tag {
   /**
    * An extension tag's body verbatim, unparsed (`""` when empty), ending at
    * the first matching close tag since extension tags don't nest.
-   * `undefined` for every marker, including a self-closing or unclosed
+   * `None` for every marker, including a self-closing or unclosed
    * extension tag.
    */
-  readonly rawContent: string | undefined;
-  /** Verbatim closing tag for an extension tag (`</ref>`), else `undefined`. */
-  readonly closeRaw: string | undefined;
+  readonly rawContent: Option.Option<string>;
+  /** Verbatim closing tag for an extension tag (`</ref>`), else `None`. */
+  readonly closeRaw: Option.Option<string>;
 }
 
 /**
@@ -536,7 +537,7 @@ export interface TableCaption {
    * `0` for a caption before any row, and `rows.length` for one after the
    * last. A caption after a row or cell ends that row, as an HTML parser
    * closes the row at the `<caption>` MediaWiki emits there; cells after it
-   * open a new row, with no `|-` (`open` `undefined`) unless one is written.
+   * open a new row, with no `|-` (`open` `None`) unless one is written.
    * The pieces of one `|+` line share a `row`. {@link serialize} writes the
    * caption just before that row; captions sharing a `row` keep their order
    * in {@link Table.captions}.
@@ -545,11 +546,11 @@ export interface TableCaption {
   /**
    * The text between `|+` (or `||`) and the first `|` on its line outside a template,
    * argument, wikilink, comment or extension tag, verbatim and untrimmed;
-   * `undefined` when there is no such `|` or a `[[` or `-{` outside those
+   * `None` when there is no such `|` or a `[[` or `-{` outside those
    * comes before it. In `|+ {{flag|France}} results` there is none, so the
    * template is content.
    */
-  readonly attrs: string | undefined;
+  readonly attrs: Option.Option<string>;
   /**
    * The caption as wikitext, after the `|+`, `||` or the attribute `|`. It
    * ends at the next `||` on the line; the line's last caption runs on up to
@@ -561,7 +562,7 @@ export interface TableCaption {
 /**
  * One table row. Rows are separated by `|-`; the table's very first row,
  * and a row whose cells follow a caption (see {@link TableCaption.row}),
- * need no explicit marker (`open` is `undefined` for such an implicit row —
+ * need no explicit marker (`open` is `None` for such an implicit row —
  * distinct from an explicit `|-` with no attribute text, which is its line
  * break, `"\n"`).
  *
@@ -579,9 +580,9 @@ export interface TableRow {
   readonly span: Span;
   /**
    * The verbatim text after `|-`: attributes, line break and any filler
-   * lines. `undefined` for the implicit first row.
+   * lines. `None` for the implicit first row.
    */
-  readonly open: string | undefined;
+  readonly open: Option.Option<string>;
   /**
    * The row's cells in source order, header and data cells mixed; empty for
    * a `|-` with no cell after it.
@@ -605,7 +606,7 @@ export interface TableRow {
  * tag doesn't count (see {@link Table}), so `| {{flag|France}}` is all
  * content. Nor is there a split when a `[[` or a `-{` (LanguageConverter
  * markup, `-{ … }-`) outside those comes before the `|`: the whole thing is
- * content and `attrs` is `undefined` (MediaWiki's guard, `/\[\[|-\{/`,
+ * content and `attrs` is `None` (MediaWiki's guard, `/\[\[|-\{/`,
  * against reading the text around a wikilink or a conversion rule as
  * attributes). `-{ … }-` is not otherwise special: as in MediaWiki, a `|`,
  * `||` or line break inside it still counts.
@@ -634,12 +635,12 @@ export interface TableCell {
   /**
    * The text between the marker and the first `|` in the cell's part of its
    * opening line outside a template, argument, wikilink, comment or
-   * extension tag, verbatim and untrimmed; `undefined` when there is no such
+   * extension tag, verbatim and untrimmed; `None` when there is no such
    * `|` or a `[[` or `-{` outside those comes before it. For
    * `| style="x" | {{flag|France}}` it is `' style="x" '`; for
-   * `| {{flag|France}}` it is `undefined`.
+   * `| {{flag|France}}` it is `None`.
    */
-  readonly attrs: string | undefined;
+  readonly attrs: Option.Option<string>;
   /**
    * The cell as wikitext, after the marker or the attribute `|`. It ends at
    * the next `!!`/`||` on the line outside a template, argument, wikilink,

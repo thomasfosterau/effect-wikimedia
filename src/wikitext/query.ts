@@ -36,11 +36,11 @@ const childFragments: (node: Node) => readonly (readonly Node[])[] = Match.type<
     Heading: (node) => [node.title],
     Template: (node) => [
       node.name,
-      ...node.params.flatMap((p) => (p.name ? [p.name, p.value] : [p.value])),
+      ...node.params.flatMap((p) => [...Option.toArray(p.name), p.value]),
     ],
-    Argument: (node) => (node.default === undefined ? [node.name] : [node.name, node.default]),
+    Argument: (node) => [node.name, ...Option.toArray(node.default)],
     Wikilink: (node) => [node.target, ...node.segments],
-    ExternalLink: (node) => (node.label === undefined ? [] : [node.label]),
+    ExternalLink: (node) => Option.toArray(node.label),
     Table: (node) => [
       ...node.captions.map((c) => c.content),
       ...node.rows.flatMap((r) => r.cells.map((c) => c.content)),
@@ -119,7 +119,7 @@ export function findTemplates(input: Fragment, name?: string): Template[] {
 
 /** A parameter's name as trimmed plain text, or `None` when positional. */
 export function paramName(param: Param): Option.Option<string> {
-  return Option.map(Option.fromUndefinedOr(param.name), (name) => serializeNodes(name).trim());
+  return Option.map(param.name, (name) => serializeNodes(name).trim());
 }
 
 /** A parameter's value as trimmed plain text. */
@@ -400,14 +400,14 @@ function makeStripper(
           onNonEmpty: (segments) => segments.map(stripNodes).join("|"),
         });
       },
-      ExternalLink: (node) => (node.label === undefined ? "" : stripNodes(node.label).trim()),
+      ExternalLink: (node) =>
+        Option.match(node.label, { onNone: () => "", onSome: (label) => stripNodes(label).trim() }),
       AutoLink: (node) => node.url,
       Tag: (node) => {
         if (node.name === "br") return "\n";
-        if (node.rawContent !== undefined && HashSet.has(STRIP_KEEP_RAW, node.name)) {
-          return node.rawContent;
-        }
-        return "";
+        return HashSet.has(STRIP_KEEP_RAW, node.name)
+          ? Option.getOrElse(node.rawContent, () => "")
+          : "";
       },
       Table: (node) => {
         const caption = node.captions.map((c) => stripNodes(c.content)).join(" ");
@@ -431,7 +431,7 @@ const stripDefault = makeStripper(() => "", CANONICAL_HIDDEN_PREFIXES);
 function renderContext(template: Template, strip: Strip): TemplateRenderContext {
   const param = (key: string | number): Option.Option<string> =>
     Option.map(HashMap.get(effectiveParams(template), String(key)), (p) =>
-      p.name === undefined ? strip(p.value) : strip(p.value).trim(),
+      Option.isNone(p.name) ? strip(p.value) : strip(p.value).trim(),
     );
   return { strip, param };
 }
