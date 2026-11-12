@@ -644,3 +644,60 @@ describe("Action.getHiddenLinkPrefixes (#208)", () => {
     expect(urls).toEqual([]);
   });
 });
+
+describe("Action.getSiteTextConfig (#220)", () => {
+  // A cut-down dewiki siteinfo answer to all four `siprop`s at once.
+  const dewiki = {
+    query: {
+      namespaces: {
+        "6": { id: 6, canonical: "File", "*": "Datei" },
+        "14": { id: 14, canonical: "Category", "*": "Kategorie" },
+      },
+      namespacealiases: [{ id: 6, "*": "Bild" }],
+      interwikimap: [{ prefix: "fr", language: "français" }, { prefix: "wikt" }],
+      magicwords: [{ name: "redirect", aliases: ["#WEITERLEITUNG", "#REDIRECT"] }],
+    },
+  };
+
+  it("gets both values in one request, as the two single calls normalise them", async () => {
+    const { urls, layer } = stubRouter({ "meta=siteinfo": { status: 200, body: dewiki } });
+    const config = await run(layer, Action.getSiteTextConfig("de.wikipedia.org"));
+    expect(config).toEqual({
+      hiddenLinkPrefixes: ["File", "Datei", "Category", "Kategorie", "Bild", "fr"],
+      redirectAliases: ["#WEITERLEITUNG", "#REDIRECT"],
+    });
+    expect(config.hiddenLinkPrefixes).toEqual(Action.normaliseHiddenLinkPrefixes(dewiki));
+    expect(config.redirectAliases).toEqual(Action.normaliseRedirectAliases(dewiki));
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0] ?? "").searchParams.get("siprop")).toBe(
+      "namespaces|namespacealiases|interwikimap|magicwords",
+    );
+  });
+
+  it("feeds both Wikitext queries", async () => {
+    const { layer } = stubRouter({ "meta=siteinfo": { status: 200, body: dewiki } });
+    const { hiddenLinkPrefixes, redirectAliases } = await run(
+      layer,
+      Action.getSiteTextConfig("de.wikipedia.org"),
+    );
+    const doc = Wikitext.parse("#weiterleitung [[Berlin]] [[Datei:x.jpg|thumb|Bild]]");
+    expect(Wikitext.redirectTarget(doc, { aliases: redirectAliases })).toEqual(
+      Option.some("Berlin"),
+    );
+    expect(Wikitext.stripToText(doc, { hiddenLinkPrefixes })).not.toContain("Bild");
+  });
+
+  it("gives empty lists for an empty query, and fails RequestFailed on a malformed one", async () => {
+    expect(Action.normaliseSiteTextConfig({})).toEqual({
+      hiddenLinkPrefixes: [],
+      redirectAliases: [],
+    });
+    const { layer } = stubRouter({
+      "meta=siteinfo": { status: 200, body: { query: { magicwords: { redirect: "#R" } } } },
+    });
+    await expectFailureInstanceOf(
+      toEffect(layer, Action.getSiteTextConfig("de.wikipedia.org")),
+      Core.RequestFailed,
+    );
+  });
+});

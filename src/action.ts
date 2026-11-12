@@ -735,6 +735,16 @@ const SiteInterwiki = Schema.Struct({
   localinterwiki: Schema.optional(Schema.Unknown),
 });
 
+/** The `query` fields `siprop=namespaces|namespacealiases|interwikimap` returns. */
+const siteinfoLinkFields = {
+  /** The wiki's namespaces, keyed by namespace number. */
+  namespaces: Schema.optional(Schema.Record(Schema.String, SiteNamespace)),
+  /** The wiki's namespace aliases, such as `Image` for File. */
+  namespacealiases: Schema.optional(Schema.Array(SiteNamespaceAlias)),
+  /** The wiki's interwiki prefixes. */
+  interwikimap: Schema.optional(Schema.Array(SiteInterwiki)),
+};
+
 /**
  * Lenient schema for the
  * `action=query&meta=siteinfo&siprop=namespaces|namespacealiases|interwikimap`
@@ -746,16 +756,7 @@ const SiteInterwiki = Schema.Struct({
  */
 export const SiteinfoResponse = Schema.Struct({
   /** The query result; absent on an error response. */
-  query: Schema.optional(
-    Schema.Struct({
-      /** The wiki's namespaces, keyed by namespace number. */
-      namespaces: Schema.optional(Schema.Record(Schema.String, SiteNamespace)),
-      /** The wiki's namespace aliases, such as `Image` for File. */
-      namespacealiases: Schema.optional(Schema.Array(SiteNamespaceAlias)),
-      /** The wiki's interwiki prefixes. */
-      interwikimap: Schema.optional(Schema.Array(SiteInterwiki)),
-    }),
-  ),
+  query: Schema.optional(Schema.Struct(siteinfoLinkFields)),
 });
 export type SiteinfoResponse = typeof SiteinfoResponse.Type;
 
@@ -852,6 +853,12 @@ const SiteMagicWord = Schema.Struct({
   aliases: lenientField(lenientArray(Schema.String)),
 });
 
+/** The `query` field `siprop=magicwords` returns. */
+const siteinfoMagicWordFields = {
+  /** The wiki's magic words, each with its spellings. */
+  magicwords: Schema.optional(Schema.Array(SiteMagicWord)),
+};
+
 /**
  * Lenient schema for the `action=query&meta=siteinfo&siprop=magicwords`
  * response envelope: the decode step {@link getRedirectAliases} runs before
@@ -862,12 +869,7 @@ const SiteMagicWord = Schema.Struct({
  */
 export const MagicWordsResponse = Schema.Struct({
   /** The query result; absent on an error response. */
-  query: Schema.optional(
-    Schema.Struct({
-      /** The wiki's magic words, each with its spellings. */
-      magicwords: Schema.optional(Schema.Array(SiteMagicWord)),
-    }),
-  ),
+  query: Schema.optional(Schema.Struct(siteinfoMagicWordFields)),
 });
 export type MagicWordsResponse = typeof MagicWordsResponse.Type;
 
@@ -936,4 +938,82 @@ export const getRedirectAliases = Effect.fn("Action.getRedirectAliases")(functio
     retry ?? DEFAULT_RETRY_OPTIONS,
   );
   return normaliseRedirectAliases(response);
+});
+
+// ── Both, in one request (#220) ──────────────────────────────────────────
+
+/**
+ * Lenient schema for the
+ * `action=query&meta=siteinfo&siprop=namespaces|namespacealiases|interwikimap|magicwords`
+ * response envelope: the decode step {@link getSiteTextConfig} runs before
+ * {@link normaliseSiteTextConfig}. Its `query` holds the fields of both
+ * {@link SiteinfoResponse} and {@link MagicWordsResponse}, with the same
+ * leniency.
+ */
+export const SiteTextConfigResponse = Schema.Struct({
+  /** The query result; absent on an error response. */
+  query: Schema.optional(Schema.Struct({ ...siteinfoLinkFields, ...siteinfoMagicWordFields })),
+});
+export type SiteTextConfigResponse = typeof SiteTextConfigResponse.Type;
+
+/**
+ * A wiki's settings for reading its wikitext as text: the two values the
+ * `Wikitext` queries take per wiki, from one siteinfo request.
+ */
+export interface SiteTextConfig {
+  /**
+   * The link prefixes whose wikilinks render outside the prose, as
+   * {@link getHiddenLinkPrefixes} returns them, for
+   * {@link Wikitext.StripToTextOptions.hiddenLinkPrefixes}.
+   */
+  readonly hiddenLinkPrefixes: readonly string[];
+  /**
+   * The spellings of the redirect magic word, as {@link getRedirectAliases}
+   * returns them, for {@link Wikitext.RedirectTargetOptions.aliases}.
+   */
+  readonly redirectAliases: readonly string[];
+}
+
+/**
+ * Normalises a `SiteTextConfigResponse` to both values:
+ * {@link normaliseHiddenLinkPrefixes} and {@link normaliseRedirectAliases}
+ * of the same response.
+ */
+export function normaliseSiteTextConfig(response: SiteTextConfigResponse): SiteTextConfig {
+  return {
+    hiddenLinkPrefixes: normaliseHiddenLinkPrefixes(response),
+    redirectAliases: normaliseRedirectAliases(response),
+  };
+}
+
+/**
+ * Fetches both of a wiki's text settings, its hidden link prefixes and its
+ * redirect spellings, in one Action API request
+ * (`meta=siteinfo&siprop=namespaces|namespacealiases|interwikimap|magicwords`),
+ * where {@link getHiddenLinkPrefixes} and {@link getRedirectAliases} make one
+ * each:
+ *
+ * ```ts
+ * const { hiddenLinkPrefixes, redirectAliases } = yield* Action.getSiteTextConfig("de.wikipedia.org");
+ * Wikitext.stripToText(doc, { hiddenLinkPrefixes });
+ * Wikitext.redirectTarget(doc, { aliases: redirectAliases });
+ * ```
+ *
+ * A wiki's settings change rarely, so fetch them once per wiki and reuse
+ * them. Fails as {@link getHiddenLinkPrefixes} does.
+ */
+export const getSiteTextConfig = Effect.fn("Action.getSiteTextConfig")(function* (
+  host: string,
+  retry?: RetryOptions,
+) {
+  const client = yield* WikimediaClient;
+  const response = yield* client.getJson(
+    actionRequest(host, "query", {
+      meta: "siteinfo",
+      siprop: "namespaces|namespacealiases|interwikimap|magicwords",
+    }),
+    SiteTextConfigResponse,
+    retry ?? DEFAULT_RETRY_OPTIONS,
+  );
+  return normaliseSiteTextConfig(response);
 });
