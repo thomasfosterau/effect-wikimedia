@@ -36,7 +36,7 @@ const fixtureNdjson = readFileSync(
 const BIG_ITEM_COUNT = 300_000;
 
 /** JSON text for a test label or an inline fixture, through the Schema JSON codec. */
-const Json = Schema.fromJsonString(Schema.Unknown);
+const Json = Schema.fromJsonString(Schema.Json);
 const toJson = Schema.encodeSync(Json);
 const parseJson = Schema.decodeSync(Json);
 
