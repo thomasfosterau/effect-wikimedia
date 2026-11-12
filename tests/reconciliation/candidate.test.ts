@@ -34,7 +34,7 @@ describe("normaliseLabelQuery", () => {
     expect(Option.getOrNull(normaliseLabelQuery("  Douglas   Adams \n"))).toBe("Douglas Adams");
   });
 
-  it("returns null for whitespace-only or non-string input", () => {
+  it("returns null for whitespace-only or missing input", () => {
     expect(Option.getOrNull(normaliseLabelQuery("   "))).toBeNull();
     // SAFETY: deliberately ill-typed — a JS caller can pass anything, and
     // the validator re-checks at runtime.
@@ -104,10 +104,9 @@ describe("sanitiseCandidateText", () => {
     expect(Option.getOrNull(sanitiseCandidateText("  hello   world \n"))).toBe("hello world");
   });
 
-  it("returns null for whitespace-only or non-string input", () => {
+  it("returns null for whitespace-only or missing input", () => {
     expect(Option.getOrNull(sanitiseCandidateText("   "))).toBeNull();
     expect(Option.getOrNull(sanitiseCandidateText(undefined))).toBeNull();
-    expect(Option.getOrNull(sanitiseCandidateText(42))).toBeNull();
   });
 
   it("clamps an over-long value to the max field length", () => {
@@ -300,7 +299,6 @@ describe("normaliseTimeValue", () => {
   it("rejects anything that isn't a Wikidata-shaped timestamp", () => {
     expect(Option.getOrNull(normaliseTimeValue("yesterday"))).toBeNull();
     expect(Option.getOrNull(normaliseTimeValue("1952-03-11"))).toBeNull();
-    expect(Option.getOrNull(normaliseTimeValue(42))).toBeNull();
   });
 });
 
@@ -325,7 +323,6 @@ describe("normaliseCommonsImage", () => {
     expect(Option.getOrNull(normaliseCommonsImage("evil#name.jpg"))).toBeNull();
     expect(Option.getOrNull(normaliseCommonsImage("a?b.jpg"))).toBeNull();
     expect(Option.getOrNull(normaliseCommonsImage(""))).toBeNull();
-    expect(Option.getOrNull(normaliseCommonsImage(null))).toBeNull();
   });
 
   it.each([

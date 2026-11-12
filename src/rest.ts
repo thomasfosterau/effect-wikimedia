@@ -18,10 +18,10 @@
 
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import {
   DEFAULT_RETRY_OPTIONS,
+  lenientField,
   requireRevisionId,
   requireTitle,
   type RetryOptions,
@@ -34,16 +34,16 @@ import {
 
 const License = Schema.Struct({
   /** The license's URL (MediaWiki's `$wgRightsUrl`). */
-  url: Schema.optional(Schema.Unknown),
+  url: lenientField(Schema.String),
   /** The license's display name (MediaWiki's `$wgRightsText`); not read. */
   title: Schema.optional(Schema.Unknown),
 });
 
 const LatestRevision = Schema.Struct({
   /** The id of the page's latest revision. */
-  id: Schema.optional(Schema.Unknown),
+  id: lenientField(Schema.Number),
   /** When the latest revision was saved, as an ISO 8601 UTC timestamp (`"2024-01-01T00:00:00Z"`). */
-  timestamp: Schema.optional(Schema.Unknown),
+  timestamp: lenientField(Schema.String),
 });
 
 /**
@@ -58,16 +58,16 @@ const LatestRevision = Schema.Struct({
  */
 export const PageMetadataResponse = Schema.Struct({
   /** The page id. */
-  id: Schema.optional(Schema.Unknown),
+  id: lenientField(Schema.Number),
   /**
    * The title in database-key form, with underscores for spaces and no
    * percent-encoding (`"Douglas_Adams"`).
    */
-  key: Schema.optional(Schema.Unknown),
+  key: lenientField(Schema.String),
   /** The title in display form, with spaces (`"Douglas Adams"`). */
-  title: Schema.optional(Schema.Unknown),
+  title: lenientField(Schema.String),
   /** The content model of the page's latest revision (`"wikitext"`, `"json"`, …). */
-  content_model: Schema.optional(Schema.Unknown),
+  content_model: lenientField(Schema.String),
   /** The page's latest revision: its id and when it was saved. */
   latest: Schema.optional(LatestRevision),
   /** The wiki's content license, which is site-wide rather than per page. */
@@ -93,24 +93,24 @@ export type PageMetadataResponse = typeof PageMetadataResponse.Type;
  */
 export const RevisionMetadataResponse = Schema.Struct({
   /** The revision id. */
-  id: Schema.optional(Schema.Unknown),
+  id: lenientField(Schema.Number),
   /** The size of the revision's content, in bytes. */
-  size: Schema.optional(Schema.Unknown),
+  size: lenientField(Schema.Number),
   /** `true` when the editor marked the edit as minor. */
-  minor: Schema.optional(Schema.Unknown),
+  minor: lenientField(Schema.Boolean),
   /** When the revision was saved, as an ISO 8601 UTC timestamp (`"2024-01-01T00:00:00Z"`). */
-  timestamp: Schema.optional(Schema.Unknown),
+  timestamp: lenientField(Schema.String),
   /** The revision's content model (`"wikitext"`, `"json"`, …). */
-  content_model: Schema.optional(Schema.Unknown),
+  content_model: lenientField(Schema.String),
   /** The page the revision belongs to. */
   page: Schema.optional(
     Schema.Struct({
       /** The page id. */
-      id: Schema.optional(Schema.Unknown),
+      id: lenientField(Schema.Number),
       /** The page's current title in database-key form, with underscores for spaces; not read. */
       key: Schema.optional(Schema.Unknown),
       /** The page's current title in display form, with spaces. */
-      title: Schema.optional(Schema.Unknown),
+      title: lenientField(Schema.String),
     }),
   ),
   /** The wiki's content license, which is site-wide rather than per revision. */
@@ -237,9 +237,9 @@ export function normalisePageMetadata(response: PageMetadataResponse, title: str
     title: sanitiseText(response.title) ?? title,
     contentModel: Option.fromNullOr(sanitiseText(response.content_model)),
     latestRevisionId: Option.fromNullOr(toNonNegativeInt(response.latest?.id)),
-    latestTimestamp: P.isString(response.latest?.timestamp)
-      ? Option.some(response.latest.timestamp.slice(0, 40))
-      : Option.none(),
+    latestTimestamp: Option.map(Option.fromUndefinedOr(response.latest?.timestamp), (timestamp) =>
+      timestamp.slice(0, 40),
+    ),
     licenseUrl: Option.fromNullOr(sanitiseText(response.license?.url)),
   };
 }
@@ -254,10 +254,10 @@ export function normaliseRevisionMetadata(
     pageId: Option.fromNullOr(toNonNegativeInt(response.page?.id)),
     pageTitle: Option.fromNullOr(sanitiseText(response.page?.title)),
     size: Option.fromNullOr(toNonNegativeInt(response.size, 100_000_000)),
-    minor: P.isBoolean(response.minor) ? Option.some(response.minor) : Option.none(),
-    timestamp: P.isString(response.timestamp)
-      ? Option.some(response.timestamp.slice(0, 40))
-      : Option.none(),
+    minor: Option.fromUndefinedOr(response.minor),
+    timestamp: Option.map(Option.fromUndefinedOr(response.timestamp), (timestamp) =>
+      timestamp.slice(0, 40),
+    ),
     contentModel: Option.fromNullOr(sanitiseText(response.content_model)),
     licenseUrl: Option.fromNullOr(sanitiseText(response.license?.url)),
   };

@@ -62,7 +62,7 @@ export class SourceError extends Schema.TaggedError<SourceError>()("SourceError"
   description: Schema.String,
 }) {}
 
-const describe = (reason: unknown): string => (P.isError(reason) ? reason.message : String(reason));
+const describe = (reason: Error | string): string => (P.isString(reason) ? reason : reason.message);
 
 /**
  * Turns an effect-produced web stream back into a Node `Readable`, for a Node
@@ -80,12 +80,15 @@ const webToNode = (web: WebByteStream): Readable => {
   return Readable.fromWeb(web);
 };
 
-const sourceError = (reason: unknown): SourceError =>
+const sourceError = (reason: Error | string): SourceError =>
   new SourceError({ description: `dumps/source-read-failed: ${describe(reason)}` });
 
 /** Runs a synchronous Node call, failing with a {@link SourceError} if it throws. */
 const tryNode = <A>(step: () => A): Effect.Effect<A, SourceError> =>
-  Effect.try({ try: step, catch: sourceError });
+  Effect.try({
+    try: step,
+    catch: (thrown) => sourceError(P.isError(thrown) ? thrown : String(thrown)),
+  });
 
 // ── Structural stream types ──────────────────────────────────────────────
 
@@ -202,7 +205,7 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefi
   try {
     return step();
   } catch (error) {
-    callback(P.isError(error) ? error : new StageError({ message: describe(error) }));
+    callback(P.isError(error) ? error : new StageError({ message: String(error) }));
     return undefined;
   }
 };
@@ -383,10 +386,10 @@ const destroyOnReturn = (readable: NodeReadableLike): AsyncIterable<Uint8Array> 
     const iterator = readable[Symbol.asyncIterator]();
     return {
       next: () => iterator.next(),
-      return: (value?: unknown) => {
+      return: () => {
         destroyReadable(readable);
-        iterator.return?.(value).catch(() => undefined);
-        return Promise.resolve({ done: true, value });
+        iterator.return?.().catch(() => undefined);
+        return Promise.resolve({ done: true, value: undefined });
       },
     };
   },
@@ -442,7 +445,9 @@ const openNodeReadable = (
       // this step and that one), and it is where teardown waits, bounded, for
       // the Readable to close (#94, #235).
       const readable = yield* Effect.acquireRelease(open, (opened) => destroyAndAwaitClose(opened));
-      return Stream.fromAsyncIterable(destroyOnReturn(readable), sourceError);
+      return Stream.fromAsyncIterable(destroyOnReturn(readable), (thrown) =>
+        sourceError(P.isError(thrown) ? thrown : String(thrown)),
+      );
     }),
   );
 

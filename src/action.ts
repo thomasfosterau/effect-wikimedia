@@ -38,7 +38,6 @@
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
@@ -56,16 +55,16 @@ import {
 } from "./core.ts";
 
 /** `Core.sanitiseText`, as an `Option`: `None` for a value it rejects. */
-const optionalText = (value: unknown): Option.Option<string> =>
+const optionalText = (value?: string): Option.Option<string> =>
   Option.fromNullOr(sanitiseText(value));
 
 /** `Core.toNonNegativeInt`, as an `Option`: `None` for a value it rejects. */
-const optionalInt = (value: unknown, max?: number): Option.Option<number> =>
+const optionalInt = (value?: number, max?: number): Option.Option<number> =>
   Option.fromNullOr(toNonNegativeInt(value, max));
 
 /** A timestamp string as the API sent it, cut to 40 characters; `None` unless it is a string. */
-const timestampOf = (value: unknown): Option.Option<string> =>
-  P.isString(value) ? Option.some(value.slice(0, 40)) : Option.none();
+const timestampOf = (value?: string): Option.Option<string> =>
+  Option.map(Option.fromUndefinedOr(value), (timestamp) => timestamp.slice(0, 40));
 
 /** Builds the fixed-path `/w/api.php` request for a given `action` and its params. */
 function actionRequest(
@@ -83,14 +82,14 @@ const RevisionSlot = Schema.Struct({
   contentmodel: Schema.optional(Schema.Unknown),
   // The Action API's wikitext slot content key is the literal `"*"`.
   /** The slot's content; absent when the revision's text is hidden. */
-  "*": Schema.optional(Schema.Unknown),
+  "*": lenientField(Schema.String),
 });
 
 const Revision = Schema.Struct({
   /** The revision ID. */
-  revid: Schema.optional(Schema.Unknown),
+  revid: lenientField(Schema.Number),
   /** When the revision was saved, as an ISO 8601 UTC string. */
-  timestamp: Schema.optional(Schema.Unknown),
+  timestamp: lenientField(Schema.String),
   /** The revision's content slots; only `main` is requested. */
   slots: Schema.optional(
     Schema.Struct({
@@ -102,9 +101,9 @@ const Revision = Schema.Struct({
 
 const WikitextPage = Schema.Struct({
   /** The page ID; absent for a missing, invalid or special title. */
-  pageid: Schema.optional(Schema.Unknown),
+  pageid: lenientField(Schema.Number),
   /** The page title, in prefixed display form. */
-  title: Schema.optional(Schema.Unknown),
+  title: lenientField(Schema.String),
   /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
   /** The latest revision, as a one-element array; absent for a missing page. */
@@ -183,7 +182,7 @@ export function normaliseWikitext(
   if (page === undefined) return Option.none();
   const revision = page.revisions?.[0];
   const wikitext = revision?.slots?.main?.["*"];
-  if (!P.isString(wikitext)) return Option.none();
+  if (wikitext === undefined) return Option.none();
   return Option.some({
     pageId: optionalInt(page.pageid),
     title: sanitiseText(page.title) ?? title,
@@ -221,9 +220,9 @@ export const getWikitext = Effect.fn("Action.getWikitext")(function* (
 
 const MetadataPage = Schema.Struct({
   /** The page ID; absent for a missing, invalid or special title. */
-  pageid: Schema.optional(Schema.Unknown),
+  pageid: lenientField(Schema.Number),
   /** The page title, in prefixed display form. */
-  title: Schema.optional(Schema.Unknown),
+  title: lenientField(Schema.String),
   /** Present (as `""`) when the page does not exist. */
   missing: Schema.optional(Schema.Unknown),
   /** Present (as `""`) when MediaWiki rejects the title; the entry then has `invalidreason`. */
@@ -231,15 +230,15 @@ const MetadataPage = Schema.Struct({
   /** Present (as `""`) for a `Special:` or `Media:` title, which names no stored page. */
   special: Schema.optional(Schema.Unknown),
   /** The page's content model. */
-  contentmodel: Schema.optional(Schema.Unknown),
+  contentmodel: lenientField(Schema.String),
   /** MediaWiki's code for the page's content language. */
-  pagelanguage: Schema.optional(Schema.Unknown),
+  pagelanguage: lenientField(Schema.String),
   /** When the page was last touched, as an ISO 8601 UTC string. */
-  touched: Schema.optional(Schema.Unknown),
+  touched: lenientField(Schema.String),
   /** The ID of the page's latest revision. */
-  lastrevid: Schema.optional(Schema.Unknown),
+  lastrevid: lenientField(Schema.Number),
   /** The latest revision's size in bytes. */
-  length: Schema.optional(Schema.Unknown),
+  length: lenientField(Schema.Number),
   /**
    * The page's full URL (`fullurl`, requested with `inprop=url`); not
    * MediaWiki's separate `canonicalurl`.
@@ -402,13 +401,13 @@ export const MAX_SEARCH_RESULTS = 50;
 
 const SearchHit = Schema.Struct({
   /** The matching page's ID. */
-  pageid: Schema.optional(Schema.Unknown),
+  pageid: lenientField(Schema.Number),
   /** The matching page's title, in prefixed display form. */
-  title: Schema.optional(Schema.Unknown),
+  title: lenientField(Schema.String),
   /** An HTML excerpt around the match. */
-  snippet: Schema.optional(Schema.Unknown),
+  snippet: lenientField(Schema.String),
   /** The page's word count. */
-  wordcount: Schema.optional(Schema.Unknown),
+  wordcount: lenientField(Schema.Number),
 });
 
 /**
@@ -514,11 +513,11 @@ const ParseSection = Schema.Struct({
   /** The heading's nesting depth in the table of contents; not read. */
   tocLevel: Schema.optional(Schema.Unknown),
   /** The heading level, as a number (`2` for `== x ==`). */
-  hLevel: Schema.optional(Schema.Unknown),
+  hLevel: lenientField(Schema.Union([Schema.Number, Schema.NumberFromString])),
   /** The heading's text, as HTML. */
-  line: Schema.optional(Schema.Unknown),
+  line: lenientField(Schema.String),
   /** The heading's fragment ID. */
-  anchor: Schema.optional(Schema.Unknown),
+  anchor: lenientField(Schema.String),
 });
 
 /** The `tocdata` table of contents, from `prop=tocdata`. */
@@ -530,14 +529,14 @@ const ParseTocData = Schema.Struct({
 /** A link/category/template entry keyed by the wikitext `"*"` (page-title) convention. */
 const TitledEntry = Schema.Struct({
   /** The entry's title (a category's in database form, without its prefix). */
-  "*": Schema.optional(Schema.Unknown),
+  "*": lenientField(Schema.String),
 });
 
 const ParseResult = Schema.Struct({
   /** The parsed page's title, in prefixed display form. */
-  title: Schema.optional(Schema.Unknown),
+  title: lenientField(Schema.String),
   /** The parsed page's ID. */
-  pageid: Schema.optional(Schema.Unknown),
+  pageid: lenientField(Schema.Number),
   /**
    * The page's table of contents (`prop=tocdata`, which replaced
    * `prop=sections`, deprecated in MediaWiki 1.46).
@@ -649,7 +648,7 @@ export interface ParsedPage {
 export const MAX_PARSE_ENTRIES = 500;
 
 function titledEntries(
-  entries: readonly { readonly "*"?: unknown }[] | undefined,
+  entries: readonly { readonly "*"?: string | undefined }[] | undefined,
 ): readonly string[] {
   const titles = Arr.getSomes(Arr.map(entries ?? [], (entry) => optionalText(entry["*"])));
   return Arr.take(titles, MAX_PARSE_ENTRIES);
@@ -663,10 +662,7 @@ export function normaliseParse(response: ParseResponse, title: string): Option.O
     Arr.getSomes(
       Arr.map(parsed.tocdata?.sections ?? [], (section) =>
         Option.map(optionalText(section.line), (sectionTitle): ParsedSection => ({
-          level: optionalInt(
-            P.isString(section.hLevel) ? Number(section.hLevel) : section.hLevel,
-            20,
-          ),
+          level: optionalInt(section.hLevel, 20),
           title: sectionTitle,
           anchor: optionalText(section.anchor),
         })),
@@ -767,7 +763,7 @@ export const MAX_HIDDEN_LINK_PREFIXES = 2000;
 const isHiddenLinkNamespace = (id: number | undefined): boolean => id === 6 || id === 14;
 
 /** A prefix from the response, or `None` when it is not a usable namespace or interwiki name. */
-function linkPrefix(value: string | undefined): Option.Option<string> {
+function linkPrefix(value?: string): Option.Option<string> {
   return Option.filter(
     optionalText(value),
     (prefix) => prefix.length <= 255 && !/[:|[\]{}#<>]/.test(prefix),
@@ -877,7 +873,7 @@ export type MagicWordsResponse = typeof MagicWordsResponse.Type;
 export const MAX_REDIRECT_ALIASES = 100;
 
 /** A spelling from the response, or `None` when it is not a usable redirect word. */
-function redirectAlias(value: string | undefined): Option.Option<string> {
+function redirectAlias(value?: string): Option.Option<string> {
   return Option.filter(optionalText(value), (alias) => alias.length <= 255);
 }
 

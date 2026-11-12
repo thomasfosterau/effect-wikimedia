@@ -32,6 +32,11 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 
 ### By surface
 
+**Core**
+
+- `sanitiseText(value)` takes an optional `string` (`value?: string`) and `toNonNegativeInt(value, max)` an optional `number`, where both took `unknown`. They still return `string | null` and `number | null`. Narrow a value you hold as `unknown` first, or decode it with a schema.
+- `detectMaxlagSignal(body)` takes a `Schema.Json` (what `response.json` yields) rather than `unknown`.
+
 **Action**
 
 - `getWikitext`, `getPageMetadata` and `parsePage` (and `normaliseWikitext`, `normalisePageMetadata`, `normaliseParse`): `T | null` → `Option<T>`.
@@ -42,9 +47,11 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
   - `ParsedSection`: `level`, `anchor`.
   - `ParsedPage`: `pageId`.
 - `SiteinfoResponse` and `MagicWordsResponse` leaves are typed (`number`, `string`) rather than `unknown`. This matters only if you build them by hand.
+- So are the leaves of `WikitextResponse`, `PageMetadataResponse`, `SearchResponse` and `ParseResponse` that the normalisers read (page ids and lengths are `number`; titles, timestamps, snippets and anchors are `string`; a section's `hLevel` is `number`, decoded from a numeric string too). A value of the wrong kind is dropped at decode.
 
 **Rest**
 
+- `PageMetadataResponse` and `RevisionMetadataResponse` leaves are typed (`number`, `string`, `boolean`) rather than `unknown`. This matters only if you build them by hand.
 - `PageMetadata`: `pageId`, `key`, `contentModel`, `latestRevisionId`, `latestTimestamp`, `licenseUrl` are `Option`s.
 - `RevisionMetadata`: `pageId`, `pageTitle`, `size`, `minor`, `timestamp`, `contentModel`, `licenseUrl` are `Option`s.
 
@@ -77,6 +84,7 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 
 - `WikidataCandidate`: `label`, `description` are `Option`s.
 - `normaliseLabelQuery`, `normaliseQid`, `normalisePropertyId`, `normaliseExternalIdValue`, `sanitiseCandidateText`, `normaliseTimeValue`, `normaliseCommonsImage` and each `ExternalIdAuthority.iri` return `Option`.
+- `sanitiseCandidateText` takes an optional `string`, and `normaliseTimeValue` and `normaliseCommonsImage` take `string`, where all three took `unknown`. Decode a value you hold as `unknown` before calling them.
 - `WikidataLookup.enrich` succeeds with `Option<WikidataFacts>`.
 - The stored fact shapes (`WikidataFact`, `DateFact.precision` / `calendar`) still use `null`: they are JSON you persist.
 

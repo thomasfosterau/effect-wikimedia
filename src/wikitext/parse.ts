@@ -1543,7 +1543,7 @@ function shiftSpans<A>(value: A, by: number): A {
   if (Array.isArray(value)) {
     // SAFETY: each element is replaced by a copy of the same shape, so the
     // array keeps its type.
-    return Arr.map(value, (item: unknown) => shiftSpans(item, by)) as A;
+    return Arr.map(value, (item) => shiftSpans(item, by)) as A;
   }
   if (!P.isObject(value) || P.isFunction(value)) return value;
   const fields: R.ReadonlyRecord<string, unknown> = { ...value };
