@@ -4,6 +4,42 @@
 
 0.10 replaces `null` and `undefined` with Effect's `Option` wherever this package reports that a value is missing (#224). It is breaking for every surface, but the change is mechanical: each place you checked for `null` or `undefined`, you now match on an `Option`.
 
+### If you only use `Reconciliation`
+
+Three things change, all from `null` to `Option`. Everything else these apps use is unchanged, including fact fields such as `item.qid`, `identifier.value` and `date.time`:
+
+- `WikidataFact` and its `.match` arms (`Item`, `Identifier`, `Date`, `Image`) and their fields.
+- `WikidataFacts`.
+- `wikidataEntityIri`.
+- `LookupFailed` / `LookupError`.
+- `wikidataLookupLayer`.
+
+```ts
+import * as Option from "effect/Option";
+
+// 1. `WikidataLookup.enrich` succeeds with `Option<WikidataFacts>`, not `WikidataFacts | null`.
+// 0.9
+const facts = yield * lookup.enrich(qid);
+if (facts === null) return notFound();
+render(facts.facts);
+// 0.10
+const facts = yield * lookup.enrich(qid);
+if (Option.isNone(facts)) return notFound();
+render(facts.value.facts);
+
+// 2. `WikidataCandidate.label` and `.description` (from `searchByLabel` / `searchByIdentifier`) are `Option<string>`.
+// 0.9: candidate.label ?? candidate.qid
+Option.getOrElse(candidate.label, () => candidate.qid);
+
+// 3. `normaliseQid` returns `Option<string>`.
+// 0.9: const qid = normaliseQid(input); if (qid === null) …
+const qid = normaliseQid(input);
+if (Option.isNone(qid)) return invalid();
+use(qid.value);
+```
+
+If you store facts, nothing changes there: the fact shapes are persisted JSON and still use `null`, for example `DateFact.precision` and `DateFact.calendar`.
+
 ### The pattern
 
 | 0.9                                | 0.10 (`import * as Option from "effect/Option"`)      |
