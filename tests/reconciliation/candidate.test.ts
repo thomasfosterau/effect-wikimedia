@@ -36,11 +36,9 @@ describe("normaliseLabelQuery", () => {
     expect(Option.getOrNull(normaliseLabelQuery("  Douglas   Adams \n"))).toBe("Douglas Adams");
   });
 
-  it("returns null for whitespace-only or missing input", () => {
+  it("returns null for whitespace-only input", () => {
     expect(Option.getOrNull(normaliseLabelQuery("   "))).toBeNull();
-    // SAFETY: deliberately ill-typed — a JS caller can pass anything, and
-    // the validator re-checks at runtime.
-    expect(Option.getOrNull(normaliseLabelQuery(undefined as never))).toBeNull();
+    expect(Option.getOrNull(normaliseLabelQuery("\t\n\u00a0"))).toBeNull();
   });
 
   it("clamps an over-long query to the max length", () => {

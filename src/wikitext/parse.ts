@@ -50,7 +50,6 @@ import * as Match from "effect/Match";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import {
   type Argument,
@@ -136,21 +135,33 @@ interface SessionState {
    */
   readonly doomed: Int32Array[];
   /**
-   * What each construct opened one level short of {@link MAX_DEPTH} parsed
-   * to, and where it ended, keyed as in `failed` (see `memoFailure`).
-   */
-  readonly deepest: MutableHashMap.MutableHashMap<number, DeepParse>;
-  /**
    * Where each nested table a table's filler steps over ends (see
    * `nestedTableEnd`), keyed by its `{|` line's offset and the region end.
    */
   readonly tableEnds: MutableHashMap.MutableHashMap<number, number>;
 }
 
-/** A construct `memoFailure` remembers (see {@link SessionState.deepest}), and where it ended. */
-interface DeepParse {
-  readonly value: unknown;
+/** A result one parser remembers for the rest of a parse (see `perSession`), and where it ended. */
+interface Remembered<V> {
+  readonly value: V;
   readonly end: number;
+}
+
+/**
+ * A cache that one parser keeps for each parse, keyed as `failed` is:
+ * created on the parse's first use, and dropped with the parse's session.
+ * Each memoised parser makes its own, so a cache holds one parser's results,
+ * of one type.
+ */
+function perSession<V>(): (s: SessionState) => MutableHashMap.MutableHashMap<number, V> {
+  const caches = new WeakMap<SessionState, MutableHashMap.MutableHashMap<number, V>>();
+  return (s) => {
+    const known = caches.get(s);
+    if (known !== undefined) return known;
+    const created = MutableHashMap.empty<number, V>();
+    caches.set(s, created);
+    return created;
+  };
 }
 
 /** A match of a closing delimiter in the source: where it starts, and its length. */
@@ -173,10 +184,13 @@ class Session extends Context.Service<Session, SessionState>()(
 /** A parser over wikitext source that reads the parse's {@link Session}. */
 type WikiParser<A> = Parser.Parser<A, never, Session>;
 
-const session = (state: State): SessionState =>
-  // SAFETY: every `WikiParser` runs only on the cursor `parse` builds, whose
-  // context is `Context.make(Session, …)`; the cursor's own type erases it.
-  Context.get(state.context as Context.Context<Session>, Session);
+/**
+ * The parse's {@link Session}: every `WikiParser` runs only on the cursor
+ * `parse` builds, whose context is `Context.make(Session, …)`. The cursor
+ * types its context as empty, so this reads it as effect-parse's own
+ * `Parser.service` does.
+ */
+const session = (state: State): SessionState => Context.getUnsafe(state.context, Session);
 
 const literal = Token.literal;
 const pipe = literal("|");
@@ -224,12 +238,13 @@ function addFailed(state: State, s: SessionState, pos: number, kind: OpenKind): 
  *
  * One level short of {@link MAX_DEPTH}, `self`'s fragments open nothing, so
  * what it parses depends only on the offset and the region end: there its
- * successes are remembered too (see {@link SessionState.deepest}). Openers
+ * successes are remembered too (in a cache of its own, `perSession`). Openers
  * that close only at the page end reach that level over and over, and a
  * template there with a parameter on every later line would otherwise
  * parse the rest of the page each time (#179).
  */
 function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
+  const deepest = perSession<Remembered<A>>();
   return Parser.make((state) => {
     const s = session(state);
     const pos = state.pos;
@@ -240,16 +255,15 @@ function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
       return a;
     }
     const key = memoKey(state, pos, kind);
-    const known = MutableHashMap.get(s.deepest, key);
+    const cache = deepest(s);
+    const known = MutableHashMap.get(cache, key);
     if (Option.isSome(known)) {
       state.pos = known.value.end;
-      // SAFETY: `key` includes `kind`, and each kind is one parser's: the
-      // value stored under it is what this `self` returned.
-      return known.value.value as A;
+      return known.value.value;
     }
     const a = self.step(state);
     if (a === Input.Fail) addFailed(state, s, pos, kind);
-    else MutableHashMap.set(s.deepest, key, { value: a, end: state.pos });
+    else MutableHashMap.set(cache, key, { value: a, end: state.pos });
     return a;
   });
 }
@@ -261,7 +275,7 @@ function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
  * (under `kind`, as in {@link memoFailure}) and a later tail that reaches
  * one fails at once. One level short of {@link MAX_DEPTH}, where its
  * segments open nothing, a tail that succeeds is remembered from every `|`
- * it passed too (see {@link SessionState.deepest}), and a later one there
+ * it passed too (in a cache of its own, `perSession`), and a later one there
  * that reaches one of them ends as it did.
  *
  * Openers that close only at the page end each nest the next, so they share
@@ -276,22 +290,24 @@ function segmentsThenClose<A>(
 ): WikiParser<A[]> {
   const closing = literal(close);
   const next = Parser.preceded(pipe, segment);
+  const tails = perSession<Remembered<TailFrom<A>>>();
   return Parser.make((state) => {
     const s = session(state);
     const deep = s.depth >= MAX_DEPTH - 1;
+    const cache = deep ? Option.some(tails(s)) : Option.none();
     const passed: number[] = [];
     const segments: A[] = [];
     let tail: Option.Option<A[]> = Option.none();
     repeatWhile(undefined, () => {
       if (hasFailed(state, s, state.pos, kind)) return false;
-      const known = knownTail<A>(state, s, kind, deep);
+      const known = Option.flatMap(cache, (remembered) => knownTail(state, remembered, kind));
       if (Option.isSome(known)) {
-        tail = Option.some(rememberTail(state, s, kind, passed, [...segments, ...known.value]));
+        tail = Option.some(rememberTail(state, cache, kind, passed, [...segments, ...known.value]));
         return false;
       }
       passed.push(state.pos);
       if (closing.step(state) !== Input.Fail) {
-        tail = Option.some(deep ? rememberTail(state, s, kind, passed, segments) : segments);
+        tail = Option.some(rememberTail(state, cache, kind, passed, segments));
         return false;
       }
       const at = state.pos;
@@ -310,45 +326,47 @@ function segmentsThenClose<A>(
 }
 
 /** The tail from one `|` of a remembered one (see `segmentsThenClose`): its segments from there on. */
-interface TailFrom {
-  readonly segments: readonly unknown[];
+interface TailFrom<A> {
+  readonly segments: readonly A[];
   readonly from: number;
 }
 
 /**
  * The segments of the remembered tail of `kind` that passed the cursor (see
  * `segmentsThenClose`), from the cursor on, with the cursor moved to where
- * it ended; `None` when none did, or when not `deep` (one level short of
- * {@link MAX_DEPTH}), where tails are not remembered.
+ * it ended; `None` when none did.
  */
 function knownTail<A>(
   state: State,
-  s: SessionState,
+  cache: MutableHashMap.MutableHashMap<number, Remembered<TailFrom<A>>>,
   kind: OpenKind,
-  deep: boolean,
 ): Option.Option<A[]> {
-  if (!deep) return Option.none();
-  return Option.map(MutableHashMap.get(s.deepest, memoKey(state, state.pos, kind)), (known) => {
+  return Option.map(MutableHashMap.get(cache, memoKey(state, state.pos, kind)), (known) => {
     state.pos = known.end;
-    // SAFETY: `kind` is one tail's, whose parser stored `TailFrom`s of its own `A` segments.
-    const { segments, from } = known.value as TailFrom;
-    // SAFETY: as above, `segments` holds that parser's `A`s.
-    return segments.slice(from) as A[];
+    return known.value.segments.slice(known.value.from);
   });
 }
 
-/** Remembers the tail ending at the cursor from each `|` it `passed` (see `segmentsThenClose`). */
+/**
+ * Remembers the tail ending at the cursor from each `|` it `passed` (see
+ * `segmentsThenClose`), when the tail is one level short of
+ * {@link MAX_DEPTH} (`cache` is `Some`); tails are not remembered elsewhere.
+ */
 function rememberTail<A>(
   state: State,
-  s: SessionState,
+  cache: Option.Option<MutableHashMap.MutableHashMap<number, Remembered<TailFrom<A>>>>,
   kind: OpenKind,
   passed: readonly number[],
   segments: A[],
 ): A[] {
-  Arr.forEach(passed, (pos, from) => {
-    const value: TailFrom = { segments, from };
-    MutableHashMap.set(s.deepest, memoKey(state, pos, kind), { value, end: state.pos });
-  });
+  Option.map(cache, (remembered) =>
+    Arr.forEach(passed, (pos, from) => {
+      MutableHashMap.set(remembered, memoKey(state, pos, kind), {
+        value: { segments, from },
+        end: state.pos,
+      });
+    }),
+  );
   return segments;
 }
 
@@ -985,14 +1003,22 @@ const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
         span,
         header,
         inline: i > 0,
-        // SAFETY: the first piece's marker is the line's `!` or `|`
-        // (`isTableMarker`), every later one the `!!` or `||` `isSep` matched.
-        marker: marker as TableCell["marker"],
+        marker: cellMarker(header, i, marker),
         attrs,
         content,
       })),
   });
 });
+
+/**
+ * A cell piece's marker, by position: the first is the line's own `!` or `|`
+ * (`isTableMarker`), and every later one is the `!!` or `||` the separator
+ * matched (`marker`, its source text).
+ */
+const cellMarker = (header: boolean, index: number, marker: string): TableCell["marker"] => {
+  if (index === 0) return header ? "!" : "|";
+  return marker === "!!" ? "!!" : "||";
+};
 
 /** One item between a table's `{|` line and its `|}`. */
 type TableItem =
@@ -1543,35 +1569,66 @@ export interface ParseOptions {
   readonly offset?: number | undefined;
 }
 
-/** Whether `value` is a {@link Span}. */
-const isSpan = (value: unknown): value is Span =>
-  P.hasProperty(value, "start") &&
-  P.hasProperty(value, "end") &&
-  P.isNumber(value.start) &&
-  P.isNumber(value.end);
-
-/** A copy of `value` with every `span` in it, at any depth, moved `by` code units. */
-function shiftSpans<A>(value: A, by: number): A {
-  if (Array.isArray(value)) {
-    // SAFETY: each element is replaced by a copy of the same shape, so the
-    // array keeps its type.
-    return Arr.map(value, (item) => shiftSpans(item, by)) as A;
-  }
-  if (Option.isOption(value)) {
-    // SAFETY: an `Option` field (`Param.name`, `Argument.default`, …) is
-    // rebuilt as an `Option` of a same-shape copy, so it keeps its type; a
-    // spread copy would lose the `Option` prototype.
-    return Option.map(value, (wrapped: unknown) => shiftSpans(wrapped, by)) as A;
-  }
-  if (!P.isObject(value) || P.isFunction(value)) return value;
-  const fields: R.ReadonlyRecord<string, unknown> = { ...value };
-  // SAFETY: the copy has `value`'s own keys, each field a copy of the same
-  // shape (a span's numbers moved), so it has `value`'s type.
-  return R.map(fields, (field, key) =>
-    key === "span" && isSpan(field)
-      ? { start: field.start + by, end: field.end + by }
-      : shiftSpans(field, by),
-  ) as A;
+/** A copy of every span in a parsed tree, moved by a fixed number of code units (see {@link ParseOptions.offset}). */
+function spanShifter(by: number): (doc: Document) => Document {
+  const span = (at: Span): Span => ({ start: at.start + by, end: at.end + by });
+  const nodes = (children: readonly Node[]): Node[] => Arr.map(children, node);
+  const node: (input: Node) => Node = Match.type<Node>().pipe(
+    Match.tagsExhaustive({
+      Text: (n): Node => ({ ...n, span: span(n.span) }),
+      Comment: (n): Node => ({ ...n, span: span(n.span) }),
+      HtmlEntity: (n): Node => ({ ...n, span: span(n.span) }),
+      Formatting: (n): Node => ({ ...n, span: span(n.span) }),
+      AutoLink: (n): Node => ({ ...n, span: span(n.span) }),
+      Tag: (n): Node => ({ ...n, span: span(n.span) }),
+      Heading: (n): Node => ({ ...n, span: span(n.span), title: nodes(n.title) }),
+      Template: (n): Node => ({
+        ...n,
+        span: span(n.span),
+        name: nodes(n.name),
+        params: Arr.map(n.params, (p): Param => ({
+          name: Option.map(p.name, nodes),
+          value: nodes(p.value),
+        })),
+      }),
+      Argument: (n): Node => ({
+        ...n,
+        span: span(n.span),
+        name: nodes(n.name),
+        default: Option.map(n.default, nodes),
+      }),
+      Wikilink: (n): Node => ({
+        ...n,
+        span: span(n.span),
+        target: nodes(n.target),
+        segments: Arr.map(n.segments, nodes),
+      }),
+      ExternalLink: (n): Node => ({ ...n, span: span(n.span), label: Option.map(n.label, nodes) }),
+      Table: (n): Node => ({
+        ...n,
+        span: span(n.span),
+        captions: Arr.map(n.captions, (caption): TableCaption => ({
+          ...caption,
+          span: span(caption.span),
+          content: nodes(caption.content),
+        })),
+        rows: Arr.map(n.rows, (row): TableRow => ({
+          ...row,
+          span: span(row.span),
+          cells: Arr.map(row.cells, (cell): TableCell => ({
+            ...cell,
+            span: span(cell.span),
+            content: nodes(cell.content),
+          })),
+        })),
+      }),
+    }),
+  );
+  return (doc) => ({
+    ...doc,
+    span: span(doc.span),
+    children: nodes(doc.children),
+  });
 }
 
 /**
@@ -1586,7 +1643,7 @@ export function parse(source: string, options?: ParseOptions): Document {
     throw new RangeError(`parse: offset must be a non-negative safe integer, got ${offset}`);
   }
   const doc = parseAt0(source);
-  return offset === 0 ? doc : shiftSpans(doc, offset);
+  return offset === 0 ? doc : spanShifter(offset)(doc);
 }
 
 /** {@link parse} with spans from `0`. */
@@ -1602,7 +1659,6 @@ function parseAt0(source: string): Document {
       nestedEnds: undefined,
       closes: MutableHashMap.empty<string, CloseSearch>(),
       doomed: [],
-      deepest: MutableHashMap.empty<number, DeepParse>(),
       tableEnds: MutableHashMap.empty<number, number>(),
     }),
   });

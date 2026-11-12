@@ -51,15 +51,24 @@ import {
 // ── Branded entity ids (Q / P / L) ───────────────────────────────────────
 
 /** A Wikidata **item** id — `Q` followed by digits (`Q42`). */
-export const ItemId = Schema.String.pipe(Schema.brand("Wikidata/ItemId"));
+export const ItemId = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^Q[1-9]\d{0,18}$/)),
+  Schema.brand("Wikidata/ItemId"),
+);
 export type ItemId = typeof ItemId.Type;
 
 /** A Wikidata **property** id — `P` followed by digits (`P31`). */
-export const PropertyId = Schema.String.pipe(Schema.brand("Wikidata/PropertyId"));
+export const PropertyId = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^P[1-9]\d{0,18}$/)),
+  Schema.brand("Wikidata/PropertyId"),
+);
 export type PropertyId = typeof PropertyId.Type;
 
 /** A Wikidata **lexeme** id — `L` followed by digits (`L1`). */
-export const LexemeId = Schema.String.pipe(Schema.brand("Wikidata/LexemeId"));
+export const LexemeId = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^L[1-9]\d{0,18}$/)),
+  Schema.brand("Wikidata/LexemeId"),
+);
 export type LexemeId = typeof LexemeId.Type;
 
 /** Any of the branded entity ids this module surfaces. */
@@ -73,23 +82,17 @@ export type EntityId = ItemId | PropertyId | LexemeId;
  * `Q` plus digits — never a slash, dot, or path-escaping byte.
  */
 export function parseItemId(raw: string): Option.Option<ItemId> {
-  const cleaned = raw.trim().toUpperCase();
-  // SAFETY: the pattern admits exactly the `Q` + digits form the brand names.
-  return /^Q[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as ItemId) : Option.none();
+  return Schema.decodeOption(ItemId)(raw.trim().toUpperCase());
 }
 
 /** Validates a Wikidata **property** id (`P` + digits); returns the branded id or `None`. */
 export function parsePropertyId(raw: string): Option.Option<PropertyId> {
-  const cleaned = raw.trim().toUpperCase();
-  // SAFETY: the pattern admits exactly the `P` + digits form the brand names.
-  return /^P[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as PropertyId) : Option.none();
+  return Schema.decodeOption(PropertyId)(raw.trim().toUpperCase());
 }
 
 /** Validates a Wikidata **lexeme** id (`L` + digits); returns the branded id or `None`. */
 export function parseLexemeId(raw: string): Option.Option<LexemeId> {
-  const cleaned = raw.trim().toUpperCase();
-  // SAFETY: the pattern admits exactly the `L` + digits form the brand names.
-  return /^L[1-9]\d{0,18}$/.test(cleaned) ? Option.some(cleaned as LexemeId) : Option.none();
+  return Schema.decodeOption(LexemeId)(raw.trim().toUpperCase());
 }
 
 /**
