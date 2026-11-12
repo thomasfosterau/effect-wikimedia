@@ -35,7 +35,7 @@ The commands, each gate's details and the single-check variants are in [CONTRIBU
 
 ## Verification
 
-Before you report work as done, run these in CI's order (`.github/workflows/ci.yml`) and quote each command with its final pass/fail:
+Before you report work as done, run `vp run ci`, the `ci` task in `vite.config.ts` and the one command CI runs (`.github/workflows/ci.yml`, on the Node.js LTS and Current lines). It runs gates 1–9 below in order, stopping at the first failure. Quote each gate with its final pass/fail:
 
 1. `vp check`
 2. `vp run check`
@@ -48,7 +48,7 @@ Before you report work as done, run these in CI's order (`.github/workflows/ci.y
 9. `pnpm audit --audit-level high`
 10. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step). Its verdict must not be `fail`.
 
-Steps 1–9 are CI's required `ci` job, in its order.
+Steps 1–9 are the `ci` task, in its order; the required check is the workflow's `ci` gate job, which passes only when every matrix run of `vp run ci` did.
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 

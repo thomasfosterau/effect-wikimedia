@@ -1,112 +1,87 @@
 name: CI
 
-# ONE job, ONE required check (copied in shape from
-# `thomasfosterau/effect-drizzle-ext`, the Vite+ library standard). The
-# repo's task graph lives in vite.config.ts, not in GitHub Actions `needs:`.
+# One workflow whose only command is `vp run ci`: the `ci` task in
+# vite.config.ts runs every gate in order (AGENTS.md "Verification"), so CI
+# and a local `vp run ci` are the same thing. It runs on the LTS and the
+# Current release lines of Node.js. The task graph lives in vite.config.ts,
+# not in GitHub Actions steps or `needs:`.
 
 on:
   pull_request:
-    branches: [trunk]
-    types: [opened, reopened, synchronize, ready_for_review]
   push:
     branches: [trunk]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
-# No permissions by default; the single job grants only read access. It needs
-# no secrets, so a Dependabot PR runs it exactly as any other PR does.
+# No permissions by default; each job grants only read access. Nothing here
+# needs a secret, so a Dependabot PR runs it exactly as any other PR does.
 permissions: {}
 
 jobs:
-  ci:
+  test:
+    name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `lts` is the active LTS line. The Current line is pinned by major,
+        # not given as `latest`: `vp env use latest` resolves pre-releases
+        # (v27.0.0-alpha on 2026-11-12), and CI must test a released line.
+        # Today the Current line is 26, the same as `lts`; move this to 27
+        # once Node.js 27 is released. Both satisfy `engines.node` (>=22).
+        node: [lts, "26"]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Vite+ at the catalog pin, Node.js `lts`, the `packageManager` pnpm, the
-      # pnpm store cache, and `vp install` (#254). pnpm installs with a frozen
-      # lockfile by default in CI, so a manifest/lockfile drift fails here.
+      # Vite+ at the catalog pin, the matrix's Node.js, the `packageManager`
+      # pnpm, the pnpm store cache, and `vp install` (#254); pnpm installs with
+      # a frozen lockfile in CI, so a manifest/lockfile drift fails here.
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
         with:
           version-file: pnpm-workspace.yaml
-          node-version: "lts"
+          node-version: ${{ matrix.node }}
           cache: true
 
-      # `vp run` tasks (`check`, `fallow`, `test:unit`, `fallow:health`,
-      # `build`, `check:dist`, `docgen`) are content-addressed (`run.cache`
-      # in vite.config.ts); restoring the cache lets an unchanged task replay.
+      # The `vp run` tasks are content-addressed (`run.cache` in
+      # vite.config.ts); restoring the cache lets an unchanged task replay.
+      # Keyed per Node.js line, since a task's output can depend on it.
       - name: Restore the Vite+ task cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: node_modules/.vite/task-cache
-          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
+          key: vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-${{ github.sha }}
           restore-keys: |
-            vp-task-v1-${{ runner.os }}-
+            vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-
 
-      # Vite+'s built-in `vp check`, not the `check` task below.
-      - name: Format, lint and type-check
-        run: pnpm exec vp check
+      - name: Install
+        run: vp install --frozen-lockfile
 
-      # `vp check` type-checks with tsgolint, which reports no Effect
-      # diagnostics. The `check` task runs `tsc -p tsconfig.json` with the
-      # native `tsc` that `prepare` patches with `effect-tsgo`, so this step is
-      # the one that fails on an Effect `error` diagnostic; warnings and
-      # suggestions don't affect its exit code
-      # (`ignoreEffectWarningsInTscExitCode` in tsconfig.json) (#31, #20).
-      - name: Effect diagnostics
-        run: pnpm exec vp run check
+      - name: Print the Node.js version
+        run: node --version
 
-      # fallow's dead-code analysis: fails on an unused file, export, type,
-      # devDependency or catalog entry, a duplicate export, an unresolved
-      # import or a circular dependency (`.fallowrc.json` holds the entry
-      # points and the documented exemptions) (#20). Then its duplication
-      # analysis: fails on a clone group not in `duplicates.ignoredClones`
-      # (#102). Like the two steps above it reads only the source tree and
-      # needs no build, and it takes well under a second, so it runs with the
-      # static checks, before the tests.
-      - name: Dead code and duplication
-        run: pnpm exec vp run fallow
+      - name: Run every gate
+        run: vp run ci
 
-      # Also writes coverage/coverage-final.json for the complexity step.
-      - name: Test
-        run: pnpm exec vp run test:unit
-
-      # fallow's complexity analysis: fails on a function over a cyclomatic,
-      # cognitive or CRAP ceiling (`health` in `.fallowrc.json`: the defaults,
-      # and today's value for each function already over one) (#102). CRAP is
-      # computed from the Test step's coverage, so it runs straight after it;
-      # its `test:unit` dependency replays from that step's cache entry.
-      - name: Complexity
-        run: pnpm exec vp run fallow:health
-
-      - name: Build
-        run: pnpm exec vp run build
-
-      # Type-checks `tests/dist-consumer/` against the emitted `dist/*.d.ts`
-      # with `skipLibCheck: false`, as a consumer's compiler sees the published
-      # package, so broken declarations fail here even when the source
-      # type-check passes (#20). Its `build` dependency replays from the step
-      # above.
-      - name: Dist-consumer declaration check
-        run: pnpm exec vp run check:dist
-
-      # Renders the API reference from the doc comments with TypeDoc and fails
-      # on an undocumented export or a `{@link}` that resolves to nothing in the
-      # published surface (`typedoc.json`'s validation, warnings as errors)
-      # (#20). It reads `src/` and needs no build; it sits after the
-      # declaration check with the other published-surface gates, and the
-      # audit stays last as the one step that needs the npm registry.
-      - name: API docs
-        run: pnpm exec vp run docgen
-
-      - name: Audit
-        run: pnpm audit --audit-level high
+  # One stable check name for rulesets, whatever the matrix holds.
+  ci:
+    name: ci
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every matrix run passed
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: test "$RESULT" = success
