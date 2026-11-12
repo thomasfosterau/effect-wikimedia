@@ -98,10 +98,10 @@ describe("Wikidata id parsers", () => {
   });
 
   it("brand schemas check the id pattern when decoding", () => {
-    expect(Schema.decodeUnknownOption(Wikidata.ItemId)("Q42")).toEqual(Option.some("Q42"));
-    expect(Schema.decodeUnknownOption(Wikidata.ItemId)("Q42/../x")).toEqual(Option.none());
-    expect(Schema.decodeUnknownOption(Wikidata.PropertyId)("Q42")).toEqual(Option.none());
-    expect(Schema.decodeUnknownOption(Wikidata.LexemeId)("L0")).toEqual(Option.none());
+    expect(Schema.decodeOption(Wikidata.ItemId)("Q42")).toEqual(Option.some("Q42"));
+    expect(Schema.decodeOption(Wikidata.ItemId)("Q42/../x")).toEqual(Option.none());
+    expect(Schema.decodeOption(Wikidata.PropertyId)("Q42")).toEqual(Option.none());
+    expect(Schema.decodeOption(Wikidata.LexemeId)("L0")).toEqual(Option.none());
   });
 });
 

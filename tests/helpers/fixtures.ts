@@ -37,7 +37,7 @@ export const readFixture = Effect.fn("readFixture")(function* (name: string) {
 /** Reads `tests/fixtures/<name>` and parses it as JSON. */
 export const readFixtureJson = Effect.fn("readFixtureJson")(function* (name: string) {
   const text = yield* readFixture(name);
-  return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(text);
+  return yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(text);
 });
 
 /** Reads `tests/fixtures/<name>` as raw bytes. */

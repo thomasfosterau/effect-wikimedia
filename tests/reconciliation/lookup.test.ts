@@ -106,7 +106,7 @@ const stubWikimediaClient = Layer.succeed(Core.WikimediaClient, {
     );
     if (route?.fail) return yield* route.fail;
     // Decode the wire-shaped body with the caller's schema, as the real client does.
-    return yield* Schema.decodeUnknownEffect(schema)(route?.body ?? {}).pipe(
+    return yield* Schema.decodeEffect(schema)(route?.body ?? {}).pipe(
       Effect.mapError((error) => new Core.RequestFailed({ description: String(error) })),
     );
   }),

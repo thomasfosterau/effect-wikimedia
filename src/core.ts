@@ -732,7 +732,7 @@ const makeWikimediaClient = Effect.fnUntraced(function* () {
         return yield* new RateLimited({
           retryAfterSeconds: retryAfterSeconds(response.headers["retry-after"]),
         });
-      return yield* Schema.decodeUnknownEffect(schema)(body).pipe(
+      return yield* Schema.decodeEffect(schema)(body).pipe(
         Effect.catchTag("SchemaError", (error) =>
           Effect.fail(
             new RequestFailed({
