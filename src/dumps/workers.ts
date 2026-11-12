@@ -30,15 +30,15 @@ import { PageRevisionRecord, pageRecords } from "./xml.ts";
  * type cannot cross the thread boundary. Per-record decode problems are not
  * this: they arrive as {@link PageRevisionError} records.
  */
-export class MultistreamRangeFailed extends Schema.TaggedError<MultistreamRangeFailed>()(
-  "MultistreamRangeFailed",
-  {
-    /** The range whose bytes could not be read. */
-    range: MultistreamRange,
-    /** The `open` failure's message (its `message` when it has one), for logs. */
-    description: Schema.String,
-  },
-) {}
+export class MultistreamRangeFailed extends Schema.TaggedError<
+  MultistreamRangeFailed,
+  { readonly brand: unique symbol }
+>()("MultistreamRangeFailed", {
+  /** The range whose bytes could not be read. */
+  range: MultistreamRange,
+  /** The `open` failure's message (its `message` when it has one), for logs. */
+  description: Schema.String,
+}) {}
 
 /**
  * The RPC contract between the main side and its workers: one `DecodeRange`

@@ -78,8 +78,9 @@ function contextServiceKeep(cls) {
 
 /**
  * The member names of the object literal in `type`, when `type` is the
- * intersection `{ _tag: tag; …fields } & YieldableError<this>` TypeDoc records
- * for a `Schema.TaggedError` base (with `YieldableError` from `effect`), and
+ * intersection `{ _tag: tag; …fields } & YieldableError<this> & Brand` TypeDoc
+ * records for a `Schema.TaggedError` base (with `YieldableError` from
+ * `effect`), and
  * none otherwise.
  *
  * @param {SomeType} type
@@ -87,7 +88,12 @@ function contextServiceKeep(cls) {
  */
 function taggedErrorFields(type) {
   if (type.type !== "intersection" || !type.types.some(isYieldableError)) return [];
-  return type.types.flatMap(literalMemberNames);
+  // Only the literal that carries `_tag`: the brand literal `{ readonly brand:
+  // unique symbol }` (#224) is a compile-time marker, not a field.
+  return type.types
+    .map(literalMemberNames)
+    .filter((names) => names.includes("_tag"))
+    .flat();
 }
 
 /**
@@ -180,6 +186,32 @@ function isInheritedExternal(member) {
 }
 
 /**
+ * Whether `member` is the compile-time `brand` marker a class inherits from
+ * its base's `{ readonly brand: unique symbol }` type argument (#224): not
+ * external (it is declared in our source), but not an API member either.
+ *
+ * @param {Declaration} member
+ */
+function isBrand(member) {
+  return member.name === "brand" && Boolean(member.inheritedFrom);
+}
+
+/**
+ * The `brand` members of the object literals in `cls`'s base type (#224): the
+ * `{ readonly brand: unique symbol }` marker is part of the base's
+ * intersection, where docgen would demand a doc comment for it.
+ *
+ * @param {Declaration} cls
+ * @returns {Declaration[]}
+ */
+function brandLiterals(cls) {
+  return (cls.extendedTypes ?? [])
+    .flatMap((type) => (type.type === "intersection" ? type.types : []))
+    .flatMap((type) => (type.type === "reflection" ? (type.declaration.children ?? []) : []))
+    .filter((member) => member.name === "brand");
+}
+
+/**
  * Presents a kept member as the class's own: drops the "Inherited from" line
  * (on the member and its signatures), clears the inherited and external flags
  * (which the default theme's filters hide), and points an external one's
@@ -211,9 +243,10 @@ function trimClass(project, cls, keep) {
   const members = [...(cls.children ?? [])];
   const isKept = (/** @type {Declaration} */ member) => keep.includes(memberKey(member));
   const isDropped = (/** @type {Declaration} */ member) =>
-    !isKept(member) && isInheritedExternal(member);
+    !isKept(member) && (isInheritedExternal(member) || isBrand(member));
   Arr.forEach(Arr.filter(members, isKept), (member) => rehome(member, cls));
   Arr.forEach(Arr.filter(members, isDropped), (member) => project.removeReflection(member));
+  Arr.forEach(brandLiterals(cls), (member) => project.removeReflection(member));
   const present = HashSet.fromIterable(Arr.map(members, memberKey));
   return Arr.filter(keep, (key) => !HashSet.has(present, key));
 }

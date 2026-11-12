@@ -131,7 +131,10 @@ const ACTION_API_PATH = "/w/api.php";
  * A bad input the caller supplied (a host, title, id, query or option),
  * rejected before any request is sent — fix the input, don't retry.
  */
-export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {
+export class InvalidRequest extends Schema.TaggedError<
+  InvalidRequest,
+  { readonly brand: unique symbol }
+>()("InvalidRequest", {
   /**
    * Which input was rejected. This package uses `"host"` (a host outside the
    * Wikimedia families {@link normaliseWikimediaHost} accepts), `"title"` and
@@ -157,7 +160,10 @@ export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("Invali
 }) {}
 
 /** An upstream transport / decode failure (network, non-2xx, malformed body). Not retried. */
-export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestFailed", {
+export class RequestFailed extends Schema.TaggedError<
+  RequestFailed,
+  { readonly brand: unique symbol }
+>()("RequestFailed", {
   /**
    * A human-readable account of the failure, for logs rather than parsing:
    * `wikimedia returned HTTP <status>` for a non-2xx status other than `429`
@@ -178,7 +184,10 @@ export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestF
  * are exhausted, or straight away when the server asks for a longer wait
  * than {@link RetryOptions.maxDelaySeconds} allows.
  */
-export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
+export class RateLimited extends Schema.TaggedError<
+  RateLimited,
+  { readonly brand: unique symbol }
+>()("RateLimited", {
   /**
    * Seconds to wait before retrying: finite, non-negative, and possibly
    * fractional. For a `429`, a `503` or a `maxlag` error body alike it is the

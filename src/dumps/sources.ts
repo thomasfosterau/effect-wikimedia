@@ -51,7 +51,10 @@ import type { MultistreamRange } from "./multistream.ts";
 // ── Error & etiquette ────────────────────────────────────────────────────
 
 /** A failure reading or decompressing a dump source. */
-export class SourceError extends Schema.TaggedError<SourceError>()("SourceError", {
+export class SourceError extends Schema.TaggedError<
+  SourceError,
+  { readonly brand: unique symbol }
+>()("SourceError", {
   /**
    * A short account of the failure, for logs rather than parsing: a reason
    * code, a colon, then the underlying error's message (or, for a value that
@@ -193,9 +196,12 @@ const hasStreamState = (stream: Duplex): boolean =>
  * `Error` is what a stream is destroyed with. Its `message` becomes the
  * {@link SourceError} description the stream fails with.
  */
-class StageError extends Schema.TaggedError<StageError>()("StageError", {
-  message: Schema.String,
-}) {}
+class StageError extends Schema.TaggedError<StageError, { readonly brand: unique symbol }>()(
+  "StageError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Returns what `step` returns as `Some`, or passes what it throws to

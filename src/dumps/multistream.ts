@@ -84,33 +84,33 @@ export interface MultistreamIndexEntry {
  * {@link multistreamIndexRecords} and {@link multistreamRanges} fail their
  * stream with. `reason` says which check failed and `line` where.
  */
-export class MultistreamIndexError extends Schema.TaggedError<MultistreamIndexError>()(
-  "MultistreamIndexError",
-  {
-    /**
-     * Which check failed: `"dumps/malformed-index-line"` for a line that is
-     * not `offset:pageId:title` with a decimal `offset` and `pageId` (digits
-     * only, at most 18 each, and a safe integer) and a title that is not
-     * empty; `"dumps/index-offset-decreased"` for an entry whose offset is
-     * below the stream before it; `"dumps/index-offset-past-file-size"` for
-     * an entry whose offset is at or past the `fileSize` given to
-     * {@link multistreamRanges}.
-     */
-    reason: Schema.Literals([
-      "dumps/malformed-index-line",
-      "dumps/index-offset-decreased",
-      "dumps/index-offset-past-file-size",
-    ]),
-    /** The 1-based number of the offending line, counted as for {@link MultistreamIndexEntry.line}. */
-    line: Schema.Int,
-    /**
-     * A short account for logs rather than parsing. For a malformed line it
-     * is the line itself, cut to its first 500 UTF-16 code units (the cut can
-     * split a surrogate pair); for an offset it names the offsets compared.
-     */
-    detail: Schema.String,
-  },
-) {}
+export class MultistreamIndexError extends Schema.TaggedError<
+  MultistreamIndexError,
+  { readonly brand: unique symbol }
+>()("MultistreamIndexError", {
+  /**
+   * Which check failed: `"dumps/malformed-index-line"` for a line that is
+   * not `offset:pageId:title` with a decimal `offset` and `pageId` (digits
+   * only, at most 18 each, and a safe integer) and a title that is not
+   * empty; `"dumps/index-offset-decreased"` for an entry whose offset is
+   * below the stream before it; `"dumps/index-offset-past-file-size"` for
+   * an entry whose offset is at or past the `fileSize` given to
+   * {@link multistreamRanges}.
+   */
+  reason: Schema.Literals([
+    "dumps/malformed-index-line",
+    "dumps/index-offset-decreased",
+    "dumps/index-offset-past-file-size",
+  ]),
+  /** The 1-based number of the offending line, counted as for {@link MultistreamIndexEntry.line}. */
+  line: Schema.Int,
+  /**
+   * A short account for logs rather than parsing. For a malformed line it
+   * is the line itself, cut to its first 500 UTF-16 code units (the cut can
+   * split a surrogate pair); for an offset it names the offsets compared.
+   */
+  detail: Schema.String,
+}) {}
 
 /**
  * One bzip2 stream of a multistream dump, as the index describes it: the
