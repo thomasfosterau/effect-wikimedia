@@ -95,25 +95,23 @@ function instanceOfQids(item: Wikidata.WikidataItem): readonly string[] {
 
 /**
  * Maps a fetched `WikidataItem` (keyed by `qid`, the identifier-search
- * match) to a neutral candidate — `undefined` when the batched
- * `wbgetentities` fetch didn't return this id (an upstream miss for one
- * QID in the batch). Re-validates the echoed id, falling back to the
- * requested `qid` (already validated before the request was built).
+ * match) to a neutral candidate. Re-validates the echoed id, falling back to
+ * the requested `qid` (already validated before the request was built). A
+ * caller whose batched `wbgetentities` fetch didn't return the id (an
+ * upstream miss for one QID in the batch) has no item to pass and no
+ * candidate.
  */
 export function itemToCandidate(
-  item: Wikidata.WikidataItem | undefined,
+  item: Wikidata.WikidataItem,
   qid: string,
   language: string,
-): readonly WikidataCandidate[] {
-  if (item === undefined) return [];
-  return [
-    {
-      qid: Option.getOrElse(normaliseQid(item.id), () => qid),
-      label: sanitiseCandidateText(item.labels[language]),
-      description: sanitiseCandidateText(item.descriptions[language]),
-      instanceOf: instanceOfQids(item),
-    },
-  ];
+): WikidataCandidate {
+  return {
+    qid: Option.getOrElse(normaliseQid(item.id), () => qid),
+    label: sanitiseCandidateText(item.labels[language]),
+    description: sanitiseCandidateText(item.descriptions[language]),
+    instanceOf: instanceOfQids(item),
+  };
 }
 
 // ── wbgetentities → enrich facts (website#613) ──────────────────────────

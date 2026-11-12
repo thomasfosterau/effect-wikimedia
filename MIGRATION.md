@@ -70,8 +70,10 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 
 **Core**
 
-- `sanitiseText(value)` takes an optional `string` (`value?: string`) and `toNonNegativeInt(value, max)` an optional `number`, where both took `unknown`. They still return `string | null` and `number | null`. Narrow a value you hold as `unknown` first, or decode it with a schema.
+- `sanitiseText(value)` takes an optional `string` (`value?: string`) and `toNonNegativeInt(value, max)` an optional `number`, where both took `unknown`. Narrow a value you hold as `unknown` first, or decode it with a schema.
 - `detectMaxlagSignal(body)` takes a `Schema.Json` (what `response.json` yields) rather than `unknown`.
+- `normaliseWikimediaHost`, `normaliseTitle`, `sanitiseText`, `toNonNegativeInt`, `parseRetryAfterHeader` and `detectMaxlagSignal`: `T | null` → `Option<T>`. `parseRetryAfterHeader` no longer takes `null`.
+- `WikimediaRequest.maxlagSeconds`: `null` → `Option.none()` to omit the parameter; a number is `Option.some(n)`.
 
 **Action**
 
@@ -122,6 +124,7 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 - `normaliseLabelQuery`, `normaliseQid`, `normalisePropertyId`, `normaliseExternalIdValue`, `sanitiseCandidateText`, `normaliseTimeValue`, `normaliseCommonsImage` and each `ExternalIdAuthority.iri` return `Option`.
 - `sanitiseCandidateText` takes an optional `string`, and `normaliseTimeValue` and `normaliseCommonsImage` take `string`, where all three took `unknown`. Decode a value you hold as `unknown` before calling them.
 - `WikidataLookup.enrich` succeeds with `Option<WikidataFacts>`.
+- `itemToCandidate(item, qid, language)` takes a `WikidataItem` (not `| undefined`) and returns one `WikidataCandidate` rather than an array of zero or one. Look the item up yourself and skip a missing one.
 - The stored fact shapes (`WikidataFact`, `DateFact.precision` / `calendar`) still use `null`: they are JSON you persist.
 
 **Wikidata**

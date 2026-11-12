@@ -453,7 +453,7 @@ export function normaliseCommonsImage(raw: string): Option.Option<{
   return Option.map(
     Option.filter(
       trimmedToken(raw),
-      (trimmed) => !/[|#?]/.test(trimmed) && normaliseTitle(trimmed) !== null,
+      (trimmed) => !/[|#?]/.test(trimmed) && Option.isSome(normaliseTitle(trimmed)),
     ),
     (trimmed) => ({
       filename: trimmed,

@@ -310,7 +310,7 @@ const MAX_TERM_LENGTH = 10_000;
 const MAX_UNKNOWN_TYPE_LENGTH = 200;
 
 /** The raw `value` cut at `MAX_TERM_LENGTH`, or `None` when it is absent. */
-const boundedValue = (value: string | undefined): Option.Option<string> =>
+const boundedValue = (value?: string): Option.Option<string> =>
   Option.map(Option.fromUndefinedOr(value), (v) => v.slice(0, MAX_TERM_LENGTH));
 
 /** Normalises one raw term into the typed {@link SparqlTerm} union; never throws. */
@@ -404,7 +404,7 @@ export const query = Effect.fn("Sparql.query")(function* (
       path: WDQS_PATH,
       params: { query: sparql, format: "json" },
       // WDQS does not accept the Action API's `maxlag` parameter.
-      maxlagSeconds: null,
+      maxlagSeconds: Option.none(),
     },
     SparqlResultsResponse,
     retry ?? DEFAULT_RETRY_OPTIONS,

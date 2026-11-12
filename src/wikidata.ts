@@ -146,7 +146,7 @@ function toFiniteNumber(value?: Schema.Json): Option.Option<number> {
 }
 
 /** A short raw string (calendar / globe / unit IRI, amount), trimmed and bounded, or `None`. */
-function toBoundedString(value: Schema.Json | undefined, max = 2000): Option.Option<string> {
+function toBoundedString(value?: Schema.Json, max = 2000): Option.Option<string> {
   if (!P.isString(value)) return Option.none();
   const trimmed = value.trim();
   return Str.isEmpty(trimmed) ? Option.none() : Option.some(trimmed.slice(0, max));

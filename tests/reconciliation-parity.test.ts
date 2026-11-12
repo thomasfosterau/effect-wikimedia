@@ -16,6 +16,7 @@
  * @module tests/reconciliation-parity
  */
 
+import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -52,10 +53,10 @@ const decodeQ42 = (): Wikidata.WikidataItem => {
 
 interface NeutralFact {
   readonly authority: string;
-  readonly externalId: string | null;
+  readonly externalId: string;
   readonly externalIri: string;
   readonly mappingKind: "exact" | "equivalent";
-  readonly notes: string | null;
+  readonly notes: Option.Option<string>;
 }
 
 // An extraction-era parity fixture: it does not track `src/reconciliation`'s
@@ -74,10 +75,17 @@ const IMAGE_PROPERTIES = ["P18"];
 
 const wikidataEntityIri = (id: string) => `http://www.wikidata.org/entity/${id}`;
 
-/** The main-snak value of the first statement on a property, if it is a value snak. */
-function firstValue(item: Wikidata.WikidataItem, property: string): Wikidata.DataValue | null {
+/** The main-snak value of the first statement on a property, when it is a value snak of kind `tag`. */
+function firstValue<K extends Wikidata.DataValue["_tag"]>(
+  item: Wikidata.WikidataItem,
+  property: string,
+  tag: K,
+): readonly Extract<Wikidata.DataValue, { _tag: K }>[] {
   const snak = item.claims[property]?.[0]?.mainsnak;
-  return P.isTagged(snak, "value") ? snak.value : null;
+  if (!P.isTagged(snak, "value")) return [];
+  const isKind = (v: Wikidata.DataValue): v is Extract<Wikidata.DataValue, { _tag: K }> =>
+    P.isTagged(v, tag);
+  return Arr.filter([snak.value], isKind);
 }
 
 /** The QID self-link — the canonical Wikidata correspondence. */
@@ -87,58 +95,46 @@ function qidSelfLink(item: Wikidata.WikidataItem): NeutralFact {
     externalId: item.id,
     externalIri: wikidataEntityIri(item.id),
     mappingKind: "exact",
-    notes: null,
+    notes: Option.none(),
   };
 }
 
 /** `sameAs` facts — one per allowlisted external-id statement. */
 function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
   return R.toEntries(EXTERNAL_ID_AUTHORITIES).flatMap(([property, scheme]) => {
-    const value = firstValue(item, property);
-    if (!P.isTagged(value, "external-id")) return [];
-    return [
-      {
-        authority: scheme.authority,
-        externalId: value.value,
-        externalIri: scheme.iri(value.value),
-        mappingKind: "exact",
-        notes: null,
-      },
-    ];
+    return firstValue(item, property, "external-id").map((value): NeutralFact => ({
+      authority: scheme.authority,
+      externalId: value.value,
+      externalIri: scheme.iri(value.value),
+      mappingKind: "exact",
+      notes: Option.none(),
+    }));
   });
 }
 
 /** Date facts — the time member, `+`-stripped like the reconciliation normaliser. */
 function dateFacts(item: Wikidata.WikidataItem): NeutralFact[] {
   return R.toEntries(DATE_PROPERTIES).flatMap(([property, label]) => {
-    const value = firstValue(item, property);
-    if (!P.isTagged(value, "time")) return [];
-    return [
-      {
-        authority: "wikidata",
-        externalId: value.time.replace(/^\+/, ""),
-        externalIri: wikidataEntityIri(property),
-        mappingKind: "equivalent",
-        notes: label,
-      },
-    ];
+    return firstValue(item, property, "time").map((value): NeutralFact => ({
+      authority: "wikidata",
+      externalId: value.time.replace(/^\+/, ""),
+      externalIri: wikidataEntityIri(property),
+      mappingKind: "equivalent",
+      notes: Option.some(label),
+    }));
   });
 }
 
 /** Image facts — the string member (commonsMedia), to a Special:FilePath URL. */
 function imageFacts(item: Wikidata.WikidataItem): NeutralFact[] {
   return IMAGE_PROPERTIES.flatMap((property) => {
-    const value = firstValue(item, property);
-    if (!P.isTagged(value, "string")) return [];
-    return [
-      {
-        authority: "wikimedia-commons",
-        externalId: value.value,
-        externalIri: `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(value.value)}`,
-        mappingKind: "equivalent",
-        notes: "image",
-      },
-    ];
+    return firstValue(item, property, "string").map((value): NeutralFact => ({
+      authority: "wikimedia-commons",
+      externalId: value.value,
+      externalIri: `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(value.value)}`,
+      mappingKind: "equivalent",
+      notes: Option.some("image"),
+    }));
   });
 }
 
@@ -162,21 +158,21 @@ describe("reconciliation enrich normaliser, expressed over the typed surface", (
         externalId: "Q42",
         externalIri: "http://www.wikidata.org/entity/Q42",
         mappingKind: "exact",
-        notes: null,
+        notes: Option.none(),
       },
       {
         authority: "viaf",
         externalId: "113230702",
         externalIri: "https://viaf.org/viaf/113230702",
         mappingKind: "exact",
-        notes: null,
+        notes: Option.none(),
       },
       {
         authority: "wikidata",
         externalId: "1952-03-11T00:00:00Z",
         externalIri: "http://www.wikidata.org/entity/P569",
         mappingKind: "equivalent",
-        notes: "date of birth",
+        notes: Option.some("date of birth"),
       },
       {
         authority: "wikimedia-commons",
@@ -184,7 +180,7 @@ describe("reconciliation enrich normaliser, expressed over the typed surface", (
         externalIri:
           "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas%20adams%20portrait%20cropped.jpg",
         mappingKind: "equivalent",
-        notes: "image",
+        notes: Option.some("image"),
       },
     ]);
   });
@@ -194,8 +190,8 @@ describe("reconciliation enrich normaliser, expressed over the typed surface", (
 
 interface NeutralCandidate {
   readonly qid: string;
-  readonly label: string | null;
-  readonly description: string | null;
+  readonly label: Option.Option<string>;
+  readonly description: Option.Option<string>;
 }
 
 describe("reconciliation label search, expressed over the typed surface", () => {
@@ -213,11 +209,15 @@ describe("reconciliation label search, expressed over the typed surface", () => 
     };
     const candidates: NeutralCandidate[] = Wikidata.normaliseSearch(response).map((hit) => ({
       qid: hit.id,
-      label: Option.getOrNull(hit.label),
-      description: Option.getOrNull(hit.description),
+      label: hit.label,
+      description: hit.description,
     }));
     expect(candidates).toEqual([
-      { qid: "Q42", label: "Douglas Adams", description: "English writer" },
+      {
+        qid: "Q42",
+        label: Option.some("Douglas Adams"),
+        description: Option.some("English writer"),
+      },
     ]);
   });
 });

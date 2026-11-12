@@ -48,7 +48,7 @@ assert<
 >();
 assert<Equals<Core.WikimediaError, Core.InvalidRequest | Core.RequestFailed | Core.RateLimited>>();
 assert<Equals<Core.WikimediaError["_tag"], "InvalidRequest" | "RequestFailed" | "RateLimited">>();
-assert<Equals<ReturnType<typeof Core.normaliseWikimediaHost>, string | null>>();
+assert<Equals<ReturnType<typeof Core.normaliseWikimediaHost>, Option.Option<string>>>();
 
 // --- Action -----------------------------------------------------------------
 

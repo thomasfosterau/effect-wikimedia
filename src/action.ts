@@ -54,14 +54,6 @@ import {
   WikimediaClient,
 } from "./core.ts";
 
-/** `Core.sanitiseText`, as an `Option`: `None` for a value it rejects. */
-const optionalText = (value?: string): Option.Option<string> =>
-  Option.fromNullOr(sanitiseText(value));
-
-/** `Core.toNonNegativeInt`, as an `Option`: `None` for a value it rejects. */
-const optionalInt = (value?: number, max?: number): Option.Option<number> =>
-  Option.fromNullOr(toNonNegativeInt(value, max));
-
 /** A timestamp string as the API sent it, cut to 40 characters; `None` unless it is a string. */
 const timestampOf = (value?: string): Option.Option<string> =>
   Option.map(Option.fromUndefinedOr(value), (timestamp) => timestamp.slice(0, 40));
@@ -184,9 +176,9 @@ export function normaliseWikitext(
   const wikitext = revision?.slots?.main?.["*"];
   if (wikitext === undefined) return Option.none();
   return Option.some({
-    pageId: optionalInt(page.pageid),
-    title: sanitiseText(page.title) ?? title,
-    revisionId: optionalInt(revision?.revid),
+    pageId: toNonNegativeInt(page.pageid),
+    title: Option.getOrElse(sanitiseText(page.title), () => title),
+    revisionId: toNonNegativeInt(revision?.revid),
     timestamp: timestampOf(revision?.timestamp),
     wikitext,
   });
@@ -326,7 +318,7 @@ export interface PageMetadata {
 }
 
 /** A URL string, re-validated as `https:` before being trusted, or `None`. */
-function toHttpsUrl(value: string | undefined): Option.Option<string> {
+function toHttpsUrl(value?: string): Option.Option<string> {
   if (value === undefined || Str.isEmpty(value) || value.length > 2000) return Option.none();
   return parseUrl(value).pipe(
     Option.filter((parsed) => parsed.protocol === "https:"),
@@ -353,13 +345,13 @@ export function normalisePageMetadata(
   );
   if (page === undefined) return Option.none();
   return Option.some({
-    pageId: optionalInt(page.pageid),
-    title: sanitiseText(page.title) ?? title,
-    contentModel: optionalText(page.contentmodel),
-    language: optionalText(page.pagelanguage),
+    pageId: toNonNegativeInt(page.pageid),
+    title: Option.getOrElse(sanitiseText(page.title), () => title),
+    contentModel: sanitiseText(page.contentmodel),
+    language: sanitiseText(page.pagelanguage),
     touched: timestampOf(page.touched),
-    lastRevisionId: optionalInt(page.lastrevid),
-    length: optionalInt(page.length, 100_000_000),
+    lastRevisionId: toNonNegativeInt(page.lastrevid),
+    length: toNonNegativeInt(page.length, 100_000_000),
     fullUrl: toHttpsUrl(page.fullurl),
   });
 }
@@ -461,11 +453,11 @@ export interface SearchResult {
 export function normaliseSearch(response: SearchResponse): readonly SearchResult[] {
   const results = Arr.getSomes(
     Arr.map(response.query?.search ?? [], (hit) =>
-      Option.map(optionalText(hit.title), (title): SearchResult => ({
-        pageId: optionalInt(hit.pageid),
+      Option.map(sanitiseText(hit.title), (title): SearchResult => ({
+        pageId: toNonNegativeInt(hit.pageid),
         title,
-        snippet: optionalText(hit.snippet),
-        wordCount: optionalInt(hit.wordcount),
+        snippet: sanitiseText(hit.snippet),
+        wordCount: toNonNegativeInt(hit.wordcount),
       })),
     ),
   );
@@ -485,7 +477,7 @@ export const search = Effect.fn("Action.search")(function* (
   options?: SearchOptions,
   retry?: RetryOptions,
 ) {
-  const cleaned = optionalText(query);
+  const cleaned = sanitiseText(query);
   if (Option.isNone(cleaned)) return yield* new InvalidRequest({ kind: "query", value: query });
   const cleanedQuery = cleaned.value;
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), MAX_SEARCH_RESULTS);
@@ -647,10 +639,8 @@ export interface ParsedPage {
 /** Cap on how many entries any single list field (sections/links/categories/templates) keeps. */
 export const MAX_PARSE_ENTRIES = 500;
 
-function titledEntries(
-  entries: readonly { readonly "*"?: string | undefined }[] | undefined,
-): readonly string[] {
-  const titles = Arr.getSomes(Arr.map(entries ?? [], (entry) => optionalText(entry["*"])));
+function titledEntries(entries: readonly (typeof TitledEntry.Type)[] = []): readonly string[] {
+  const titles = Arr.getSomes(Arr.map(entries, (entry) => sanitiseText(entry["*"])));
   return Arr.take(titles, MAX_PARSE_ENTRIES);
 }
 
@@ -661,18 +651,18 @@ export function normaliseParse(response: ParseResponse, title: string): Option.O
   const sections = Arr.take(
     Arr.getSomes(
       Arr.map(parsed.tocdata?.sections ?? [], (section) =>
-        Option.map(optionalText(section.line), (sectionTitle): ParsedSection => ({
-          level: optionalInt(section.hLevel, 20),
+        Option.map(sanitiseText(section.line), (sectionTitle): ParsedSection => ({
+          level: toNonNegativeInt(section.hLevel, 20),
           title: sectionTitle,
-          anchor: optionalText(section.anchor),
+          anchor: sanitiseText(section.anchor),
         })),
       ),
     ),
     MAX_PARSE_ENTRIES,
   );
   return Option.some({
-    pageId: optionalInt(parsed.pageid),
-    title: sanitiseText(parsed.title) ?? title,
+    pageId: toNonNegativeInt(parsed.pageid),
+    title: Option.getOrElse(sanitiseText(parsed.title), () => title),
     sections,
     links: titledEntries(parsed.links),
     categories: titledEntries(parsed.categories),
@@ -760,12 +750,12 @@ export type SiteinfoResponse = typeof SiteinfoResponse.Type;
 export const MAX_HIDDEN_LINK_PREFIXES = 2000;
 
 /** Whether `id` is the File (6) or Category (14) namespace, whose links render outside the prose. */
-const isHiddenLinkNamespace = (id: number | undefined): boolean => id === 6 || id === 14;
+const isHiddenLinkNamespace = (id?: number): boolean => id === 6 || id === 14;
 
 /** A prefix from the response, or `None` when it is not a usable namespace or interwiki name. */
 function linkPrefix(value?: string): Option.Option<string> {
   return Option.filter(
-    optionalText(value),
+    sanitiseText(value),
     (prefix) => prefix.length <= 255 && !/[:|[\]{}#<>]/.test(prefix),
   );
 }
@@ -874,7 +864,7 @@ export const MAX_REDIRECT_ALIASES = 100;
 
 /** A spelling from the response, or `None` when it is not a usable redirect word. */
 function redirectAlias(value?: string): Option.Option<string> {
-  return Option.filter(optionalText(value), (alias) => alias.length <= 255);
+  return Option.filter(sanitiseText(value), (alias) => alias.length <= 255);
 }
 
 /**
