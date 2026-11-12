@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -52,9 +53,9 @@ describe("parse with an offset", () => {
       (node): node is Tag => P.isTagged(node, "Tag") && node.name === "ref",
     );
     expect(ref).toBeDefined();
-    if (ref === undefined || ref.rawContent === undefined) return;
-    const offset = page.indexOf(ref.rawContent);
-    const body = parse(ref.rawContent, { offset });
+    if (ref === undefined || Option.isNone(ref.rawContent)) return;
+    const offset = page.indexOf(ref.rawContent.value);
+    const body = parse(ref.rawContent.value, { offset });
     const link = filter(body, P.isTagged("Wikilink"))[0];
     expect(link).toBeDefined();
     if (link === undefined) return;

@@ -16,6 +16,7 @@
  */
 
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import type { Document, Node, Param, Table, TableCaption, TableCell, TableRow } from "./ast.ts";
 
 /** Serializes a fragment (a list of nodes) back to wikitext. */
@@ -38,19 +39,23 @@ const serializeByTag: (node: Node) => string = Match.type<Node>().pipe(
       node.leftEquals + serializeNodes(node.title) + node.rightEquals + node.trailing,
     Template: (node) => `{{${serializeNodes(node.name)}${serializeParams(node.params)}}}`,
     Argument: (node) =>
-      `{{{${serializeNodes(node.name)}${
-        node.default === undefined ? "" : `|${serializeNodes(node.default)}`
-      }}}}`,
+      `{{{${serializeNodes(node.name)}${Option.match(node.default, {
+        onNone: () => "",
+        onSome: (d) => `|${serializeNodes(d)}`,
+      })}}}}`,
     Wikilink: (node) =>
       `[[${serializeNodes(node.target)}${node.segments
         .map((seg) => `|${serializeNodes(seg)}`)
         .join("")}]]`,
     ExternalLink: (node) =>
-      `[${node.url}${node.label === undefined ? "" : serializeNodes(node.label)}]`,
+      `[${node.url}${Option.match(node.label, { onNone: () => "", onSome: serializeNodes })}]`,
     AutoLink: (node) => node.url,
     // A marker tag is just its verbatim text; an extension tag adds its
     // captured raw body and closing tag (both absent when open-only).
-    Tag: (node) => node.raw + (node.rawContent ?? "") + (node.closeRaw ?? ""),
+    Tag: (node) =>
+      node.raw +
+      Option.getOrElse(node.rawContent, () => "") +
+      Option.getOrElse(node.closeRaw, () => ""),
     Table: (node) => `{|${node.open}${serializeTableBody(node)}|}`,
   }),
 );
@@ -76,18 +81,21 @@ function serializeTableBody(table: Table): string {
 
 function serializeCaption(caption: TableCaption): string {
   const marker = caption.inline ? "||" : "|+";
-  return `${marker}${caption.attrs === undefined ? "" : `${caption.attrs}|`}${serializeNodes(caption.content)}`;
+  return `${marker}${attrsPrefix(caption.attrs)}${serializeNodes(caption.content)}`;
 }
 
 function serializeRow(row: TableRow): string {
-  const marker = row.open === undefined ? "" : `|-${row.open}`;
+  const marker = Option.match(row.open, { onNone: () => "", onSome: (open) => `|-${open}` });
   return marker + row.cells.map(serializeCell).join("");
 }
 
 function serializeCell(cell: TableCell): string {
-  const attrs = cell.attrs === undefined ? "" : `${cell.attrs}|`;
-  return cell.marker + attrs + serializeNodes(cell.content);
+  return cell.marker + attrsPrefix(cell.attrs) + serializeNodes(cell.content);
 }
+
+/** A cell's or caption's attributes and their `|` separator, or `""` without attributes. */
+const attrsPrefix = (attrs: Option.Option<string>): string =>
+  Option.match(attrs, { onNone: () => "", onSome: (text) => `${text}|` });
 
 /** Serializes a document (its top-level fragment). */
 export function serialize(doc: Document): string {
@@ -98,7 +106,7 @@ function serializeParams(params: readonly Param[]): string {
   return params
     .map(
       (p) =>
-        `|${p.name === undefined ? "" : `${serializeNodes(p.name)}=`}${serializeNodes(p.value)}`,
+        `|${Option.match(p.name, { onNone: () => "", onSome: (name) => `${serializeNodes(name)}=` })}${serializeNodes(p.value)}`,
     )
     .join("");
 }

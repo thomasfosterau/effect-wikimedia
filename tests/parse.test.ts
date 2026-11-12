@@ -7,10 +7,10 @@
  * @module tests/parse
  */
 
-import * as Option from "effect/Option";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { describe, expect, it } from "vite-plus/test";
 import { firstNode, isNode } from "./helpers/nodes.ts";
@@ -44,23 +44,23 @@ describe("templates", () => {
     const t = only("{{Infobox|a|b|key=value}}", "Template");
     expect(text(t.name)).toBe("Infobox");
     expect(t.params).toHaveLength(3);
-    expect(t.params[0].name).toBeUndefined();
+    expect(t.params[0].name).toEqual(Option.none());
     expect(text(t.params[0].value)).toBe("a");
     expect(text(t.params[1].value)).toBe("b");
-    expect(t.params[2].name && text(t.params[2].name)).toBe("key");
+    expect(Option.map(t.params[2].name, text)).toEqual(Option.some("key"));
     expect(text(t.params[2].value)).toBe("value");
   });
 
   it("splits a param on the first equals only", () => {
     const t = only("{{t|k=a=b}}", "Template");
-    expect(t.params[0].name && text(t.params[0].name)).toBe("k");
+    expect(Option.map(t.params[0].name, text)).toEqual(Option.some("k"));
     expect(text(t.params[0].value)).toBe("a=b");
   });
 
   it("keeps whitespace inside name/value (not on the separators)", () => {
     const t = only("{{ t | k = v }}", "Template");
     expect(text(t.name)).toBe(" t ");
-    expect(t.params[0].name && text(t.params[0].name)).toBe(" k ");
+    expect(Option.map(t.params[0].name, text)).toEqual(Option.some(" k "));
     expect(text(t.params[0].value)).toBe(" v ");
   });
 
@@ -88,13 +88,13 @@ describe("arguments (triple brace)", () => {
   it("parses name and default", () => {
     const a = only("{{{name|fallback}}}", "Argument");
     expect(text(a.name)).toBe("name");
-    expect(a.default && text(a.default)).toBe("fallback");
+    expect(Option.map(a.default, text)).toEqual(Option.some("fallback"));
   });
 
   it("has no default when the pipe is absent", () => {
     const a = only("{{{1}}}", "Argument");
     expect(text(a.name)).toBe("1");
-    expect(a.default).toBeUndefined();
+    expect(a.default).toEqual(Option.none());
   });
 });
 
@@ -127,13 +127,13 @@ describe("external links", () => {
   it("parses url and label", () => {
     const e = only("[https://example.org Example]", "ExternalLink");
     expect(e.url).toBe("https://example.org");
-    expect(e.label && text(e.label)).toBe(" Example");
+    expect(Option.map(e.label, text)).toEqual(Option.some(" Example"));
   });
 
   it("parses a bare bracketed url", () => {
     const e = only("[https://example.org]", "ExternalLink");
     expect(e.url).toBe("https://example.org");
-    expect(e.label).toBeUndefined();
+    expect(e.label).toEqual(Option.none());
   });
 
   it("leaves a non-url bracket as text", () => {
@@ -185,8 +185,8 @@ describe("tags", () => {
   it("captures an extension tag body raw", () => {
     const t = only("<ref>{{cite|x}} '''kept'''</ref>", "Tag");
     expect(t.name).toBe("ref");
-    expect(t.rawContent).toBe("{{cite|x}} '''kept'''");
-    expect(t.closeRaw).toBe("</ref>");
+    expect(t.rawContent).toEqual(Option.some("{{cite|x}} '''kept'''"));
+    expect(t.closeRaw).toEqual(Option.some("</ref>"));
   });
 
   it("does not parse the raw body of an extension tag as wikitext", () => {
@@ -215,7 +215,7 @@ describe("tags", () => {
 
   it("degrades an unclosed extension tag to an open-only marker", () => {
     const t = only("<ref>citation with no close", "Tag");
-    expect(t).toMatchObject({ name: "ref", rawContent: undefined, closeRaw: undefined });
+    expect(t).toMatchObject({ name: "ref", rawContent: Option.none(), closeRaw: Option.none() });
   });
 });
 
@@ -335,7 +335,7 @@ describe("wikitables (issue #1287)", () => {
     const t = only("{|\n| a\n|}", "Table");
     expect(t.open).toBe("\n");
     expect(t.rows).toHaveLength(1);
-    expect(t.rows[0].open).toBeUndefined();
+    expect(t.rows[0].open).toEqual(Option.none());
     expect(t.rows[0].cells).toHaveLength(1);
     expect(t.rows[0].cells[0]).toMatchObject({ header: false, inline: false });
     expect(text(t.rows[0].cells[0].content)).toBe(" a\n");
@@ -344,8 +344,8 @@ describe("wikitables (issue #1287)", () => {
   it("distinguishes an explicit |- row (open defined) from the implicit first row", () => {
     const t = only('{|\n| a\n|- style="x"\n| b\n|}', "Table");
     expect(t.rows).toHaveLength(2);
-    expect(t.rows[0].open).toBeUndefined();
-    expect(t.rows[1].open).toBe(' style="x"\n');
+    expect(t.rows[0].open).toEqual(Option.none());
+    expect(t.rows[1].open).toEqual(Option.some(' style="x"\n'));
   });
 
   it("parses header cells and keeps table attributes verbatim", () => {
@@ -368,13 +368,13 @@ describe("wikitables (issue #1287)", () => {
   it("splits a cell's leading attributes from its content on the single pipe", () => {
     const t = only('{|\n| style="color:red" | content\n|}', "Table");
     const cell = t.rows[0].cells[0];
-    expect(cell.attrs).toBe(' style="color:red" ');
+    expect(cell.attrs).toEqual(Option.some(' style="color:red" '));
     expect(text(cell.content)).toBe(" content\n");
   });
 
   it("does not split attrs when there is no pipe at all", () => {
     const t = only("{|\n| just content\n|}", "Table");
-    expect(t.rows[0].cells[0].attrs).toBeUndefined();
+    expect(t.rows[0].cells[0].attrs).toEqual(Option.none());
   });
 
   it("does not misread a wikilink's own pipe as the attrs separator", () => {
@@ -382,7 +382,7 @@ describe("wikitables (issue #1287)", () => {
     // when the text before the pipe contains `[[`.
     const t = only("{|\n| [[Foo|Bar]]\n|}", "Table");
     const cell = t.rows[0].cells[0];
-    expect(cell.attrs).toBeUndefined();
+    expect(cell.attrs).toEqual(Option.none());
     const link = firstNode(cell.content, "Wikilink");
     expect(text(link.target)).toBe("Foo");
     expect(link.segments.map(text)).toEqual(["Bar"]);
@@ -398,7 +398,7 @@ describe("wikitables (issue #1287)", () => {
   it("parses a caption with attributes, split the same way as cells", () => {
     const t = only('{|\n|+ style="text-align:left" | The caption\n| a\n|}', "Table");
     expect(t.captions).toHaveLength(1);
-    expect(t.captions[0].attrs).toBe(' style="text-align:left" ');
+    expect(t.captions[0].attrs).toEqual(Option.some(' style="text-align:left" '));
     expect(text(t.captions[0].content)).toBe(" The caption\n");
   });
 
@@ -419,7 +419,7 @@ describe("wikitables (issue #1287)", () => {
   it("treats a |- line as a row marker even where it looks like a negative number", () => {
     const t = only("{|\n| a\n|-5\n|}", "Table");
     expect(t.rows).toHaveLength(2);
-    expect(t.rows[1].open).toBe("5\n");
+    expect(t.rows[1].open).toEqual(Option.some("5\n"));
     expect(t.rows[1].cells).toHaveLength(0);
   });
 
@@ -461,7 +461,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
   it("keeps a template's own pipe out of the attribute split (the issue's example)", () => {
     const doc = parse("{|\n| {{flag|France}}\n|}");
     const cell = only("{|\n| {{flag|France}}\n|}", "Table").rows[0].cells[0];
-    expect(cell.attrs).toBeUndefined();
+    expect(cell.attrs).toEqual(Option.none());
     expect(text(cell.content)).toBe(" {{flag|France}}\n");
     expect(names(cell.content)).toEqual(["flag"]);
     expect(findTemplates(doc)).toHaveLength(1);
@@ -470,22 +470,22 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
 
   it("(A) keeps a citation in a cell whole, with and without attributes", () => {
     const bare = table("{|\n| Paris<ref>{{cite web|url=x}}</ref> {{efn|a=b}}\n|}").rows[0].cells[0];
-    expect(bare.attrs).toBeUndefined();
+    expect(bare.attrs).toEqual(Option.none());
     const ref = firstNode(bare.content, "Tag");
-    expect(ref).toMatchObject({ name: "ref", rawContent: "{{cite web|url=x}}" });
+    expect(ref).toMatchObject({ name: "ref", rawContent: Option.some("{{cite web|url=x}}") });
     expect(names(bare.content)).toEqual(["efn"]);
     expect(stripToText(bare.content)).toBe(" Paris \n");
 
     const withAttrs = table('{|\n| style="x" | Paris<ref>{{cite web|url=x}}</ref>\n|}').rows[0]
       .cells[0];
-    expect(withAttrs.attrs).toBe(' style="x" ');
+    expect(withAttrs.attrs).toEqual(Option.some(' style="x" '));
     expect(text(withAttrs.content)).toBe(" Paris<ref>{{cite web|url=x}}</ref>\n");
   });
 
   it("(B) keeps a template in an inline cell whole", () => {
     const cells = table("{|\n| a || {{flagicon|FRA}} b\n|}").rows[0].cells;
     expect(cells).toHaveLength(2);
-    expect(cells[1]).toMatchObject({ inline: true, attrs: undefined });
+    expect(cells[1]).toMatchObject({ inline: true, attrs: Option.none() });
     const [flag] = findTemplates(cells[1].content, "flagicon");
     expect(getParam(flag, 1)).toEqual(Option.some("FRA"));
     expect(stripToText(cells[1].content)).toBe("  b\n");
@@ -503,7 +503,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
     expect(t.rows).toHaveLength(1);
     const [first, second] = t.rows[0].cells;
     expect(t.rows[0].cells).toHaveLength(2);
-    expect(first.attrs).toBeUndefined();
+    expect(first.attrs).toEqual(Option.none());
     const [infobox] = findTemplates(first.content, "Infobox");
     expect(getParam(infobox, "a")).toEqual(Option.some("b"));
     expect(getParam(infobox, "c")).toEqual(Option.some("d"));
@@ -520,7 +520,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
   it("splits header cells on !! and attributes on | outside templates", () => {
     const cells = table('{|\n! scope="col" | {{abbr|A|Alpha}} !! {{abbr|B|Beta}}\n|}').rows[0]
       .cells;
-    expect(cells.map((c) => [c.header, c.inline, c.attrs])).toEqual([
+    expect(cells.map((c) => [c.header, c.inline, Option.getOrUndefined(c.attrs)])).toEqual([
       [true, false, ' scope="col" '],
       [true, true, undefined],
     ]);
@@ -536,10 +536,10 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
 
   it("keeps a template in a caption whole, with and without attributes", () => {
     const bare = table("{|\n|+ {{flag|France}} results\n| a\n|}").captions[0];
-    expect(bare.attrs).toBeUndefined();
+    expect(bare.attrs).toEqual(Option.none());
     expect(names(bare.content)).toEqual(["flag"]);
     const withAttrs = table('{|\n|+ style="x" | {{a|b}}\n| a\n|}').captions[0];
-    expect(withAttrs.attrs).toBe(' style="x" ');
+    expect(withAttrs.attrs).toEqual(Option.some(' style="x" '));
     expect(names(withAttrs.content)).toEqual(["a"]);
   });
 
@@ -548,7 +548,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
       "{|\n| {{{1|a||b}}} [[A||B]] <!-- x || y\n| z --> <nowiki>||\n|</nowiki> <ref name=a/> || w\n|}",
     ).rows[0].cells;
     expect(cells).toHaveLength(2);
-    expect(cells[0].attrs).toBeUndefined();
+    expect(cells[0].attrs).toEqual(Option.none());
     expect(cells[0].content.map((n) => n._tag)).toEqual(
       expect.arrayContaining(["Argument", "Wikilink", "Comment", "Tag"]),
     );
@@ -557,13 +557,13 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
 
   it("keeps the [[ guard: a wikilink before the first pipe means there are no attributes", () => {
     const cell = table("{|\n| [[A]] | b\n|}").rows[0].cells[0];
-    expect(cell.attrs).toBeUndefined();
+    expect(cell.attrs).toEqual(Option.none());
     expect(text(cell.content)).toBe(" [[A]] | b\n");
   });
 
   it("puts a template written in the attributes into attrs", () => {
     const cell = table('{|\n| style="{{x|y}}" | b\n|}').rows[0].cells[0];
-    expect(cell.attrs).toBe(' style="{{x|y}}" ');
+    expect(cell.attrs).toEqual(Option.some(' style="{{x|y}}" '));
     expect(text(cell.content)).toBe(" b\n");
   });
 
@@ -587,20 +587,23 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
     // kind left open inside it stays literal, as recursive descent leaves it.
     const cells = (src: string) => table(src).rows[0].cells;
     const [braces] = cells("{|\n| {{a|[[b}} || c\n|}");
-    expect(braces.attrs).toBeUndefined();
+    expect(braces.attrs).toEqual(Option.none());
     expect(names(braces.content)).toEqual(["a"]);
     const [link] = cells("{|\n| [[a|{{b]] || c\n|}");
-    expect(link.attrs).toBeUndefined();
+    expect(link.attrs).toEqual(Option.none());
     expect(link.content.some(P.isTagged("Wikilink"))).toBe(true);
     // Three braces closed by two: the first is literal, the rest a template.
     const [three] = cells("{|\n| {{{a|b}} || c\n|}");
-    expect(three.attrs).toBeUndefined();
+    expect(three.attrs).toEqual(Option.none());
     expect(text(three.content)).toBe(" {{{a|b}} ");
     // A single `}` or `]` closes nothing.
-    expect(cells("{|\n| {{a|b} || c\n|}").map((c) => c.attrs)).toEqual([" {{a", undefined]);
+    expect(cells("{|\n| {{a|b} || c\n|}").map((c) => Option.getOrUndefined(c.attrs))).toEqual([
+      " {{a",
+      undefined,
+    ]);
     // Five braces closed by five: an argument inside a template.
     const [five] = cells("{|\n| {{{{{a|b}}}}} || c\n|}");
-    expect(five.attrs).toBeUndefined();
+    expect(five.attrs).toEqual(Option.none());
     expect(text(five.content)).toBe(" {{{{{a|b}}}}} ");
   });
 
@@ -612,7 +615,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
         t.rows.map((r) => r.cells.length),
         open,
       ).toEqual([3, 1]);
-      expect(t.rows[0].cells[2].attrs, open).toBeUndefined();
+      expect(t.rows[0].cells[2].attrs, open).toEqual(Option.none());
       expect(names(t.rows[0].cells[2].content), open).toEqual(["t"]);
       expect(text(t.rows[1].cells[0].content), open).toBe(" d\n");
     });
@@ -634,7 +637,15 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
 
   it("splits a header line on || as well as !!, every piece a header cell", () => {
     const cells = table("{|\n! a || b !! c\n|}").rows[0].cells;
-    expect(cells.map((c) => [c.marker, c.header, c.inline, c.attrs, text(c.content)])).toEqual([
+    expect(
+      cells.map((c) => [
+        c.marker,
+        c.header,
+        c.inline,
+        Option.getOrUndefined(c.attrs),
+        text(c.content),
+      ]),
+    ).toEqual([
       ["!", true, false, undefined, " a "],
       ["||", true, true, undefined, " b "],
       ["!!", true, true, undefined, " c\n"],
@@ -648,7 +659,7 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
 
   it("splits a header cell's attributes after the || split, not on its first pipe", () => {
     const cells = table('{|\n! scope="col" | a || b\n|}').rows[0].cells;
-    expect(cells.map((c) => [c.attrs, text(c.content)])).toEqual([
+    expect(cells.map((c) => [Option.getOrUndefined(c.attrs), text(c.content)])).toEqual([
       [' scope="col" ', " a "],
       [undefined, " b\n"],
     ]);
@@ -672,7 +683,9 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
 
   it("splits a |+ line on || into one caption per piece, keeping every character", () => {
     const t = table('{|\n|+ a || style="x" | b !! c\nmore\n|-\n| d\n|}');
-    expect(t.captions.map((c) => [c.inline, c.attrs, text(c.content), c.span])).toEqual([
+    expect(
+      t.captions.map((c) => [c.inline, Option.getOrUndefined(c.attrs), text(c.content), c.span]),
+    ).toEqual([
       [false, undefined, " a ", { start: 3, end: 8 }],
       [true, ' style="x" ', " b !! c\nmore\n", { start: 8, end: 35 }],
     ]);
@@ -712,7 +725,7 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
   it("keeps a caption between two cells where it was, ending the first row (the issue's first repro)", () => {
     const t = table("{|\n|a\n|+cap\n|b\n|}");
     expect(layout(t)).toEqual(["row:a", "caption:cap", "row:b"]);
-    expect(t.rows.map((r) => [r.open, r.span])).toEqual([
+    expect(t.rows.map((r) => [Option.getOrUndefined(r.open), r.span])).toEqual([
       [undefined, { start: 3, end: 6 }],
       [undefined, { start: 12, end: 15 }],
     ]);
@@ -722,7 +735,7 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
   it("keeps a caption after a bare |- where it was (the issue's second repro)", () => {
     const t = table("{|\n|-\n|+cap\n|a\n|}");
     expect(layout(t)).toEqual(["row:", "caption:cap", "row:a"]);
-    expect(t.rows[0].open).toBe("\n");
+    expect(t.rows[0].open).toEqual(Option.some("\n"));
   });
 
   it("gives every piece of a mid-table |+ … || … line the same row", () => {
@@ -763,7 +776,7 @@ describe("wikitables: the -{ attribute guard (#158)", () => {
 
   it("reads a cell with -{ before its first | as all content (the issue's example)", () => {
     const cells = table("{|\n| -{ a|b }- || c\n|}").rows[0].cells;
-    expect(cells.map((c) => [c.attrs, text(c.content)])).toEqual([
+    expect(cells.map((c) => [Option.getOrUndefined(c.attrs), text(c.content)])).toEqual([
       [undefined, " -{ a|b }- "],
       [undefined, " c\n"],
     ]);
@@ -771,14 +784,16 @@ describe("wikitables: the -{ attribute guard (#158)", () => {
 
   it("applies the guard to a caption", () => {
     const [caption] = table("{|\n|+ -{zh-hans:简;zh-hant:繁}- | x\n|}").captions;
-    expect(caption.attrs).toBeUndefined();
+    expect(caption.attrs).toEqual(Option.none());
     expect(text(caption.content)).toBe(" -{zh-hans:简;zh-hant:繁}- | x\n");
   });
 
   it("keeps attributes when -{ comes only after the first |, or inside a template", () => {
-    expect(table('{|\n| style="x" | -{ a }-\n|}').rows[0].cells[0].attrs).toBe(' style="x" ');
-    expect(table('{|\n| {{t|-{}} style="x" | a\n|}').rows[0].cells[0].attrs).toBe(
-      ' {{t|-{}} style="x" ',
+    expect(table('{|\n| style="x" | -{ a }-\n|}').rows[0].cells[0].attrs).toEqual(
+      Option.some(' style="x" '),
+    );
+    expect(table('{|\n| {{t|-{}} style="x" | a\n|}').rows[0].cells[0].attrs).toEqual(
+      Option.some(' {{t|-{}} style="x" '),
     );
   });
 

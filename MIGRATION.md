@@ -100,3 +100,12 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 
 - `paramName`, `getParam` and `redirectTarget` return `Option<string>`.
 - A `TemplateRenderer`'s `param(key)` returns `Option<string>`: `param(1) ?? ""` becomes `Option.getOrElse(param(1), () => "")`.
+- AST fields that are now `Option`s, always present (no longer `undefined`):
+  - `Param.name`: `None` for a positional parameter.
+  - `Argument.default`.
+  - `ExternalLink.label`.
+  - `Tag.rawContent` and `Tag.closeRaw`.
+  - `TableCaption.attrs` and `TableCell.attrs`.
+  - `TableRow.open`: `None` for an implicit row.
+
+  Code that builds nodes by hand passes `Option.none()` or `Option.some(…)`. `serialize(parse(s)) === s` still holds.
