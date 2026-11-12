@@ -67,12 +67,14 @@ const run = <A, E>(effect: Effect.Effect<A, E, Core.WikimediaClient>): Promise<A
 
 describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
   it("fetches Douglas Adams's wikitext via Action", async () => {
-    const result = await run(Action.getWikitext("en.wikipedia.org", "Douglas Adams"));
-    expect(result).not.toBeNull();
-    expect(result?.title).toBe("Douglas Adams");
-    expect(result?.revisionId).toBe(1198166957);
-    expect(result?.wikitext).toContain("Douglas Noel Adams");
-    expect(result?.wikitext).toContain("[[Category:English novelists]]");
+    const result = Option.getOrElse(
+      await run(Action.getWikitext("en.wikipedia.org", "Douglas Adams")),
+      () => expect.unreachable("no wikitext"),
+    );
+    expect(result.title).toBe("Douglas Adams");
+    expect(result.revisionId).toEqual(Option.some(1198166957));
+    expect(result.wikitext).toContain("Douglas Noel Adams");
+    expect(result.wikitext).toContain("[[Category:English novelists]]");
   });
 
   it("fetches Douglas Adams's parsed HTML via Rest, matching the wikitext's revision", async () => {
@@ -89,7 +91,8 @@ describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
     expect(html).toContain("<b>Douglas Noel Adams</b>");
     expect(html).toContain('<h2 id="Life">Life</h2>');
     // The REST metadata's latest revision matches the Action wikitext's revision — one consistent page.
-    expect(metadata.latestRevisionId).toEqual(Option.fromNullOr(wikitext?.revisionId));
+    expect(Option.isSome(metadata.latestRevisionId)).toBe(true);
+    expect(metadata.latestRevisionId).toEqual(Option.flatMap(wikitext, (page) => page.revisionId));
   });
 
   it("builds Douglas Adams's Commons portrait file URL and fetches its file info", async () => {

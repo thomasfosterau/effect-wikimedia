@@ -80,19 +80,21 @@ describe("Action.getWikitext", () => {
       },
     });
     const result = await run(layer, Action.getWikitext("en.wikipedia.org", "Douglas Adams"));
-    expect(result).toEqual({
-      pageId: 42,
-      title: "Douglas Adams",
-      revisionId: 987654,
-      timestamp: "2024-01-01T00:00:00Z",
-      wikitext: "'''Douglas Adams''' was a writer.",
-    });
+    expect(result).toEqual(
+      Option.some({
+        pageId: Option.some(42),
+        title: "Douglas Adams",
+        revisionId: Option.some(987654),
+        timestamp: Option.some("2024-01-01T00:00:00Z"),
+        wikitext: "'''Douglas Adams''' was a writer.",
+      }),
+    );
     expect(urls[0]).toContain("action=query");
     expect(urls[0]).toContain("rvslots=main");
     expect(urls[0]).toContain("titles=Douglas_Adams");
   });
 
-  it("returns null for a missing page", async () => {
+  it("returns None for a missing page", async () => {
     const { layer } = stubRouter({
       "action=query": {
         status: 200,
@@ -100,7 +102,7 @@ describe("Action.getWikitext", () => {
       },
     });
     const result = await run(layer, Action.getWikitext("en.wikipedia.org", "Nonexistent"));
-    expect(result).toBeNull();
+    expect(result).toEqual(Option.none());
   });
 
   it("rejects a blank title before any request", async () => {
@@ -191,7 +193,7 @@ describe("Action.getWikitext", () => {
       },
     });
     const result = await run(layer, Action.getWikitext("en.wiktionary.org", "cat"));
-    expect(result?.wikitext).toBe("==English==");
+    expect(Option.map(result, (page) => page.wikitext)).toEqual(Option.some("==English=="));
     expect(urls[0]).toMatch(/^https:\/\/en\.wiktionary\.org\/w\/api\.php\?/);
   });
 
@@ -229,16 +231,18 @@ describe("Action.getPageMetadata", () => {
       },
     });
     const result = await run(layer, Action.getPageMetadata("en.wikipedia.org", "Douglas Adams"));
-    expect(result).toEqual({
-      pageId: 42,
-      title: "Douglas Adams",
-      contentModel: "wikitext",
-      language: "en",
-      touched: "2024-01-01T00:00:00Z",
-      lastRevisionId: 987654,
-      length: 54321,
-      fullUrl: "https://en.wikipedia.org/wiki/Douglas_Adams",
-    });
+    expect(result).toEqual(
+      Option.some({
+        pageId: Option.some(42),
+        title: "Douglas Adams",
+        contentModel: Option.some("wikitext"),
+        language: Option.some("en"),
+        touched: Option.some("2024-01-01T00:00:00Z"),
+        lastRevisionId: Option.some(987654),
+        length: Option.some(54321),
+        fullUrl: Option.some("https://en.wikipedia.org/wiki/Douglas_Adams"),
+      }),
+    );
   });
 
   it("drops a non-https fullurl rather than trusting it", async () => {
@@ -251,21 +255,24 @@ describe("Action.getPageMetadata", () => {
       },
     });
     const result = await run(layer, Action.getPageMetadata("en.wikipedia.org", "X"));
-    expect(result?.fullUrl).toBeNull();
+    expect(Option.flatMap(result, (page) => page.fullUrl)).toEqual(Option.none());
+    expect(Option.isSome(result)).toBe(true);
   });
 
-  it("returns null for a missing page", async () => {
+  it("returns None for a missing page", async () => {
     const { layer } = stubRouter({
       "prop=info": { status: 200, body: { query: { pages: { "-1": { missing: "" } } } } },
     });
-    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Nonexistent"))).toBeNull();
+    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Nonexistent"))).toEqual(
+      Option.none(),
+    );
   });
 
   // MediaWiki's `ApiQuery` writes an invalid title as `{ title, invalidreason,
   // invalid }` and an existing special page as `{ ns, title, special }`, with
   // no `missing` flag on either (`formatversion=1`, the default this client
   // requests, sends each flag as `""`).
-  it("returns null for a title the API reports as invalid", async () => {
+  it("returns None for a title the API reports as invalid", async () => {
     const { urls, layer } = stubRouter({
       "prop=info": {
         status: 200,
@@ -283,20 +290,22 @@ describe("Action.getPageMetadata", () => {
         },
       },
     });
-    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Talk:../Foo"))).toBeNull();
+    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Talk:../Foo"))).toEqual(
+      Option.none(),
+    );
     expect(urls).toHaveLength(1);
   });
 
-  it("returns null for an existing special page", async () => {
+  it("returns None for an existing special page", async () => {
     const { layer } = stubRouter({
       "prop=info": {
         status: 200,
         body: { query: { pages: { "-1": { ns: -1, title: "Special:Random", special: "" } } } },
       },
     });
-    expect(
-      await run(layer, Action.getPageMetadata("en.wikipedia.org", "Special:Random")),
-    ).toBeNull();
+    expect(await run(layer, Action.getPageMetadata("en.wikipedia.org", "Special:Random"))).toEqual(
+      Option.none(),
+    );
   });
 });
 
@@ -325,10 +334,10 @@ describe("Action.search", () => {
     );
     expect(result).toEqual([
       {
-        pageId: 42,
+        pageId: Option.some(42),
         title: "Douglas Adams",
-        snippet: "<span>Douglas</span> Adams",
-        wordCount: 3000,
+        snippet: Option.some("<span>Douglas</span> Adams"),
+        wordCount: Option.some(3000),
       },
     ]);
     expect(urls[0]).toContain("srlimit=5");
@@ -372,14 +381,16 @@ describe("Action.parsePage", () => {
       },
     });
     const result = await run(layer, Action.parsePage("en.wikipedia.org", "Douglas Adams"));
-    expect(result).toEqual({
-      pageId: 42,
-      title: "Douglas Adams",
-      sections: [{ level: 2, title: "Life", anchor: "Life" }],
-      links: ["The Hitchhiker's Guide to the Galaxy"],
-      categories: ["English novelists"],
-      templates: ["Infobox writer"],
-    });
+    expect(result).toEqual(
+      Option.some({
+        pageId: Option.some(42),
+        title: "Douglas Adams",
+        sections: [{ level: Option.some(2), title: "Life", anchor: Option.some("Life") }],
+        links: ["The Hitchhiker's Guide to the Galaxy"],
+        categories: ["English novelists"],
+        templates: ["Infobox writer"],
+      }),
+    );
   });
 
   // Hand-derived from MediaWiki's ApiParse (`prop=tocdata`, which writes
@@ -427,23 +438,27 @@ describe("Action.parsePage", () => {
       },
     });
     const result = await run(layer, Action.parsePage("en.wikipedia.org", "Douglas Adams"));
-    expect(result?.sections).toEqual([
-      { level: 2, title: "Early life", anchor: "Early_life" },
-      {
-        level: 3,
-        title: "<i>The Hitchhiker's Guide</i> & radio",
-        anchor: "The_Hitchhiker's_Guide_&_radio",
-      },
-    ]);
+    expect(Option.map(result, (page) => page.sections)).toEqual(
+      Option.some([
+        { level: Option.some(2), title: "Early life", anchor: Option.some("Early_life") },
+        {
+          level: Option.some(3),
+          title: "<i>The Hitchhiker's Guide</i> & radio",
+          anchor: Option.some("The_Hitchhiker's_Guide_&_radio"),
+        },
+      ]),
+    );
     const prop = new URL(urls[0] ?? "").searchParams.get("prop");
     expect(prop?.split("|")).toEqual(["tocdata", "links", "categories", "templates"]);
   });
 
-  it("returns null when the endpoint has no parse result", async () => {
+  it("returns None when the endpoint has no parse result", async () => {
     const { layer } = stubRouter({
       "action=parse": { status: 200, body: { error: { code: "missingtitle" } } },
     });
-    expect(await run(layer, Action.parsePage("en.wikipedia.org", "Nonexistent"))).toBeNull();
+    expect(await run(layer, Action.parsePage("en.wikipedia.org", "Nonexistent"))).toEqual(
+      Option.none(),
+    );
   });
 });
 
