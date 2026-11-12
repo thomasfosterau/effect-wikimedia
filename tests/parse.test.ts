@@ -7,6 +7,7 @@
  * @module tests/parse
  */
 
+import * as Option from "effect/Option";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
@@ -486,7 +487,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
     expect(cells).toHaveLength(2);
     expect(cells[1]).toMatchObject({ inline: true, attrs: undefined });
     const [flag] = findTemplates(cells[1].content, "flagicon");
-    expect(getParam(flag, 1)).toBe("FRA");
+    expect(getParam(flag, 1)).toEqual(Option.some("FRA"));
     expect(stripToText(cells[1].content)).toBe("  b\n");
   });
 
@@ -504,8 +505,8 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
     expect(t.rows[0].cells).toHaveLength(2);
     expect(first.attrs).toBeUndefined();
     const [infobox] = findTemplates(first.content, "Infobox");
-    expect(getParam(infobox, "a")).toBe("b");
-    expect(getParam(infobox, "c")).toBe("d");
+    expect(getParam(infobox, "a")).toEqual(Option.some("b"));
+    expect(getParam(infobox, "c")).toEqual(Option.some("d"));
     expect(text(second.content)).toBe(" next\n");
   });
 

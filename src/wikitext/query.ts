@@ -117,9 +117,9 @@ export function findTemplates(input: Fragment, name?: string): Template[] {
   return out;
 }
 
-/** A parameter's name as trimmed plain text, or `null` when positional. */
-export function paramName(param: Param): string | null {
-  return param.name === undefined ? null : serializeNodes(param.name).trim();
+/** A parameter's name as trimmed plain text, or `None` when positional. */
+export function paramName(param: Param): Option.Option<string> {
+  return Option.map(Option.fromUndefinedOr(param.name), (name) => serializeNodes(name).trim());
 }
 
 /** A parameter's value as trimmed plain text. */
@@ -134,10 +134,10 @@ export function paramValue(param: Param): string {
  */
 export function effectiveParams(template: Template): HashMap.HashMap<string, Param> {
   const [, entries] = Arr.mapAccum(template.params, 0, (positional, p) => {
-    const name = paramName(p);
-    return name === null
-      ? [positional + 1, [String(positional + 1), p] as const]
-      : [positional, [name, p] as const];
+    return Option.match(paramName(p), {
+      onNone: () => [positional + 1, [String(positional + 1), p] as const] as const,
+      onSome: (name) => [positional, [name, p] as const] as const,
+    });
   });
   return HashMap.fromIterable(entries);
 }
@@ -154,10 +154,10 @@ export function templateParams(template: Template): HashMap.HashMap<string, stri
 
 /**
  * Reads one template parameter by name or 1-based positional index, trimmed.
- * Returns `undefined` when absent.
+ * Returns `None` when absent.
  */
-export function getParam(template: Template, key: string | number): string | undefined {
-  return Option.getOrUndefined(HashMap.get(templateParams(template), String(key)));
+export function getParam(template: Template, key: string | number): Option.Option<string> {
+  return HashMap.get(templateParams(template), String(key));
 }
 
 // ── strip to plain text ───────────────────────────────────────────────
@@ -249,12 +249,12 @@ export interface TemplateRenderContext {
   /**
    * The plain text of the template's parameter `key` (a name, or a 1-based
    * positional index), stripped with {@link TemplateRenderContext.strip};
-   * `undefined` when the template has no such parameter. Keys resolve as in
+   * `None` when the template has no such parameter. Keys resolve as in
    * {@link templateParams}: later duplicates win, and `1=` overrides the
    * first positional value. As in MediaWiki, a named value is trimmed and a
    * positional one keeps its whitespace.
    */
-  readonly param: (key: string | number) => string | undefined;
+  readonly param: (key: string | number) => Option.Option<string>;
 }
 
 /**
@@ -302,7 +302,7 @@ export interface StripToTextOptions {
 }
 
 /** Renders a template as its first positional parameter, or `""` without one. */
-const firstParam: TemplateRenderer = (_, { param }) => param(1) ?? "";
+const firstParam: TemplateRenderer = (_, { param }) => Option.getOrElse(param(1), () => "");
 
 /**
  * A small set of {@link TemplateRenderer}s for enwiki's purely textual
@@ -321,7 +321,7 @@ export const basicTemplateRenderers = {
   /** `{{abbr|short|expansion}}` (an abbreviation with a tooltip) renders as `short`. */
   abbr: firstParam,
   /** `{{lang|code|text}}` (text tagged with a language code) renders as `text`. */
-  lang: (_, { param }) => param(2) ?? "",
+  lang: (_, { param }) => Option.getOrElse(param(2), () => ""),
 } as const satisfies Readonly<Record<string, TemplateRenderer>>;
 
 /**
@@ -429,11 +429,9 @@ const stripDefault = makeStripper(() => "", CANONICAL_HIDDEN_PREFIXES);
 
 /** The renderer context for one template, under the projection `strip`. */
 function renderContext(template: Template, strip: Strip): TemplateRenderContext {
-  const param = (key: string | number): string | undefined =>
-    Option.getOrUndefined(
-      Option.map(HashMap.get(effectiveParams(template), String(key)), (p) =>
-        p.name === undefined ? strip(p.value) : strip(p.value).trim(),
-      ),
+  const param = (key: string | number): Option.Option<string> =>
+    Option.map(HashMap.get(effectiveParams(template), String(key)), (p) =>
+      p.name === undefined ? strip(p.value) : strip(p.value).trim(),
     );
   return { strip, param };
 }

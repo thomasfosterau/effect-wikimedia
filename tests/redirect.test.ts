@@ -5,6 +5,7 @@
  * @module tests/redirect
  */
 
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 import { parse, redirectTarget, serialize } from "../src/wikitext/index.ts";
 
@@ -45,22 +46,30 @@ describe("redirectTarget", () => {
     [" #REDIRECT [[Target]]", null],
   ];
   it.each(cases)("%j → %j", (source, expected) => {
-    expect(redirectTarget(parse(source))).toBe(expected);
+    expect(redirectTarget(parse(source))).toEqual(Option.fromNullOr(expected));
   });
 
   it("accepts a fragment as well as a document", () => {
-    expect(redirectTarget(parse("#REDIRECT [[Target]]").children)).toBe("Target");
+    expect(redirectTarget(parse("#REDIRECT [[Target]]").children)).toEqual(Option.some("Target"));
   });
 
   it("accepts caller-supplied aliases, case-insensitively, alongside #REDIRECT", () => {
     const aliases = ["#WEITERLEITUNG", "#redirection", "#a.b"];
-    expect(redirectTarget(parse("#weiterleitung [[Ziel]]"), { aliases })).toBe("Ziel");
-    expect(redirectTarget(parse("#REDIRECTION [[Cible]]"), { aliases })).toBe("Cible");
-    expect(redirectTarget(parse("#REDIRECT [[Target]]"), { aliases })).toBe("Target");
+    expect(redirectTarget(parse("#weiterleitung [[Ziel]]"), { aliases })).toEqual(
+      Option.some("Ziel"),
+    );
+    expect(redirectTarget(parse("#REDIRECTION [[Cible]]"), { aliases })).toEqual(
+      Option.some("Cible"),
+    );
+    expect(redirectTarget(parse("#REDIRECT [[Target]]"), { aliases })).toEqual(
+      Option.some("Target"),
+    );
     // An alias is literal text, not a pattern.
-    expect(redirectTarget(parse("#a.b [[T]]"), { aliases })).toBe("T");
-    expect(redirectTarget(parse("#axb [[T]]"), { aliases })).toBeNull();
-    expect(redirectTarget(parse("#REDIRECT [[T]]"), { aliases: undefined })).toBe("T");
+    expect(redirectTarget(parse("#a.b [[T]]"), { aliases })).toEqual(Option.some("T"));
+    expect(redirectTarget(parse("#axb [[T]]"), { aliases })).toEqual(Option.none());
+    expect(redirectTarget(parse("#REDIRECT [[T]]"), { aliases: undefined })).toEqual(
+      Option.some("T"),
+    );
   });
 
   it("leaves the document's round trip untouched", () => {
