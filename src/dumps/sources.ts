@@ -230,16 +230,19 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): Option.Opt
 /**
  * A classic stream's `write()`, typed as it behaves: Node's `Duplex` type says
  * `boolean`, but a classic `through` stream (unbzip2-stream) can return
- * `undefined`, which means "keep writing", like `true`.
+ * `undefined`, which is `None` here and means "keep writing", like `true`.
  */
-const writeClassic = (classic: Duplex, chunk: Uint8Array): boolean | undefined =>
-  classic.write(chunk);
+const writeClassic = (classic: Duplex, chunk: Uint8Array): Option.Option<boolean> =>
+  Option.fromUndefinedOr(classic.write(chunk));
 
 const adaptClassicDuplex = (classic: Duplex): Duplex => {
   let ended = false;
   const adapter = new Duplex({
     write: (chunk: Uint8Array, _encoding, callback) => {
-      const written = attempt(() => writeClassic(classic, chunk) !== false, callback);
+      const written = attempt(
+        () => Option.getOrElse(writeClassic(classic, chunk), () => true),
+        callback,
+      );
       if (Option.isSome(written)) {
         if (written.value) callback();
         else classic.once("drain", () => callback());

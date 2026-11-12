@@ -1051,7 +1051,9 @@ describe("interruption teardown", () => {
             expect(exit).not.toBe("hung");
             if (exit === "hung") return;
             expect(Exit.hasInterrupts(exit)).toBe(true);
-            expect(Option.map(created.stage, (stage) => stage.destroyed)).toEqual(Option.some(true));
+            expect(Option.map(created.stage, (stage) => stage.destroyed)).toEqual(
+              Option.some(true),
+            );
           }),
         );
       }),
