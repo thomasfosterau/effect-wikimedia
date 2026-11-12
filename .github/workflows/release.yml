@@ -7,9 +7,10 @@ name: Release
 #   calls for: `version` while unreleased changesets exist, `publish` once none
 #   remain and some package version is not on npm yet (`changeset
 #   publish-plan`), else `none`.
-# - `version` opens/updates the "chore: version packages" PR. It holds a
-#   write-scoped token but no `id-token`, so it cannot publish, and runs outside
-#   the `release` environment, so it needs no approval.
+# - `version` opens/updates the "chore: version packages" PR and assigns the
+#   owner to it. It holds a write-scoped token but no `id-token`, so it cannot
+#   publish, and runs outside the `release` environment, so it needs no
+#   approval.
 # - `publish` is the only job in the protected `release` environment and the
 #   only one with `id-token: write`: it publishes to npm via OIDC trusted
 #   publishing and tags the release, after the owner approves it (once per
@@ -77,11 +78,22 @@ jobs:
           node-version: "lts"
           cache: true
       - name: Create or update the version PR
+        id: version
         uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           script: pnpm run version
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
+      # The version PR is opened with `GITHUB_TOKEN` in the owner's absence,
+      # so it is the one non-Dependabot PR the owner did not open: assign them
+      # (`pr-number` is the PR the step created or updated; empty if none).
+      - name: Assign the owner to the version PR
+        if: steps.version.outputs.pr-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.version.outputs.pr-number }}
+        run: gh pr edit "$PR_NUMBER" --add-assignee thomasfosterau
 
   publish:
     name: Publish to npm
