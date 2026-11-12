@@ -31,7 +31,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
+import * as Console from "effect/Console";
 import { describe, expect, it } from "vite-plus/test";
+import { runTest } from "./helpers/effect.ts";
 import { parse, serialize } from "../src/wikitext/index.ts";
 
 const ada = readFileSync(
@@ -39,8 +41,11 @@ const ada = readFileSync(
   "utf8",
 );
 
+/** Writes one measured timing to the CI log through the `Console` service. */
+const logTiming = (line: string): Promise<void> => runTest(Console.log(line));
+
 /** The best of `runs` timings of `run`, in ms, after `warmups` untimed runs (a JIT warm-up). */
-function bestTime<A>(run: () => A, warmups: number, runs: number): number {
+function bestTime(run: () => void, warmups: number, runs: number): number {
   Arr.makeBy(warmups, run);
   return Math.min(
     ...Arr.makeBy(runs, () => {
@@ -55,13 +60,12 @@ function bestTime<A>(run: () => A, warmups: number, runs: number): number {
 const largeArticle = `${ada}\n`.repeat(60);
 
 describe("performance floor", () => {
-  it(`parses a large article (${largeArticle.length} chars) fast`, () => {
+  it(`parses a large article (${largeArticle.length} chars) fast`, async () => {
     // Warm up the JIT so the measurement reflects steady state.
     Arr.makeBy(5, () => serialize(parse(largeArticle)));
     const best = bestTime(() => parse(largeArticle), 0, 30);
 
-    // eslint-disable-next-line no-console
-    console.log(`[perf] parse ${largeArticle.length} chars: best ${best.toFixed(2)} ms`);
+    await logTiming(`[perf] parse ${largeArticle.length} chars: best ${best.toFixed(2)} ms`);
 
     // Single-digit ms is the target (1.16 ms uncontended); 60 ms is the
     // regression ceiling — sized to clear the worst contended measurement
@@ -107,10 +111,9 @@ describe("performance floor: wikitables (#132)", () => {
     ["a cell holding one long run of { then of }", braceRunTable],
     ["a cell holding one long run of [[ then of ]]", linkRunTable],
     ["a cell holding [[{{ runs closed only by }}", mixedRunTable],
-  ] as const)("parses %s in linear time", (name, src) => {
+  ] as const)("parses %s in linear time", async (name, src) => {
     const best = bestParseTime(src);
-    // eslint-disable-next-line no-console
-    console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
+    await logTiming(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
     expect(best).toBeLessThan(250);
     expect(serialize(parse(src))).toBe(src);
   });
@@ -134,10 +137,9 @@ describe("performance floor: unclosed openers (#152, #159)", () => {
     ["a page of unclosed {| lines", "{|\n".repeat(13_334)],
     ["a page of unclosed {| and {{ lines", "{|\n| {{\n".repeat(5000)],
     ["a page of unclosed [[ lines", "[[\n".repeat(13_334)],
-  ] as const)("parses %s in linear time", (name, src) => {
+  ] as const)("parses %s in linear time", async (name, src) => {
     const best = bestParseTime(src);
-    // eslint-disable-next-line no-console
-    console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
+    await logTiming(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
     expect(best).toBeLessThan(250);
     expect(serialize(parse(src))).toBe(src);
   });
@@ -156,10 +158,9 @@ describe("performance floor: openers closed only at the page end (#179)", () => 
     ["a page of {{{ lines closed by one }}}", `${"{{{\n".repeat(4000)}}}}`],
     ["a page of [[ lines closed by one ]]", `${"[[\n".repeat(4000)}]]`],
     ["a page of {| and {{ lines closed at its end", `${"{|\n| {{\n".repeat(2000)}|}\n}}`],
-  ] as const)("parses %s in linear time", (name, src) => {
+  ] as const)("parses %s in linear time", async (name, src) => {
     const best = bestParseTime(src);
-    // eslint-disable-next-line no-console
-    console.log(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
+    await logTiming(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
     expect(best).toBeLessThan(250);
     expect(serialize(parse(src))).toBe(src);
   });
