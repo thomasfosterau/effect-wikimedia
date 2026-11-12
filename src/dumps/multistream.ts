@@ -144,9 +144,9 @@ export interface MultistreamRangesOptions {
    * The size in bytes of the compressed `.xml.bz2`, which the index doesn't
    * record. Given, it closes the last range (`end: fileSize`), and an entry
    * whose offset is at or past it fails the stream with a
-   * {@link MultistreamIndexError}. Omitted, the last range's `end` is `null`.
+   * {@link MultistreamIndexError}. Omitted, the last range's `end` is `None`.
    */
-  readonly fileSize?: number | undefined;
+  readonly fileSize?: number;
 }
 
 /** Upper bound on how much of an offending line is retained on a {@link MultistreamIndexError}. */
@@ -157,10 +157,10 @@ const MAX_RAW_LENGTH = 500;
 /** `offset:pageId:title`; the title (group 3) runs to the end of the line and may hold colons. */
 const INDEX_LINE_RE = /^(\d{1,18}):(\d{1,18}):(.*)$/s;
 
-/** Parses a decimal field already matched as 1–18 digits; `null` past `Number.MAX_SAFE_INTEGER`. */
-function toSafeInt(digits: string): number | null {
+/** Parses a decimal field already matched as 1–18 digits; `None` past `Number.MAX_SAFE_INTEGER`. */
+function toSafeInt(digits: string): Option.Option<number> {
   const n = Number.parseInt(digits, 10);
-  return Number.isSafeInteger(n) ? n : null;
+  return Number.isSafeInteger(n) ? Option.some(n) : Option.none();
 }
 
 const malformed = (line: string, lineNumber: number): MultistreamIndexError =>
@@ -172,7 +172,7 @@ const malformed = (line: string, lineNumber: number): MultistreamIndexError =>
 
 /**
  * Decodes one line of a multistream index: a success holding its
- * {@link MultistreamIndexEntry}, or holding `null` for a blank line (the
+ * {@link MultistreamIndexEntry}, or holding `None` for a blank line (the
  * index ends in a newline, and a line of only whitespace carries nothing),
  * or a failure holding a `"dumps/malformed-index-line"`
  * {@link MultistreamIndexError} for a line that isn't `offset:pageId:title`.
@@ -191,10 +191,12 @@ export function decodeIndexLine(
   const offset = toSafeInt(offsetDigits);
   const pageId = toSafeInt(pageIdDigits);
   const title = decodeXmlEntities(rawTitle);
-  if (offset === null || pageId === null || Str.isEmpty(title)) {
+  if (Option.isNone(offset) || Option.isNone(pageId) || Str.isEmpty(title)) {
     return Result.fail(malformed(line, lineNumber));
   }
-  return Result.succeed(Option.some({ line: lineNumber, offset, pageId, title }));
+  return Result.succeed(
+    Option.some({ line: lineNumber, offset: offset.value, pageId: pageId.value, title }),
+  );
 }
 
 // ── The index stream ─────────────────────────────────────────────────────
@@ -249,27 +251,31 @@ const closeRange = (range: OpenRange, end: Option.Option<number>): MultistreamRa
   end,
 });
 
-/** The offset check for one entry: `null` when it passes. */
+/** The offset check for one entry: `None` when it passes. */
 function offsetError(
-  open: OpenRange | null,
+  open: Option.Option<OpenRange>,
   entry: MultistreamIndexEntry,
-  fileSize: number | undefined,
-): MultistreamIndexError | null {
+  fileSize?: number,
+): Option.Option<MultistreamIndexError> {
   if (fileSize !== undefined && entry.offset >= fileSize) {
-    return new MultistreamIndexError({
-      reason: "dumps/index-offset-past-file-size",
-      line: entry.line,
-      detail: `offset ${entry.offset} is at or past the file size ${fileSize}`,
-    });
+    return Option.some(
+      new MultistreamIndexError({
+        reason: "dumps/index-offset-past-file-size",
+        line: entry.line,
+        detail: `offset ${entry.offset} is at or past the file size ${fileSize}`,
+      }),
+    );
   }
-  if (open !== null && entry.offset < open.start) {
-    return new MultistreamIndexError({
-      reason: "dumps/index-offset-decreased",
-      line: entry.line,
-      detail: `offset ${entry.offset} is below the previous offset ${open.start}`,
-    });
+  if (Option.isSome(open) && entry.offset < open.value.start) {
+    return Option.some(
+      new MultistreamIndexError({
+        reason: "dumps/index-offset-decreased",
+        line: entry.line,
+        detail: `offset ${entry.offset} is below the previous offset ${open.value.start}`,
+      }),
+    );
   }
-  return null;
+  return Option.none();
 }
 
 /**
@@ -278,31 +284,35 @@ function offsetError(
  * every range closed before the offending entry is emitted first.
  */
 const groupEntry =
-  (fileSize: number | undefined) =>
+  (fileSize?: number) =>
   (
-    open: OpenRange | null,
+    open: Option.Option<OpenRange>,
     entry: MultistreamIndexEntry,
   ): Effect.Effect<
-    readonly [OpenRange, ReadonlyArray<MultistreamRange>],
+    readonly [Option.Option<OpenRange>, ReadonlyArray<MultistreamRange>],
     MultistreamIndexError
   > => {
     const error = offsetError(open, entry, fileSize);
-    if (error !== null) return Effect.fail(error);
-    if (open === null) return Effect.succeed([openRange(entry), []]);
-    if (open.start === entry.offset) {
+    if (Option.isSome(error)) return Effect.fail(error.value);
+    if (Option.isNone(open)) return Effect.succeed([Option.some(openRange(entry)), []]);
+    const range = open.value;
+    if (range.start === entry.offset) {
       return Effect.succeed([
-        { ...open, pageCount: open.pageCount + 1, lastPageId: entry.pageId },
+        Option.some({ ...range, pageCount: range.pageCount + 1, lastPageId: entry.pageId }),
         [],
       ]);
     }
-    return Effect.succeed([openRange(entry), [closeRange(open, Option.some(entry.offset))]]);
+    return Effect.succeed([
+      Option.some(openRange(entry)),
+      [closeRange(range, Option.some(entry.offset))],
+    ]);
   };
 
 /**
  * Groups index entries into the dump's bzip2 streams: one
  * {@link MultistreamRange} per run of entries that share an `offset`, in
  * index order, each emitted once the next run starts (the last at the end of
- * the stream, its `end` the `fileSize` option or `null`). Use it after
+ * the stream, its `end` the `fileSize` option or `None`). Use it after
  * {@link multistreamIndexRecords} in a `pipe`, as
  * `Dumps.multistreamRanges()` or `Dumps.multistreamRanges({ fileSize })`.
  *
@@ -315,7 +325,7 @@ const groupEntry =
  * offset holds one range at a time; keep the entry stream for titles.
  *
  * To decode one range, read the compressed bytes `[start, end)` of the
- * `.xml.bz2` (to the end of the file when `end` is `null`), decompress them
+ * `.xml.bz2` (to the end of the file when `end` is `None`), decompress them
  * with a fresh bzip2 decoder, and feed the result to
  * {@link Dumps.pageRecords}.
  */
@@ -326,9 +336,11 @@ export const multistreamRanges =
   ): Stream.Stream<MultistreamRange, E | MultistreamIndexError, R> => {
     const fileSize = options?.fileSize;
     return entries.pipe(
-      Stream.mapAccumEffect((): OpenRange | null => null, groupEntry(fileSize), {
+      Stream.mapAccumEffect((): Option.Option<OpenRange> => Option.none(), groupEntry(fileSize), {
         onHalt: (open) =>
-          open === null ? [] : [closeRange(open, Option.fromUndefinedOr(fileSize))],
+          Option.toArray(
+            Option.map(open, (range) => closeRange(range, Option.fromUndefinedOr(fileSize))),
+          ),
       }),
     );
   };
@@ -408,7 +420,7 @@ export interface MultistreamPageRecordsOptions {
    * a bzip2 decoder in JavaScript and the XML reader both run on the event
    * loop.
    */
-  readonly concurrency?: number | "unbounded" | undefined;
+  readonly concurrency?: number | "unbounded";
 }
 
 /**

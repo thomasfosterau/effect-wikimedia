@@ -209,11 +209,9 @@ describe("multistreamRanges", () => {
     }),
   );
 
-  it.effect("leaves the last end null for an explicit fileSize: undefined", () =>
+  it.effect("leaves the last end None for an options object without fileSize", () =>
     Effect.gen(function* () {
-      const ranges = yield* collect(
-        entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: undefined })),
-      );
+      const ranges = yield* collect(entriesOf(INDEX).pipe(Dumps.multistreamRanges({})));
       expect(ranges.map((r) => Option.getOrNull(r.end))).toEqual([40, 90, null]);
     }),
   );
@@ -299,13 +297,19 @@ describe("a multistream range decoded on its own", () => {
     );
 
   it.effect.each([
-    { label: "without fileSize", fileSize: undefined, lastEnd: null },
-    { label: "with fileSize", fileSize: DUMP_BZ2.length, lastEnd: DUMP_BZ2.length },
+    { label: "without fileSize", fileSize: Option.none<number>(), lastEnd: null },
+    {
+      label: "with fileSize",
+      fileSize: Option.some(DUMP_BZ2.length),
+      lastEnd: DUMP_BZ2.length,
+    },
   ])("yields exactly the pages the index lists for it ($label)", ({ fileSize, lastEnd }) =>
     Effect.gen(function* () {
       const entries = yield* indexEntries();
       const ranges = yield* collect(
-        Stream.fromIterable(entries).pipe(Dumps.multistreamRanges({ fileSize })),
+        Stream.fromIterable(entries).pipe(
+          Dumps.multistreamRanges(Option.isSome(fileSize) ? { fileSize: fileSize.value } : {}),
+        ),
       );
       expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
         [236, 533],

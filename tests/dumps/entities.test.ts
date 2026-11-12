@@ -41,8 +41,15 @@ const toJson = Schema.encodeSync(Json);
 const parseJson = Schema.decodeSync(Json);
 
 /** Refines an entity-dump record to its per-line error member. */
-const isLineError = (record: Dumps.EntityRecord | null): record is Dumps.DumpLineError =>
+const isLineError = (record: Dumps.EntityRecord): record is Dumps.DumpLineError =>
   P.isTagged(record, "error");
+
+/** The record `decodeEntityLine` yields for a line; fails the test when it yields none. */
+const decodedRecord = (line: string, lineNumber: number): Dumps.EntityRecord =>
+  Option.match(Dumps.decodeEntityLine(line, lineNumber), {
+    onNone: () => expect.unreachable("expected a record"),
+    onSome: (record) => record,
+  });
 
 let tmp: string;
 let slicePath: string;
@@ -72,18 +79,19 @@ const count = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<number, E> =>
 // ── stripFraming (table-driven) ──────────────────────────────────────────
 
 describe("stripFraming", () => {
-  const cases: ReadonlyArray<readonly [string, string | null]> = [
-    ["[", null],
-    ["]", null],
-    ["", null],
-    ["   ", null],
-    ['{"id":"Q1"},', '{"id":"Q1"}'],
-    ['{"id":"Q1"}', '{"id":"Q1"}'],
-    ['  {"id":"Q1"} , ', '{"id":"Q1"}'],
+  const cases: ReadonlyArray<readonly [string, Option.Option<string>]> = [
+    ["[", Option.none()],
+    ["]", Option.none()],
+    ["", Option.none()],
+    ["   ", Option.none()],
+    ['{"id":"Q1"},', Option.some('{"id":"Q1"}')],
+    ['{"id":"Q1"}', Option.some('{"id":"Q1"}')],
+    ['  {"id":"Q1"} , ', Option.some('{"id":"Q1"}')],
   ];
   Arr.forEach(cases, ([input, expected]) => {
-    it(`${toJson(input)} → ${toJson(expected)}`, () => {
-      expect(Option.getOrNull(Dumps.stripFraming(input))).toBe(expected);
+    const shown = Option.match(expected, { onNone: () => "none", onSome: toJson });
+    it(`${toJson(input)} → ${shown}`, () => {
+      expect(Dumps.stripFraming(input)).toEqual(expected);
     });
   });
 });
@@ -97,7 +105,7 @@ describe("decodeEntityLine", () => {
   });
 
   it("a valid entity line decodes to an entity record with its line number", () => {
-    const record = Option.getOrNull(Dumps.decodeEntityLine('{"type":"item","id":"Q1"},', 5));
+    const record = decodedRecord('{"type":"item","id":"Q1"},', 5);
     expect(record).toMatchObject({ _tag: "entity" });
     if (!P.isTagged(record, "entity")) return expect.unreachable("expected entity");
     expect(record.line).toBe(5);
@@ -105,7 +113,7 @@ describe("decodeEntityLine", () => {
   });
 
   it("invalid JSON degrades to an invalid-json error element", () => {
-    const record = Option.getOrNull(Dumps.decodeEntityLine("{ not json },", 3));
+    const record = decodedRecord("{ not json },", 3);
     expect(record).toMatchObject({ _tag: "error" });
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/invalid-json");
@@ -113,7 +121,7 @@ describe("decodeEntityLine", () => {
   });
 
   it("valid JSON that is not an entity degrades to a not-an-entity error element", () => {
-    const record = Option.getOrNull(Dumps.decodeEntityLine('{"foo":"bar"},', 4));
+    const record = decodedRecord('{"foo":"bar"},', 4);
     expect(record).toMatchObject({ _tag: "error" });
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");
@@ -123,7 +131,7 @@ describe("decodeEntityLine", () => {
   // what it parses to is not an entity, the same as `42` or `"x"` (#116).
   Arr.forEach(["null", "42", '"x"', "[]"], (body) => {
     it(`a JSON ${body} line degrades to a not-an-entity error element`, () => {
-      const record = Option.getOrNull(Dumps.decodeEntityLine(`${body},`, 3));
+      const record = decodedRecord(`${body},`, 3);
       expect(record).toMatchObject({ _tag: "error" });
       if (!isLineError(record)) return expect.unreachable("expected error");
       expect(record.reason).toBe("dumps/not-an-entity");
@@ -134,7 +142,7 @@ describe("decodeEntityLine", () => {
   // Wikibase marks an entity that does not exist with `missing`; such an
   // object has a valid id but is still not an entity (#122).
   it("an object Wikibase flagged missing degrades to a not-an-entity error element", () => {
-    const record = Option.getOrNull(Dumps.decodeEntityLine('{"id":"Q42","missing":""},', 5));
+    const record = decodedRecord('{"id":"Q42","missing":""},', 5);
     expect(record).toMatchObject({ _tag: "error" });
     if (!isLineError(record)) return expect.unreachable("expected error");
     expect(record.reason).toBe("dumps/not-an-entity");

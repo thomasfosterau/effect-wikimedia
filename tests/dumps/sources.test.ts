@@ -168,18 +168,22 @@ describe("fromFile", () => {
     Effect.gen(function* () {
       // A NUL byte in the path makes `createReadStream` throw synchronously,
       // after the decompressor was created.
-      let stage: PassThrough | undefined;
+      const created = { stage: Option.none<PassThrough>() };
       assertInstanceOf(
         yield* Effect.flip(
           Stream.runDrain(
             Dumps.fromFile(join(tmp, "bad\0path.gz"), {
-              decompressor: () => (stage = new PassThrough()),
+              decompressor: () => {
+                const stage = new PassThrough();
+                created.stage = Option.some(stage);
+                return stage;
+              },
             }),
           ),
         ),
         Dumps.SourceError,
       );
-      expect(stage?.destroyed).toBe(true);
+      expect(Option.map(created.stage, (stage) => stage.destroyed)).toEqual(Option.some(true));
     }),
   );
 });
@@ -649,14 +653,9 @@ describe("a decompressor that returns a used stream", () => {
 
 /** A Node Readable that emits gzip data forever and records whether it was destroyed. */
 class TrackedGzSource extends Readable {
-  destroyedFlag = false;
   private readonly chunk = gzipSync(Buffer.from("x".repeat(1024)));
   override _read(): void {
     setTimeout(() => this.push(this.chunk), 5);
-  }
-  override _destroy(error: Error | null, callback: (e?: Error | null) => void): void {
-    this.destroyedFlag = true;
-    callback(error);
   }
 }
 
@@ -675,7 +674,7 @@ describe("interruption teardown", () => {
       yield* Effect.sleep("120 millis");
       yield* Fiber.interrupt(fiber);
       yield* Effect.sleep("60 millis");
-      expect(source.destroyedFlag).toBe(true);
+      expect(source.destroyed).toBe(true);
     }),
   );
 
@@ -767,10 +766,11 @@ describe("interruption teardown", () => {
         // is in flight and the drain's `next()` is pending on it.
         const read = vi.spyOn(ReadStream.prototype, "_read");
         const reading = vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 5000 });
-        const stream = (): ReadStream | undefined => {
-          const context = read.mock.contexts[0];
-          return context instanceof ReadStream ? context : undefined;
-        };
+        const stream = (): Option.Option<ReadStream> =>
+          Option.filter(
+            Option.fromUndefinedOr(read.mock.contexts[0]),
+            (context): context is ReadStream => context instanceof ReadStream,
+          );
         // Runs when the test's scope closes, after it passes or fails.
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
@@ -779,10 +779,13 @@ describe("interruption teardown", () => {
             // With no writer left the read returns end-of-file and the stream
             // finishes closing: the fd is released after all, just not before the
             // interrupt returned.
-            const closed =
-              source === undefined || source.closed
-                ? Promise.resolve("closed" as const)
-                : new Promise<"closed">((resolve) => source.once("close", () => resolve("closed")));
+            const closed = Option.match(source, {
+              onNone: () => Promise.resolve("closed" as const),
+              onSome: (open) =>
+                open.closed
+                  ? Promise.resolve("closed" as const)
+                  : new Promise<"closed">((resolve) => open.once("close", () => resolve("closed"))),
+            });
             closeSync(writer);
             expect(yield* promiseOrHung(closed)).toBe("closed");
           }).pipe(Effect.orDie),
@@ -791,7 +794,7 @@ describe("interruption teardown", () => {
           Dumps.fromFile(fifo),
           reading.then(() => undefined),
         );
-        expect(stream()?.destroyed).toBe(true);
+        expect(Option.map(stream(), (source) => source.destroyed)).toEqual(Option.some(true));
       }),
   );
 
@@ -943,7 +946,7 @@ describe("interruption teardown", () => {
         // holding its socket once a chunk is buffered) stays open (#109). The
         // source's first step interrupts the consuming fiber, which lands the
         // interruption in that window deterministically; the source then parks.
-        let outer: Fiber.Fiber<unknown, unknown> | undefined;
+        const fibers = { outer: Option.none<Fiber.Fiber<unknown, unknown>>() };
         let started = false;
         let onReleased = (): void => undefined;
         const released = new Promise<"released">(
@@ -952,13 +955,13 @@ describe("interruption teardown", () => {
         const source = Stream.fromEffect(
           Effect.sync(() => {
             started = true;
-            outer?.interruptUnsafe();
+            Option.map(fibers.outer, (outer) => outer.interruptUnsafe());
             return new Uint8Array(gzipSync(Buffer.from(DUMP)));
           }),
         ).pipe(Stream.concat(Stream.never), Stream.ensuring(Effect.sync(() => onReleased())));
         const stream = Stream.unwrap(
           Effect.sync(() => {
-            outer = Fiber.getCurrent();
+            fibers.outer = Option.fromUndefinedOr(Fiber.getCurrent());
             return source.pipe(Dumps.decompressWith(Dumps.gunzipTransform));
           }),
         );
@@ -1033,10 +1036,14 @@ describe("interruption teardown", () => {
         // after the open, as in the #95 test above.
         const path = join(tmp, "interrupted-open.json.gz");
         writeFileSync(path, gzipSync(Buffer.from(DUMP)));
-        let stage: Transform | undefined;
+        const created = { stage: Option.none<Transform>() };
         const decompressor = (): Transform => {
-          Fiber.getCurrent()?.interruptUnsafe();
-          return (stage = createGunzip());
+          Option.map(Option.fromUndefinedOr(Fiber.getCurrent()), (fiber) =>
+            fiber.interruptUnsafe(),
+          );
+          const stage = createGunzip();
+          created.stage = Option.some(stage);
+          return stage;
         };
         yield* withoutUncaught(
           Effect.gen(function* () {
@@ -1044,7 +1051,9 @@ describe("interruption teardown", () => {
             expect(exit).not.toBe("hung");
             if (exit === "hung") return;
             expect(Exit.hasInterrupts(exit)).toBe(true);
-            expect(stage?.destroyed).toBe(true);
+            expect(Option.map(created.stage, (stage) => stage.destroyed)).toEqual(
+              Option.some(true),
+            );
           }),
         );
       }),
@@ -1135,13 +1144,13 @@ const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 /** A fetch stub over `Range` requests; `onCall` decides each response. */
 const stubFetch = (onCall: (call: number, start: number) => Response) => {
   const ranges: string[] = [];
-  const userAgents: (string | null)[] = [];
+  const userAgents: Array<Option.Option<string>> = [];
   let call = 0;
   const fetch: typeof globalThis.fetch = (input, init) => {
     const request = new Request(input, init);
     const range = request.headers.get("range") ?? "";
     ranges.push(range);
-    userAgents.push(request.headers.get("user-agent"));
+    userAgents.push(Option.fromNullOr(request.headers.get("user-agent")));
     const start = Number(/bytes=(\d+)-/.exec(range)?.[1] ?? "0");
     call += 1;
     return Promise.resolve(onCall(call, start));
@@ -1264,7 +1273,7 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
     Effect.gen(function* () {
       const { userAgents, provideFetch } = stubFetch(() => new Response("abc", { status: 206 }));
       yield* collectRange.pipe(provideFetch);
-      expect(userAgents).toEqual([Core.USER_AGENT]);
+      expect(userAgents).toEqual([Option.some(Core.USER_AGENT)]);
     }),
   );
 
@@ -1272,13 +1281,15 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
     "sends no Api-User-Agent: the dump host is not an API, unlike Core.WikimediaClient's",
     () =>
       Effect.gen(function* () {
-        const apiUserAgents: (string | null)[] = [];
+        const apiUserAgents: Array<Option.Option<string>> = [];
         const fetch: typeof globalThis.fetch = (input, init) => {
-          apiUserAgents.push(new Request(input, init).headers.get("api-user-agent"));
+          apiUserAgents.push(
+            Option.fromNullOr(new Request(input, init).headers.get("api-user-agent")),
+          );
           return Promise.resolve(new Response("abc", { status: 206 }));
         };
         yield* collectRange.pipe(Effect.provideService(FetchHttpClient.Fetch, fetch));
-        expect(apiUserAgents).toEqual([null]);
+        expect(apiUserAgents).toEqual([Option.none()]);
       }),
   );
 
@@ -1290,7 +1301,7 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
         provideFetch,
         Effect.provideService(Core.UserAgent, userAgent),
       );
-      expect(userAgents).toEqual([userAgent]);
+      expect(userAgents).toEqual([Option.some(userAgent)]);
     }),
   );
 
@@ -1319,14 +1330,14 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
         Effect.provideService(Core.UserAgent, "ignored/0 (reference loses to the option)"),
       );
       expect(decodeUtf8(bytes)).toBe(ALPHABET);
-      expect(userAgents).toEqual([userAgent, userAgent]);
+      expect(userAgents).toEqual([Option.some(userAgent), Option.some(userAgent)]);
     }),
   );
 
   /** The `User-Agent` each of the two requests sent, once it has been sent. */
   interface SentUserAgents {
-    client?: string | null;
-    dumps?: string | null;
+    client?: Option.Option<string>;
+    dumps?: Option.Option<string>;
   }
 
   // One program that uses both the client and a dump download: where the
@@ -1338,10 +1349,10 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
       const request = new Request(input, init);
       const ua = request.headers.get("user-agent");
       if (request.url.startsWith("https://dumps.example.org/")) {
-        userAgents.dumps = ua;
+        userAgents.dumps = Option.fromNullOr(ua);
         return Promise.resolve(new Response("abc", { status: 206 }));
       }
-      userAgents.client = ua;
+      userAgents.client = Option.fromNullOr(ua);
       return Promise.resolve(new Response("ok", { status: 200 }));
     };
     yield* Effect.gen(function* () {
@@ -1364,7 +1375,10 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
       () =>
         Effect.gen(function* () {
           const sent = yield* bothUserAgents();
-          expect(sent).toEqual({ client: callerUserAgent, dumps: callerUserAgent });
+          expect(sent).toEqual({
+            client: Option.some(callerUserAgent),
+            dumps: Option.some(callerUserAgent),
+          });
         }),
     );
   });
@@ -1375,7 +1389,10 @@ layer(FetchHttpClient.layer)("fromHttpRange", (it) => {
     it.effect("sends a Core.UserAgent given with Layer.provide from the client only", () =>
       Effect.gen(function* () {
         const sent = yield* bothUserAgents();
-        expect(sent).toEqual({ client: callerUserAgent, dumps: Core.USER_AGENT });
+        expect(sent).toEqual({
+          client: Option.some(callerUserAgent),
+          dumps: Option.some(Core.USER_AGENT),
+        });
       }),
     );
   });

@@ -198,16 +198,16 @@ class StageError extends Schema.TaggedError<StageError>()("StageError", {
 }) {}
 
 /**
- * Returns what `step` returns, or passes what it throws to `callback` and
- * returns `undefined`: a classic stream's `write()` may throw, and a throw
- * from a Duplex's `_write` would escape the stream.
+ * Returns what `step` returns as `Some`, or passes what it throws to
+ * `callback` and returns `None`: a classic stream's `write()` may throw, and a
+ * throw from a Duplex's `_write` would escape the stream.
  */
-const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefined => {
+const attempt = <A>(step: () => A, callback: (error: Error) => void): Option.Option<A> => {
   try {
-    return step();
+    return Option.some(step());
   } catch (error) {
     callback(P.isError(error) ? error : new StageError({ message: String(error) }));
-    return undefined;
+    return Option.none();
   }
 };
 
@@ -230,18 +230,23 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): A | undefi
 /**
  * A classic stream's `write()`, typed as it behaves: Node's `Duplex` type says
  * `boolean`, but a classic `through` stream (unbzip2-stream) can return
- * `undefined`, which means "keep writing", like `true`.
+ * `undefined`, which is `None` here and means "keep writing", like `true`.
  */
-const writeClassic = (classic: Duplex, chunk: Uint8Array): boolean | undefined =>
-  classic.write(chunk);
+const writeClassic = (classic: Duplex, chunk: Uint8Array): Option.Option<boolean> =>
+  Option.fromUndefinedOr(classic.write(chunk));
 
 const adaptClassicDuplex = (classic: Duplex): Duplex => {
   let ended = false;
   const adapter = new Duplex({
     write: (chunk: Uint8Array, _encoding, callback) => {
-      const written = attempt(() => writeClassic(classic, chunk) !== false, callback);
-      if (written === true) callback();
-      else if (written === false) classic.once("drain", () => callback());
+      const written = attempt(
+        () => Option.getOrElse(writeClassic(classic, chunk), () => true),
+        callback,
+      );
+      if (Option.isSome(written)) {
+        if (written.value) callback();
+        else classic.once("drain", () => callback());
+      }
     },
     // Node turns a synchronous throw from `_final` into an `error` event, so
     // a throwing `end()` needs no guard here.
@@ -565,7 +570,7 @@ export interface FromFileOptions {
    * (before any decompression). Defaults to `0`. A non-negative safe integer,
    * or the stream fails with a {@link SourceError}.
    */
-  readonly start?: number | undefined;
+  readonly start?: number;
   /**
    * The byte offset to stop reading at, **exclusive**, in the file as stored,
    * so `{ start, end }` reads `end - start` bytes, as a
@@ -573,13 +578,13 @@ export interface FromFileOptions {
    * safe integer above `start`, or the stream fails with a
    * {@link SourceError}. A range past the end of the file reads to the end.
    */
-  readonly end?: number | undefined;
+  readonly end?: number;
 }
 
-/** A byte range checked for {@link fromFile} and {@link fromHttpRange}: `end` exclusive, `undefined` for open-ended. */
+/** A byte range checked for {@link fromFile} and {@link fromHttpRange}: `end` exclusive, `None` for open-ended. */
 interface ByteRange {
   readonly start: number;
-  readonly end: number | undefined;
+  readonly end: Option.Option<number>;
 }
 
 /**
@@ -587,10 +592,7 @@ interface ByteRange {
  * given) a safe integer above it. Fails with a {@link SourceError} naming
  * the offending bound otherwise.
  */
-const byteRange = (
-  start: number | undefined,
-  end: number | undefined,
-): Effect.Effect<ByteRange, SourceError> => {
+const byteRange = (start?: number, end?: number): Effect.Effect<ByteRange, SourceError> => {
   const from = start ?? 0;
   if (!Number.isSafeInteger(from) || from < 0) {
     return Effect.fail(
@@ -604,7 +606,7 @@ const byteRange = (
       }),
     );
   }
-  return Effect.succeed({ start: from, end });
+  return Effect.succeed({ start: from, end: Option.fromUndefinedOr(end) });
 };
 
 /**
@@ -614,14 +616,16 @@ const byteRange = (
 const readRange = (path: string, range: ByteRange) =>
   createReadStream(path, {
     start: range.start,
-    end: range.end === undefined ? Number.POSITIVE_INFINITY : range.end - 1,
+    end: Option.match(range.end, {
+      onNone: () => Number.POSITIVE_INFINITY,
+      onSome: (end) => end - 1,
+    }),
   });
 
 /** Chooses a decompressor for a path when the caller did not pin one. */
-function decompressorFor(path: string, override: Decompressor | undefined): Decompressor | null {
-  if (override !== undefined) return override;
-  if (path.endsWith(".gz")) return gunzipTransform;
-  return null;
+function decompressorFor(path: string, override?: Decompressor): Option.Option<Decompressor> {
+  if (override !== undefined) return Option.some(override);
+  return path.endsWith(".gz") ? Option.some(gunzipTransform) : Option.none();
 }
 
 /**
@@ -644,11 +648,12 @@ export const fromFile = (
 ): Stream.Stream<Uint8Array, SourceError> => {
   const decompressor = decompressorFor(path, options?.decompressor);
   const open = (range: ByteRange): Effect.Effect<NodeReadableLike, SourceError> =>
-    decompressor === null
-      ? tryNode(() => readRange(path, range))
-      : Effect.gen(function* () {
+    Option.match(decompressor, {
+      onNone: () => tryNode(() => readRange(path, range)),
+      onSome: (stageFactory) =>
+        Effect.gen(function* () {
           // Check the stage before opening the file, so a rejected one leaks no fd.
-          const stage = yield* openStage(decompressor);
+          const stage = yield* openStage(stageFactory);
           // `compose` so destroying the decompressor also destroys the file
           // read — the fd is closed on interruption, not orphaned. If opening
           // the file throws, destroy the stage, which nothing else owns yet.
@@ -656,7 +661,8 @@ export const fromFile = (
             Effect.tapError(() => Effect.sync(() => stage.destroy())),
           );
           return yield* composeOrDestroy(file, stage);
-        });
+        }),
+    });
   return openNodeReadable(Effect.flatMap(byteRange(options?.start, options?.end), open));
 };
 
@@ -666,7 +672,7 @@ export const fromFile = (
  * the file at `path`, through a fresh stage from `decompressor`. Each range
  * is a whole bzip2 stream, so it decodes on its own, and its pages feed
  * {@link pageRecords} as they are, with no `<mediawiki>` wrapper needed. A
- * last range with `end: null` reads to the end of the file. The package
+ * last range with `end: None` reads to the end of the file. The package
  * ships no bzip2 decoder, so pass one, as the {@link Decompressor} docs show:
  *
  * ```ts
@@ -684,7 +690,12 @@ export const fromMultistreamRange = (
   range: MultistreamRange,
   decompressor: Decompressor,
 ): Stream.Stream<Uint8Array, SourceError> =>
-  fromFile(path, { start: range.start, end: Option.getOrUndefined(range.end), decompressor });
+  fromFile(path, {
+    start: range.start,
+    decompressor,
+    // `end` is left out for an open-ended range (`exactOptionalPropertyTypes`).
+    ...Option.match(range.end, { onNone: () => ({}), onSome: (end) => ({ end }) }),
+  });
 
 // ── HTTP range source (resumable) ────────────────────────────────────────
 
@@ -703,7 +714,7 @@ export interface FromHttpRangeOptions {
    * Defaults to the end of the file. A safe integer above `startByte`, or
    * the stream fails with a {@link SourceError} before any request is sent.
    */
-  readonly endByte?: number | undefined;
+  readonly endByte?: number;
   /** Extra attempts after a mid-stream transport failure, each resuming from the last received byte. Defaults to `3`. */
   readonly maxResumes?: number;
   /**
@@ -716,21 +727,24 @@ export interface FromHttpRangeOptions {
    * header is for browser clients of Wikimedia's APIs, and this is a Node
    * download from the dump host, where `User-Agent` arrives as given.
    */
-  readonly userAgent?: string | undefined;
+  readonly userAgent?: string;
 }
 
 const DEFAULT_MAX_RESUMES = 3;
 
 /** The `Range` header value for bytes `offset` up to `end` (exclusive), or to the end of the file. */
-const rangeHeader = (offset: number, end: number | undefined): string =>
-  end === undefined ? `bytes=${offset}-` : `bytes=${offset}-${end - 1}`;
+const rangeHeader = (offset: number, end: Option.Option<number>): string =>
+  Option.match(end, {
+    onNone: () => `bytes=${offset}-`,
+    onSome: (last) => `bytes=${offset}-${last - 1}`,
+  });
 
 /** Issues a ranged GET from `offset` (up to `end`, exclusive) and returns its body byte stream. */
 const rangeRequest = (
   url: string,
   offset: number,
-  end: number | undefined,
-  userAgent: string | undefined,
+  end: Option.Option<number>,
+  userAgent?: string,
 ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> =>
   Stream.unwrap(
     Effect.gen(function* () {
@@ -782,10 +796,10 @@ export const fromHttpRange = (
   const maxResumes = options?.maxResumes ?? DEFAULT_MAX_RESUMES;
   const download = (
     offset: number,
-    end: number | undefined,
+    end: Option.Option<number>,
     resumesLeft: number,
   ): Stream.Stream<Uint8Array, SourceError, HttpClient.HttpClient> => {
-    if (end !== undefined && offset >= end) return Stream.empty;
+    if (Option.exists(end, (last) => offset >= last)) return Stream.empty;
     let received = offset;
     return rangeRequest(url, offset, end, options?.userAgent).pipe(
       Stream.tap((chunk) => Effect.sync(() => (received += chunk.length))),
