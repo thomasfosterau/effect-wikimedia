@@ -5,6 +5,7 @@
  * @module tests/parse-offset
  */
 
+import * as Struct from "effect/Struct";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
@@ -39,7 +40,7 @@ describe("parse with an offset", () => {
       const after = allNodes(shifted);
       expect(after).toHaveLength(before.length);
       Arr.forEach(Arr.zip(before, after), ([a, b]) => {
-        expect(b._tag).toBe(a._tag);
+        expect(Struct.get(b, "_tag")).toBe(Struct.get(a, "_tag"));
         expect(b.span).toEqual({ start: a.span.start + 1000, end: a.span.end + 1000 });
         expect(serializeNodes([b])).toBe(serializeNodes([a]));
       });

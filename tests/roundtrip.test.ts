@@ -13,6 +13,7 @@
  * @module tests/roundtrip
  */
 
+import * as Struct from "effect/Struct";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
@@ -36,7 +37,9 @@ const fixtures = readdirSync(fixturesDir)
 function assertSpanFidelity(source: string, doc: ReturnType<typeof parse>): void {
   walk(doc, (node: Node) => {
     const slice = source.slice(node.span.start, node.span.end);
-    expect(serializeNode(node), `node ${node._tag} @ ${node.span.start}`).toBe(slice);
+    expect(serializeNode(node), `node ${Struct.get(node, "_tag")} @ ${node.span.start}`).toBe(
+      slice,
+    );
   });
 }
 

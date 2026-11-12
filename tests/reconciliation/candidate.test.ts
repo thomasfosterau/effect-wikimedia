@@ -8,6 +8,7 @@
  * @module tests/candidate
  */
 
+import * as Struct from "effect/Struct";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -388,7 +389,7 @@ describe("non-string wire values never reach the validators", () => {
     Option.flatMap(item, (i) =>
       Option.fromNullishOr(i.claims["P569"]?.[0]?.mainsnak).pipe(
         Option.flatMap((snak) =>
-          P.isTagged(snak, "value") ? Option.some(snak.value._tag) : Option.none(),
+          P.isTagged(snak, "value") ? Option.some(Struct.get(snak.value, "_tag")) : Option.none(),
         ),
       ),
     );

@@ -16,6 +16,7 @@
  * @module tests/reconciliation-parity
  */
 
+import * as P from "effect/Predicate";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Option from "effect/Option";
@@ -76,7 +77,7 @@ const wikidataEntityIri = (id: string) => `http://www.wikidata.org/entity/${id}`
 /** The main-snak value of the first statement on a property, if it is a value snak. */
 function firstValue(item: Wikidata.WikidataItem, property: string): Wikidata.DataValue | null {
   const snak = item.claims[property]?.[0]?.mainsnak;
-  return snak?._tag === "value" ? snak.value : null;
+  return P.isTagged(snak, "value") ? snak.value : null;
 }
 
 /** The QID self-link — the canonical Wikidata correspondence. */
@@ -94,7 +95,7 @@ function qidSelfLink(item: Wikidata.WikidataItem): NeutralFact {
 function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
   return R.toEntries(EXTERNAL_ID_AUTHORITIES).flatMap(([property, scheme]) => {
     const value = firstValue(item, property);
-    if (value?._tag !== "external-id") return [];
+    if (!P.isTagged(value, "external-id")) return [];
     return [
       {
         authority: scheme.authority,
@@ -111,7 +112,7 @@ function sameAsFacts(item: Wikidata.WikidataItem): NeutralFact[] {
 function dateFacts(item: Wikidata.WikidataItem): NeutralFact[] {
   return R.toEntries(DATE_PROPERTIES).flatMap(([property, label]) => {
     const value = firstValue(item, property);
-    if (value?._tag !== "time") return [];
+    if (!P.isTagged(value, "time")) return [];
     return [
       {
         authority: "wikidata",
@@ -128,7 +129,7 @@ function dateFacts(item: Wikidata.WikidataItem): NeutralFact[] {
 function imageFacts(item: Wikidata.WikidataItem): NeutralFact[] {
   return IMAGE_PROPERTIES.flatMap((property) => {
     const value = firstValue(item, property);
-    if (value?._tag !== "string") return [];
+    if (!P.isTagged(value, "string")) return [];
     return [
       {
         authority: "wikimedia-commons",

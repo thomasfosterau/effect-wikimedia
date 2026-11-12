@@ -598,7 +598,7 @@ function retryAfterSeconds(retryAfterHeader: string | undefined): number {
 }
 
 function describeHttpError(error: HttpClientError.HttpClientError): string {
-  return error.reason._tag === "StatusCodeError"
+  return P.isTagged(error.reason, "StatusCodeError")
     ? `wikimedia returned HTTP ${error.reason.response.status}`
     : `request failed: ${String(error)}`;
 }

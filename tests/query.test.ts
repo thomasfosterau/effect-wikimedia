@@ -5,6 +5,7 @@
  * @module tests/query
  */
 
+import * as Struct from "effect/Struct";
 import * as Option from "effect/Option";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -119,7 +120,7 @@ describe("filter / walk", () => {
     const doc = parse("a{{t|[[L]]}}b");
     const seen: string[] = [];
     walk(doc, (n) => {
-      seen.push(n._tag);
+      seen.push(Struct.get(n, "_tag"));
       if (P.isTagged(n, "Template")) return false; // don't descend
     });
     expect(seen).toContain("Template");
@@ -130,7 +131,7 @@ describe("filter / walk", () => {
     const doc = parse("{{A|{{B}}}} {{C|[[D]]}}");
     const seen: string[] = [];
     walk(doc, (n) => {
-      seen.push(`${n._tag}@${n.span.start}`);
+      seen.push(`${Struct.get(n, "_tag")}@${n.span.start}`);
     });
     // Each template's `name` fragment holds a Text node, visited before its params.
     expect(seen).toEqual([
@@ -148,7 +149,7 @@ describe("filter / walk", () => {
 
   it("agrees with filter on order, so findTemplates returns document order (#175)", () => {
     const doc = parse("{{A}} {{B|{{C}}}} {{D}}");
-    const tags = (n: Node) => `${n._tag}@${n.span.start}`;
+    const tags = (n: Node) => `${Struct.get(n, "_tag")}@${n.span.start}`;
     const walked: string[] = [];
     walk(doc, (n) => {
       walked.push(tags(n));
@@ -358,7 +359,9 @@ describe("strip to plain text: entities (#107)", () => {
   /** Strips `src`, first checking the parser read all of it as entities. */
   const stripEntities = (src: string): string => {
     const doc = parse(src);
-    expect(doc.children.map((n) => n._tag)).toEqual(doc.children.map(() => "HtmlEntity"));
+    expect(doc.children.map((n) => Struct.get(n, "_tag"))).toEqual(
+      doc.children.map(() => "HtmlEntity"),
+    );
     return stripToText(doc);
   };
 
