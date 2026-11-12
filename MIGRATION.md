@@ -113,6 +113,7 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 - `PageRevisionError.page` is always a `PageRef`.
 - `MultistreamRange.end` is `Option<number>`.
 - `decodeIndexLine`, `stripFraming` and `decodeEntityLine` return `Option`.
+- The optional members of the options objects (`fileSize`, `concurrency`, `start`, `end`, `endByte`, `userAgent`) no longer accept an explicit `undefined`: omit the key.
 - `Revision.minor` is renamed `isMinor`.
 - `PageRef`, `Contributor`, `Revision`, `PageRevisionHit`, `PageRevisionError`, `PageRevisionRecord` and `MultistreamRange` are now `Schema`s as well as types. The types are unchanged apart from `isMinor`. Encoded, an absent field is `null`, so persist a record with `Schema.encodeSync(Dumps.PageRevisionRecord)` rather than spreading it.
 

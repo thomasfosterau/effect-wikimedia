@@ -58,6 +58,7 @@
  */
 
 import * as Arr from "effect/Array";
+import * as HashMap from "effect/HashMap";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -368,23 +369,33 @@ export function tokenizeXml(buffer: string): XmlTokenization {
 
 // ── Entity decoding ──────────────────────────────────────────────────────
 
-// XML's five predefined entities, and nothing more: the MediaWiki exporter
-// escapes with these alone, and XML defines no others without a DTD.
-type XmlEntityName = "lt" | "gt" | "amp" | "quot" | "apos";
-const XML_NAMED_ENTITIES: Readonly<Record<XmlEntityName, string>> = {
-  lt: "<",
-  gt: ">",
-  amp: "&",
-  quot: '"',
-  apos: "'",
-};
+// One entity: a whole hex reference, a whole decimal reference or one of the
+// of XML's five predefined names (the MediaWiki exporter escapes with these
+// alone, and XML defines no others without a DTD). XML spells the hex marker `x`; `X` is also accepted,
+// as it always has been here. Any other name (`&nbsp;`, `&constructor;`)
+// doesn't match, so it stays as written. No capture groups:
+// `String.prototype.replace` passes an unmatched group as `undefined`, so the
+// replacer reads the matched text instead.
+// The predefined names, keyed by the whole reference, so a lookup needs no
+// capture group and an unknown name (`&constructor;`) finds nothing.
+const XML_NAMED_ENTITIES = HashMap.make(
+  ["&lt;", "<"],
+  ["&gt;", ">"],
+  ["&amp;", "&"],
+  ["&quot;", '"'],
+  ["&apos;", "'"],
+);
 
-// One entity: a whole hex reference (group 1), a whole decimal reference
-// (group 2) or one of the five predefined names (group 3). XML spells the hex
-// marker `x`; `X` is also accepted, as it always has been here. Any other name
-// (`&nbsp;`, `&constructor;`) doesn't match, so it stays as written and never
-// reaches the lookup above, where `constructor` would find `{}`'s prototype.
-const XML_ENTITY_RE = /&(?:#[xX]([0-9A-Fa-f]+)|#([0-9]+)|(lt|gt|amp|quot|apos));/g;
+const XML_ENTITY_RE = /&(?:#[xX][0-9A-Fa-f]+|#[0-9]+|lt|gt|amp|quot|apos);/g;
+
+/** Decodes one whole reference `XML_ENTITY_RE` matched; the reference itself when it names a forbidden code point. */
+function decodeXmlEntity(match: string): string {
+  const named = HashMap.get(XML_NAMED_ENTITIES, match);
+  if (Option.isSome(named)) return named.value;
+  const isHex = match.charAt(2) === "x" || match.charAt(2) === "X";
+  const code = isHex ? Number.parseInt(match.slice(3, -1), 16) : Number(match.slice(2, -1));
+  return isXmlChar(code) ? String.fromCodePoint(code) : match;
+}
 
 // XML 1.0's `Char` production: the code points a character reference may
 // name in a well-formed document. NUL, the C0 controls other than tab, LF and
@@ -412,14 +423,7 @@ function isXmlChar(code: number): boolean {
  */
 export function decodeXmlEntities(text: string): string {
   if (!text.includes("&")) return text;
-  return text.replace(
-    XML_ENTITY_RE,
-    (match, hex: string | undefined, dec: string | undefined, name: XmlEntityName | undefined) => {
-      if (name !== undefined) return XML_NAMED_ENTITIES[name];
-      const code = hex === undefined ? Number(dec) : Number.parseInt(hex, 16);
-      return isXmlChar(code) ? String.fromCodePoint(code) : match;
-    },
-  );
+  return text.replace(XML_ENTITY_RE, decodeXmlEntity);
 }
 
 // ── Field bounds & parsing ───────────────────────────────────────────────
@@ -443,70 +447,79 @@ const MAX_FIELD_LENGTH = 4096;
  */
 const MAX_TEXT_LENGTH = 16 * 1024 * 1024;
 
-/** Parses a non-negative integer field; `null` for anything else. */
-function toInt(value: string): number | null {
-  if (!/^\d{1,18}$/.test(value.trim())) return null;
+/** Parses a non-negative integer field; `None` for anything else. */
+function toInt(value: string): Option.Option<number> {
+  if (!/^\d{1,18}$/.test(value.trim())) return Option.none();
   const n = Number.parseInt(value.trim(), 10);
-  return Number.isSafeInteger(n) ? n : null;
+  return Number.isSafeInteger(n) ? Option.some(n) : Option.none();
 }
 
-/** Trims and length-bounds a short field; `null` when empty. */
-function toField(value: string): string | null {
+/** Trims and length-bounds a short field; `None` when empty. */
+function toField(value: string): Option.Option<string> {
   const trimmed = value.trim();
-  if (Str.isEmpty(trimmed)) return null;
-  return trimmed.length > MAX_FIELD_LENGTH ? trimmed.slice(0, MAX_FIELD_LENGTH) : trimmed;
+  if (Str.isEmpty(trimmed)) return Option.none();
+  return Option.some(
+    trimmed.length > MAX_FIELD_LENGTH ? trimmed.slice(0, MAX_FIELD_LENGTH) : trimmed,
+  );
 }
 
 // A `title="…"` (or `title='…'`) attribute in a tag's raw attribute text.
 const TITLE_ATTRIBUTE_RE = /(?:^|\s)title\s*=\s*(?:"([^"]*)"|'([^']*)')/;
 
-/** The decoded, bounded `title` attribute of a `<redirect>`; `null` when absent or blank. */
-function redirectTitle(attributes: string | undefined): string | null {
-  const match = attributes === undefined ? null : TITLE_ATTRIBUTE_RE.exec(attributes);
-  const raw = match?.[1] ?? match?.[2];
-  return raw === undefined ? null : toField(decodeXmlEntities(raw));
+/** The decoded, bounded `title` attribute of a `<redirect>`; `None` when absent or blank. */
+function redirectTitle(attributes?: string): Option.Option<string> {
+  if (attributes === undefined) return Option.none();
+  return Option.fromNullOr(TITLE_ATTRIBUTE_RE.exec(attributes)).pipe(
+    Option.flatMap((match) => Option.fromUndefinedOr(match[1] ?? match[2])),
+    Option.flatMap((raw) => toField(decodeXmlEntities(raw))),
+  );
 }
 
 // ── Assembler: tokens → page/revision records ────────────────────────────
 
 interface MutablePage {
-  title: string | null;
-  ns: number | null;
-  id: number | null;
-  redirect: string | null;
+  title: Option.Option<string>;
+  ns: Option.Option<number>;
+  id: Option.Option<number>;
+  redirect: Option.Option<string>;
 }
 
 interface MutableRevision {
-  id: number | null;
-  parentId: number | null;
-  timestamp: string | null;
-  comment: string | null;
-  model: string | null;
-  format: string | null;
-  text: string | null;
-  sha1: string | null;
+  id: Option.Option<number>;
+  parentId: Option.Option<number>;
+  timestamp: Option.Option<string>;
+  comment: Option.Option<string>;
+  model: Option.Option<string>;
+  format: Option.Option<string>;
+  text: Option.Option<string>;
+  sha1: Option.Option<string>;
   minor: boolean;
-  contributorUsername: string | null;
-  contributorId: number | null;
-  contributorIp: string | null;
+  contributorUsername: Option.Option<string>;
+  contributorId: Option.Option<number>;
+  contributorIp: Option.Option<string>;
   hasContributor: boolean;
 }
 
-const freshPage = (): MutablePage => ({ title: null, ns: null, id: null, redirect: null });
+const freshPage = (): MutablePage => ({
+  title: Option.none(),
+  ns: Option.none(),
+  id: Option.none(),
+  redirect: Option.none(),
+});
 
 const freshRevision = (): MutableRevision => ({
-  id: null,
-  parentId: null,
-  timestamp: null,
-  comment: null,
-  model: null,
-  format: null,
-  text: null,
-  sha1: null,
+  id: Option.none(),
+  parentId: Option.none(),
+  timestamp: Option.none(),
+  comment: Option.none(),
+  model: Option.none(),
+  format: Option.none(),
+  text: Option.none(),
+  sha1: Option.none(),
   minor: false,
-  contributorUsername: null,
-  contributorId: null,
-  contributorIp: null,
+  contributorUsername: Option.none(),
+  contributorId: Option.none(),
+  contributorIp: Option.none(),
   hasContributor: false,
 });
 
@@ -528,7 +541,7 @@ const REVISION_SETTERS = {
   comment: (r, v) => (r.comment = toField(v)),
   model: (r, v) => (r.model = toField(v)),
   format: (r, v) => (r.format = toField(v)),
-  text: (r, v) => (r.text = Str.isEmpty(v) ? null : v),
+  text: (r, v) => (r.text = Str.isEmpty(v) ? Option.none() : Option.some(v)),
   sha1: (r, v) => (r.sha1 = toField(v)),
 } satisfies Readonly<Record<string, Setter<MutableRevision>>>;
 
@@ -568,11 +581,11 @@ const isCaptured = (name: string): boolean =>
 export class XmlPageReader {
   private carry = "";
   private page = freshPage();
-  private rev: MutableRevision | null = null;
+  private rev: Option.Option<MutableRevision> = Option.none();
   private inContributor = false;
   /** Inside a `<content>` (a non-main slot), whose fields are skipped. */
   private inContent = false;
-  private capturing: string | null = null;
+  private capturing: Option.Option<string> = Option.none();
   private textBuf = "";
   /** Set when a captured field breaches {@link MAX_TEXT_LENGTH}; degrades the revision. */
   private textOverLimit = false;
@@ -588,7 +601,7 @@ export class XmlPageReader {
 
   /** Flushes at end of stream: a page still open mid-revision is a truncation error. */
   end(): readonly PageRevisionRecord[] {
-    if (this.rev !== null) {
+    if (Option.isSome(this.rev)) {
       return [
         {
           _tag: "error",
@@ -603,7 +616,7 @@ export class XmlPageReader {
 
   private consume(token: XmlToken, out: PageRevisionRecord[]): void {
     if (token.t === "text") {
-      if (this.capturing !== null) this.appendText(token.value);
+      if (Option.isSome(this.capturing)) this.appendText(token.value);
       return;
     }
     if (token.t === "open") return this.onOpen(token.name, out, token.attributes);
@@ -636,11 +649,11 @@ export class XmlPageReader {
     }
     if (this.onRevisionMarker(name)) return;
     if (name === "redirect") {
-      if (this.rev === null) this.page.redirect = redirectTitle(attributes);
+      if (Option.isNone(this.rev)) this.page.redirect = redirectTitle(attributes);
       return;
     }
     if (isCaptured(name) && !this.inContent) {
-      this.capturing = name;
+      this.capturing = Option.some(name);
       this.textBuf = "";
     }
   }
@@ -652,22 +665,22 @@ export class XmlPageReader {
    */
   private onRevisionMarker(name: string): boolean {
     if (name !== "contributor" && name !== "content" && name !== "minor") return false;
-    if (this.rev === null) return true;
+    if (Option.isNone(this.rev)) return true;
     if (name === "contributor") {
       this.inContributor = true;
-      this.rev.hasContributor = true;
+      this.rev.value.hasContributor = true;
     } else if (name === "content") {
       this.inContent = true;
     } else {
-      this.rev.minor = true;
+      this.rev.value.minor = true;
     }
     return true;
   }
 
   private onClose(name: string, out: PageRevisionRecord[]): void {
-    if (this.capturing === name) {
+    if (Option.exists(this.capturing, (capturing) => capturing === name)) {
       this.store(name, this.textBuf);
-      this.capturing = null;
+      this.capturing = Option.none();
       this.textBuf = "";
       return;
     }
@@ -681,7 +694,7 @@ export class XmlPageReader {
     }
     if (name === "revision") {
       out.push(this.finalizeRevision());
-      this.rev = null;
+      this.rev = Option.none();
       return;
     }
     if (name === "page") {
@@ -696,29 +709,30 @@ export class XmlPageReader {
    * No-op when no revision is open, which is the normal case.
    */
   private flushPendingRevision(out: PageRevisionRecord[], detail: string): void {
-    if (this.rev === null) return;
+    if (Option.isNone(this.rev)) return;
     out.push({
       _tag: "error",
       reason: "dumps/malformed-revision",
       page: this.snapshotPage(),
       detail,
     });
-    this.rev = null;
+    this.rev = Option.none();
     this.inContributor = false;
     this.inContent = false;
-    this.capturing = null;
+    this.capturing = Option.none();
     this.textBuf = "";
     this.textOverLimit = false;
   }
 
   private store(name: string, raw: string): void {
     const value = decodeXmlEntities(raw);
-    if (this.inContributor && this.rev !== null) {
-      applySetter(CONTRIBUTOR_SETTERS, name, this.rev, value);
-      return;
-    }
-    if (this.rev !== null) {
-      applySetter(REVISION_SETTERS, name, this.rev, value);
+    if (Option.isSome(this.rev)) {
+      applySetter(
+        this.inContributor ? CONTRIBUTOR_SETTERS : REVISION_SETTERS,
+        name,
+        this.rev.value,
+        value,
+      );
       return;
     }
     applySetter(PAGE_SETTERS, name, this.page, value);
@@ -726,36 +740,32 @@ export class XmlPageReader {
 
   private startPage(): void {
     this.page = freshPage();
-    this.rev = null;
+    this.rev = Option.none();
     this.inContributor = false;
     this.inContent = false;
-    this.capturing = null;
+    this.capturing = Option.none();
     this.textBuf = "";
     this.textOverLimit = false;
   }
 
   private startRevision(): void {
-    this.rev = freshRevision();
+    this.rev = Option.some(freshRevision());
     this.inContributor = false;
     this.inContent = false;
-    this.capturing = null;
+    this.capturing = Option.none();
     this.textBuf = "";
     this.textOverLimit = false;
   }
 
   private snapshotPage(): PageRef {
-    return {
-      title: Option.fromNullOr(this.page.title),
-      ns: Option.fromNullOr(this.page.ns),
-      id: Option.fromNullOr(this.page.id),
-      redirect: Option.fromNullOr(this.page.redirect),
-    };
+    const { title, ns, id, redirect } = this.page;
+    return { title, ns, id, redirect };
   }
 
   private finalizeRevision(): PageRevisionRecord {
-    const rev = this.rev;
     const page = this.snapshotPage();
-    if (rev === null || rev.id === null) {
+    const rev = this.rev;
+    if (Option.isNone(rev) || Option.isNone(rev.value.id)) {
       return {
         _tag: "error",
         reason: "dumps/malformed-revision",
@@ -771,7 +781,7 @@ export class XmlPageReader {
         detail: `revision field exceeds the ${MAX_TEXT_LENGTH}-code-unit cap`,
       };
     }
-    return { _tag: "revision", page, revision: toRevision(rev, rev.id) };
+    return { _tag: "revision", page, revision: toRevision(rev.value, rev.value.id.value) };
   }
 }
 
@@ -779,21 +789,21 @@ export class XmlPageReader {
 function toRevision(rev: MutableRevision, id: number): Revision {
   const contributor: Option.Option<Contributor> = rev.hasContributor
     ? Option.some({
-        username: Option.fromNullOr(rev.contributorUsername),
-        id: Option.fromNullOr(rev.contributorId),
-        ip: Option.fromNullOr(rev.contributorIp),
+        username: rev.contributorUsername,
+        id: rev.contributorId,
+        ip: rev.contributorIp,
       })
     : Option.none();
   return {
     id,
-    parentId: Option.fromNullOr(rev.parentId),
-    timestamp: Option.fromNullOr(rev.timestamp),
+    parentId: rev.parentId,
+    timestamp: rev.timestamp,
     contributor,
-    comment: Option.fromNullOr(rev.comment),
-    model: Option.fromNullOr(rev.model),
-    format: Option.fromNullOr(rev.format),
-    text: Option.fromNullOr(rev.text),
-    sha1: Option.fromNullOr(rev.sha1),
+    comment: rev.comment,
+    model: rev.model,
+    format: rev.format,
+    text: rev.text,
+    sha1: rev.sha1,
     isMinor: rev.minor,
   };
 }

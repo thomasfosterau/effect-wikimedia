@@ -212,17 +212,12 @@ describe("tokenizeXml", () => {
 
 // ── The pipeline over the fixture ────────────────────────────────────────
 
-/** The {@link Dumps.PageRef} the reader gives for these values, `null` for an absent one. */
-const pageRef = (
-  title: string | null,
-  ns: number | null,
-  id: number | null,
-  redirect: string | null,
-): Dumps.PageRef => ({
-  title: Option.fromNullOr(title),
-  ns: Option.fromNullOr(ns),
-  id: Option.fromNullOr(id),
-  redirect: Option.fromNullOr(redirect),
+/** The {@link Dumps.PageRef} the reader gives for these values, `None` for an omitted `redirect`. */
+const pageRef = (title: string, ns: number, id: number, redirect?: string): Dumps.PageRef => ({
+  title: Option.some(title),
+  ns: Option.some(ns),
+  id: Option.some(id),
+  redirect: Option.fromUndefinedOr(redirect),
 });
 
 describe("pageRecords pipeline", () => {
@@ -238,7 +233,7 @@ describe("pageRecords pipeline", () => {
 
       const first = hits[0];
       if (!P.isTagged(first, "revision")) return expect.unreachable("expected revision");
-      expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091, null));
+      expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091));
       expect(first.revision.id).toBe(100);
       expect(first.revision.isMinor).toBe(true);
       expect(first.revision.comment).toEqual(Option.some("first version"));
@@ -259,7 +254,7 @@ describe("pageRecords pipeline", () => {
       const error = errors[0];
       if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
       expect(error.reason).toBe("dumps/malformed-revision");
-      expect(error.page).toEqual(pageRef("Category:Writers", 14, 200, null));
+      expect(error.page).toEqual(pageRef("Category:Writers", 14, 200));
     }),
   );
 
@@ -315,7 +310,7 @@ describe("pageRecords pipeline", () => {
       if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
       expect(error.reason).toBe("dumps/malformed-revision");
       expect(error.detail).toContain("truncated");
-      expect(error.page).toEqual(pageRef("T", 0, 1, null));
+      expect(error.page).toEqual(pageRef("T", 0, 1));
     }),
   );
 
@@ -330,7 +325,7 @@ describe("pageRecords pipeline", () => {
       if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
       expect(error.reason).toBe("dumps/malformed-revision");
       expect(error.detail).toContain("not closed");
-      expect(error.page).toEqual(pageRef("A", 0, 1, null));
+      expect(error.page).toEqual(pageRef("A", 0, 1));
     }),
   );
 
@@ -493,7 +488,7 @@ describe("pageRecords pipeline", () => {
         const orphan: Dumps.PageRevisionError = {
           _tag: "error",
           reason: "dumps/malformed-revision",
-          page: pageRef("P", 0, 1, null),
+          page: pageRef("P", 0, 1),
           detail: "revision missing id",
         };
         expect(yield* collect(Stream.make(orphan).pipe(Dumps.skipRedirects))).toEqual([orphan]);
