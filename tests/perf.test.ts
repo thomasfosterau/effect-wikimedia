@@ -32,17 +32,15 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Console from "effect/Console";
-import { describe, expect, it } from "vite-plus/test";
-import { runTest } from "./helpers/effect.ts";
+import * as Effect from "effect/Effect";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import { parse, serialize } from "../src/wikitext/index.ts";
 
 const ada = readFileSync(
   fileURLToPath(new URL("./fixtures/ada-lovelace.txt", import.meta.url)),
   "utf8",
 );
-
-/** Writes one measured timing to the CI log through the `Console` service. */
-const logTiming = (line: string): Promise<void> => runTest(Console.log(line));
 
 /** The best of `runs` timings of `run`, in ms, after `warmups` untimed runs (a JIT warm-up). */
 function bestTime(run: () => void, warmups: number, runs: number): number {
@@ -60,19 +58,21 @@ function bestTime(run: () => void, warmups: number, runs: number): number {
 const largeArticle = `${ada}\n`.repeat(60);
 
 describe("performance floor", () => {
-  it(`parses a large article (${largeArticle.length} chars) fast`, async () => {
-    // Warm up the JIT so the measurement reflects steady state.
-    Arr.makeBy(5, () => serialize(parse(largeArticle)));
-    const best = bestTime(() => parse(largeArticle), 0, 30);
+  it.effect(`parses a large article (${largeArticle.length} chars) fast`, () =>
+    Effect.gen(function* () {
+      // Warm up the JIT so the measurement reflects steady state.
+      Arr.makeBy(5, () => serialize(parse(largeArticle)));
+      const best = bestTime(() => parse(largeArticle), 0, 30);
 
-    await logTiming(`[perf] parse ${largeArticle.length} chars: best ${best.toFixed(2)} ms`);
+      yield* Console.log(`[perf] parse ${largeArticle.length} chars: best ${best.toFixed(2)} ms`);
 
-    // Single-digit ms is the target (1.16 ms uncontended); 60 ms is the
-    // regression ceiling — sized to clear the worst contended measurement
-    // observed under the single-job CI (37.97 ms) while still catching an
-    // order-of-magnitude regression. See the module doc for the trade.
-    expect(best).toBeLessThan(60);
-  });
+      // Single-digit ms is the target (1.16 ms uncontended); 60 ms is the
+      // regression ceiling — sized to clear the worst contended measurement
+      // observed under the single-job CI (37.97 ms) while still catching an
+      // order-of-magnitude regression. See the module doc for the trade.
+      expect(best).toBeLessThan(60);
+    }),
+  );
 
   it("round-trips the large article without error", () => {
     expect(serialize(parse(largeArticle))).toBe(largeArticle);
@@ -105,18 +105,26 @@ describe("performance floor: wikitables (#132)", () => {
   const linkRunTable = cell(`${"[[".repeat(20_000)}${"]]".repeat(20_000)}`);
   const mixedRunTable = cell(`${"[[{{".repeat(10_000)}${"}}".repeat(10_000)}`);
 
-  it.each([
-    ["a table of templates and citations", largeTable],
-    ["a table with an unclosed {{ in every row", strayTable],
-    ["a cell holding one long run of { then of }", braceRunTable],
-    ["a cell holding one long run of [[ then of ]]", linkRunTable],
-    ["a cell holding [[{{ runs closed only by }}", mixedRunTable],
-  ] as const)("parses %s in linear time", async (name, src) => {
-    const best = bestParseTime(src);
-    await logTiming(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
-    expect(best).toBeLessThan(250);
-    expect(serialize(parse(src))).toBe(src);
-  });
+  Arr.forEach(
+    [
+      ["a table of templates and citations", largeTable],
+      ["a table with an unclosed {{ in every row", strayTable],
+      ["a cell holding one long run of { then of }", braceRunTable],
+      ["a cell holding one long run of [[ then of ]]", linkRunTable],
+      ["a cell holding [[{{ runs closed only by }}", mixedRunTable],
+    ] as const,
+    ([name, src]) =>
+      it.effect(`parses ${name} in linear time`, () =>
+        Effect.gen(function* () {
+          const best = bestParseTime(src);
+          yield* Console.log(
+            `[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`,
+          );
+          expect(best).toBeLessThan(250);
+          expect(serialize(parse(src))).toBe(src);
+        }),
+      ),
+  );
 });
 
 // An unclosed opener whose close is searched for past the region it sits in
@@ -130,19 +138,27 @@ describe("performance floor: unclosed openers (#152, #159)", () => {
   const cellRows = (cell: string, rows: number): string =>
     `{|\n${`|-\n| ${cell} || b\n| c\n`.repeat(rows)}|}\n`;
 
-  it.each([
-    ["a table with an unclosed <!-- in every row", cellRows("<!-- x", 8000)],
-    ["a table with an unclosed <ref> in every row", cellRows("<ref>x", 12_000)],
-    ["a page of unclosed <ref> lines", "<ref>x\n".repeat(20_000)],
-    ["a page of unclosed {| lines", "{|\n".repeat(13_334)],
-    ["a page of unclosed {| and {{ lines", "{|\n| {{\n".repeat(5000)],
-    ["a page of unclosed [[ lines", "[[\n".repeat(13_334)],
-  ] as const)("parses %s in linear time", async (name, src) => {
-    const best = bestParseTime(src);
-    await logTiming(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
-    expect(best).toBeLessThan(250);
-    expect(serialize(parse(src))).toBe(src);
-  });
+  Arr.forEach(
+    [
+      ["a table with an unclosed <!-- in every row", cellRows("<!-- x", 8000)],
+      ["a table with an unclosed <ref> in every row", cellRows("<ref>x", 12_000)],
+      ["a page of unclosed <ref> lines", "<ref>x\n".repeat(20_000)],
+      ["a page of unclosed {| lines", "{|\n".repeat(13_334)],
+      ["a page of unclosed {| and {{ lines", "{|\n| {{\n".repeat(5000)],
+      ["a page of unclosed [[ lines", "[[\n".repeat(13_334)],
+    ] as const,
+    ([name, src]) =>
+      it.effect(`parses ${name} in linear time`, () =>
+        Effect.gen(function* () {
+          const best = bestParseTime(src);
+          yield* Console.log(
+            `[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`,
+          );
+          expect(best).toBeLessThan(250);
+          expect(serialize(parse(src))).toBe(src);
+        }),
+      ),
+  );
 });
 
 // Openers that do close, but only at the very end of the page (#179): each
@@ -152,16 +168,24 @@ describe("performance floor: unclosed openers (#152, #159)", () => {
 // these took 0.5 s to 8 s each on a developer machine (the last over a
 // minute on a loaded one); with it, a few ms each.
 describe("performance floor: openers closed only at the page end (#179)", () => {
-  it.each([
-    ["a page of {| lines closed by one |}", `${"{|\n".repeat(8000)}|}\n`],
-    ["a page of {{ lines closed by one }}", `${"{{\n".repeat(4000)}}}`],
-    ["a page of {{{ lines closed by one }}}", `${"{{{\n".repeat(4000)}}}}`],
-    ["a page of [[ lines closed by one ]]", `${"[[\n".repeat(4000)}]]`],
-    ["a page of {| and {{ lines closed at its end", `${"{|\n| {{\n".repeat(2000)}|}\n}}`],
-  ] as const)("parses %s in linear time", async (name, src) => {
-    const best = bestParseTime(src);
-    await logTiming(`[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`);
-    expect(best).toBeLessThan(250);
-    expect(serialize(parse(src))).toBe(src);
-  });
+  Arr.forEach(
+    [
+      ["a page of {| lines closed by one |}", `${"{|\n".repeat(8000)}|}\n`],
+      ["a page of {{ lines closed by one }}", `${"{{\n".repeat(4000)}}}`],
+      ["a page of {{{ lines closed by one }}}", `${"{{{\n".repeat(4000)}}}}`],
+      ["a page of [[ lines closed by one ]]", `${"[[\n".repeat(4000)}]]`],
+      ["a page of {| and {{ lines closed at its end", `${"{|\n| {{\n".repeat(2000)}|}\n}}`],
+    ] as const,
+    ([name, src]) =>
+      it.effect(`parses ${name} in linear time`, () =>
+        Effect.gen(function* () {
+          const best = bestParseTime(src);
+          yield* Console.log(
+            `[perf] parse ${name}, ${src.length} chars: best ${best.toFixed(2)} ms`,
+          );
+          expect(best).toBeLessThan(250);
+          expect(serialize(parse(src))).toBe(src);
+        }),
+      ),
+  );
 });
