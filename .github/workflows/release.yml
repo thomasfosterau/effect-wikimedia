@@ -40,18 +40,18 @@ jobs:
       mode: ${{ steps.mode.outputs.mode }}
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
           node-version: "lts"
           cache: true
       - name: Select mode
         id: mode
-        uses: changesets/action/select-mode@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        uses: changesets/action/select-mode@v2.1.2
 
   version:
     name: Version packages
@@ -67,17 +67,17 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
           node-version: "lts"
           cache: true
       - name: Create or update the version PR
-        uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        uses: changesets/action/version@v2.1.2
         with:
           script: pnpm run version
           commit-message: "chore: version packages"
@@ -106,12 +106,12 @@ jobs:
       id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
           node-version: "lts"
@@ -129,7 +129,7 @@ jobs:
       # / `commit` / `title`. The action parses the "New tag:" output of
       # `changeset publish`, pushes the tag and creates the GitHub release.
       - name: Publish to npm
-        uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        uses: changesets/action/publish@v2.1.2
         with:
           # `pnpm run`, NOT `vp run`: pnpm forwards the ambient environment to
           # child processes, whereas `vp run` filters it and drops

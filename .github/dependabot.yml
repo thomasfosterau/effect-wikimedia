@@ -81,8 +81,9 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore"
-    # Third-party actions are pinned to full commit SHAs (with a `# vX.Y.Z`
-    # comment); Dependabot updates both.
+    # Every action is referenced by an exact `@vX.Y.Z` tag and locked to its
+    # commit in .github/workflows/actions.lock; Dependabot keeps the tags
+    # current.
     cooldown:
       default-days: 1
     assignees:
