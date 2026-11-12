@@ -25,6 +25,7 @@ import { build } from "esbuild";
 import { expectDefined } from "./helpers/narrow.ts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 /** Span-name markers unique to each surface module's `Effect.fn` calls. */
 const MARKERS = {
@@ -62,6 +63,12 @@ type Surface =
   | "Reconciliation"
   | "Wikitext";
 
+/** esbuild rejected the entry that imports one namespace, so its bundle can't be inspected. */
+class BundleFailed extends Schema.TaggedError<BundleFailed, { readonly brand: unique symbol }>()(
+  "BundleFailed",
+  { namespace: Schema.String, cause: Schema.Defect() },
+) {}
+
 /** Bundles a one-line entry that imports and uses only the given namespace from the package barrel. */
 const bundleImporting = Effect.fn("bundleImporting")(function* (namespace: Surface) {
   const path = yield* Path.Path;
@@ -77,29 +84,31 @@ const bundleImporting = Effect.fn("bundleImporting")(function* (namespace: Surfa
     Wikitext: `import { Wikitext } from "./index";\nconsole.log(Wikitext.parse, Wikitext.stripToText, Wikitext.serialize);\n`,
   };
 
-  const result = yield* Effect.tryPromise(() =>
-    build({
-      stdin: {
-        contents: entryByNamespace[namespace],
-        resolveDir: srcDir,
-        loader: "ts",
-      },
-      bundle: true,
-      write: false,
-      format: "esm",
-      platform: "neutral",
-      target: "esnext",
-      treeShaking: true,
-      minify: false,
-      logLevel: "silent",
-      // `effect` (the peer) and `@thomasfosterau/effect-parse` (the `Wikitext`
-      // parser's combinators) are the package's only dependencies; excluding
-      // them keeps the check focused on this package's own module boundaries
-      // (and keeps the bundle fast — effect is large). `node:*` builtins are
-      // external too — the Dumps sources module is the one Node-only module.
-      external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
-    }),
-  );
+  const result = yield* Effect.tryPromise({
+    try: () =>
+      build({
+        stdin: {
+          contents: entryByNamespace[namespace],
+          resolveDir: srcDir,
+          loader: "ts",
+        },
+        bundle: true,
+        write: false,
+        format: "esm",
+        platform: "neutral",
+        target: "esnext",
+        treeShaking: true,
+        minify: false,
+        logLevel: "silent",
+        // `effect` (the peer) and `@thomasfosterau/effect-parse` (the `Wikitext`
+        // parser's combinators) are the package's only dependencies; excluding
+        // them keeps the check focused on this package's own module boundaries
+        // (and keeps the bundle fast — effect is large). `node:*` builtins are
+        // external too — the Dumps sources module is the one Node-only module.
+        external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
+      }),
+    catch: (cause) => new BundleFailed({ namespace, cause }),
+  });
   return expectDefined(result.outputFiles?.[0]?.text, "esbuild output");
 });
 
