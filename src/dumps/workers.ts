@@ -56,10 +56,6 @@ export const MultistreamRpcs = RpcGroup.make(
   }),
 );
 
-/** A failure's text for {@link MultistreamRangeFailed}: its `message` when it has a string one. */
-const describeFailure = <E>(error: E): string =>
-  P.hasProperty(error, "message") && P.isString(error.message) ? error.message : String(error);
-
 /**
  * The worker side's handler layer for {@link MultistreamRpcs}: each request's
  * range is opened with `open` (the decompressed bytes, as
@@ -74,8 +70,16 @@ export const multistreamWorkerHandlers = <E, R>(
   MultistreamRpcs.toLayer({
     DecodeRange: (range) =>
       pageRecords(open(range)).pipe(
+        // The failure's text for the error: its `message` when it has a string one.
         Stream.mapError(
-          (error) => new MultistreamRangeFailed({ range, description: describeFailure(error) }),
+          (error) =>
+            new MultistreamRangeFailed({
+              range,
+              description:
+                P.hasProperty(error, "message") && P.isString(error.message)
+                  ? error.message
+                  : String(error),
+            }),
         ),
       ),
   });

@@ -13,35 +13,33 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import { Worker, WorkerRunner } from "effect/workers";
 
-/** A worker runner's `run` on one end of a channel: answers `[0, input]` frames with `handler`. */
-const runOn = Effect.fn("inProcessWorkers.run")(function* <I, A, E, R>(
-  port: MessagePort,
-  handler: (portId: number, message: I) => Effect.Effect<A, E, R> | void,
-) {
-  const fibers = yield* FiberSet.make<A, E>();
-  const fork = yield* FiberSet.runtime(fibers)<R>();
-  port.addEventListener("message", (event: MessageEvent<readonly [0, I] | readonly [1]>) => {
-    const frame = event.data;
-    if (frame[0] !== 0) return;
-    const result = handler(0, frame[1]);
-    if (Effect.isEffect(result)) fork(result);
-  });
-  port.start();
-  // The worker platform's handshake: `[0]` says the worker is ready.
-  port.postMessage([0]);
-  return yield* Effect.never;
-});
-
 /** A runner platform over one end of a channel, speaking the worker platform's `[kind, data]` frames. */
 const runnerPlatformOn = (port: MessagePort): Layer.Layer<WorkerRunner.WorkerRunnerPlatform> =>
   Layer.succeed(WorkerRunner.WorkerRunnerPlatform, {
-    start: <O, I>() =>
-      Effect.succeed<WorkerRunner.WorkerRunner<O, I>>({
-        run: <A, E, R>(handler: (portId: number, message: I) => Effect.Effect<A, E, R> | void) =>
-          Effect.scoped(runOn(port, handler)),
+    start: <O, I>() => {
+      /** The runner's `run` on this end of the channel: answers `[0, input]` frames with `handler`. */
+      const runOn = Effect.fn("inProcessWorkers.run")(function* <A, E, R>(
+        handler: (portId: number, message: I) => Effect.Effect<A, E, R> | void,
+      ) {
+        const fibers = yield* FiberSet.make<A, E>();
+        const fork = yield* FiberSet.runtime(fibers)<R>();
+        port.addEventListener("message", (event: MessageEvent<readonly [0, I] | readonly [1]>) => {
+          const frame = event.data;
+          if (frame[0] !== 0) return;
+          const result = handler(0, frame[1]);
+          if (Effect.isEffect(result)) fork(result);
+        });
+        port.start();
+        // The worker platform's handshake: `[0]` says the worker is ready.
+        port.postMessage([0]);
+        return yield* Effect.never;
+      });
+      return Effect.succeed<WorkerRunner.WorkerRunner<O, I>>({
+        run: (handler) => Effect.scoped(runOn(handler)),
         send: (_, message) => Effect.sync(() => port.postMessage([1, message])),
         sendUnsafe: (_, message) => port.postMessage([1, message]),
-      }),
+      });
+    },
   });
 
 /** Opens a worker's channel in `scope`, launching `serve`'s runner layer on its far end. */

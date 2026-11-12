@@ -45,7 +45,7 @@ const ada = readFileSync(
 const logTiming = (line: string): Promise<void> => runTest(Console.log(line));
 
 /** The best of `runs` timings of `run`, in ms, after `warmups` untimed runs (a JIT warm-up). */
-function bestTime<A>(run: () => A, warmups: number, runs: number): number {
+function bestTime(run: () => void, warmups: number, runs: number): number {
   Arr.makeBy(warmups, run);
   return Math.min(
     ...Arr.makeBy(runs, () => {
