@@ -18,7 +18,8 @@ import { fileURLToPath } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import { createContext, runInContext } from "node:vm";
 import { createGzip, gzipSync } from "node:zlib";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { afterAll, beforeAll, describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
@@ -27,7 +28,6 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Dumps, Wikidata } from "../../src/index.ts";
-import { runTest } from "../helpers/effect.ts";
 
 const fixtureNdjson = readFileSync(
   fileURLToPath(new URL("../fixtures/dumps/entities-slice.ndjson", import.meta.url)),
@@ -62,12 +62,12 @@ beforeAll(async () => {
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 /** Collects a stream to an array under the test runtime. */
-const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
-  runTest(Stream.runCollect(stream));
+const collect = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<ReadonlyArray<A>, E> =>
+  Stream.runCollect(stream);
 
 /** Counts a stream under the test runtime. */
-const count = <A, E>(stream: Stream.Stream<A, E>): Promise<number> =>
-  runTest(Stream.runCount(stream));
+const count = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<number, E> =>
+  Stream.runCount(stream);
 
 // ── stripFraming (table-driven) ──────────────────────────────────────────
 
@@ -178,62 +178,76 @@ describe("predicates", () => {
 // ── The pipeline over the fixture ────────────────────────────────────────
 
 describe("entityRecords pipeline", () => {
-  it("keeps streaming past a line whose nested containers are the wrong kind (#147)", async () => {
-    const lines = [
-      "[",
-      `${toJson({ type: "item", id: "Q1", claims: { P31: [null] } })},`,
-      `${toJson({ type: "item", id: "Q2", sitelinks: { enwiki: null } })},`,
-      toJson({ type: "item", id: "Q3" }),
-      "]",
-    ];
-    const bytes = Stream.make(new TextEncoder().encode(lines.join("\n")));
-    const records = await collect(Dumps.entityRecords(bytes));
-    expect(records.filter(isLineError)).toEqual([]);
-    const hits = records.filter((r): r is Dumps.EntityHit => !isLineError(r));
-    expect(hits.map((r) => [r.line, r.item.id])).toEqual([
-      [2, "Q1"],
-      [3, "Q2"],
-      [4, "Q3"],
-    ]);
-  });
+  it.effect("keeps streaming past a line whose nested containers are the wrong kind (#147)", () =>
+    Effect.gen(function* () {
+      const lines = [
+        "[",
+        `${toJson({ type: "item", id: "Q1", claims: { P31: [null] } })},`,
+        `${toJson({ type: "item", id: "Q2", sitelinks: { enwiki: null } })},`,
+        toJson({ type: "item", id: "Q3" }),
+        "]",
+      ];
+      const bytes = Stream.make(new TextEncoder().encode(lines.join("\n")));
+      const records = yield* collect(Dumps.entityRecords(bytes));
+      expect(records.filter(isLineError)).toEqual([]);
+      const hits = records.filter((r): r is Dumps.EntityHit => !isLineError(r));
+      expect(hits.map((r) => [r.line, r.item.id])).toEqual([
+        [2, "Q1"],
+        [3, "Q2"],
+        [4, "Q3"],
+      ]);
+    }),
+  );
 
-  it("decodes the fixture: 5 entities + 2 error elements, in line order", async () => {
-    const records = await collect(Dumps.entityRecords(Dumps.fromFile(slicePath)));
-    const entities = records.filter(P.isTagged("entity"));
-    const errors = records.filter(isLineError);
-    expect(entities.length).toBe(5);
-    expect(errors.length).toBe(2);
-    expect(errors.map((e) => e.reason)).toEqual(["dumps/invalid-json", "dumps/not-an-entity"]);
-  });
+  it.effect("decodes the fixture: 5 entities + 2 error elements, in line order", () =>
+    Effect.gen(function* () {
+      const records = yield* collect(Dumps.entityRecords(Dumps.fromFile(slicePath)));
+      const entities = records.filter(P.isTagged("entity"));
+      const errors = records.filter(isLineError);
+      expect(entities.length).toBe(5);
+      expect(errors.length).toBe(2);
+      expect(errors.map((e) => e.reason)).toEqual(["dumps/invalid-json", "dumps/not-an-entity"]);
+    }),
+  );
 
-  it("byType keeps only items (4)", async () => {
-    const n = await count(
-      Dumps.fromFile(slicePath).pipe(Dumps.entityRecords, Dumps.onlyEntities, Dumps.byType("item")),
-    );
-    expect(n).toBe(4);
-  });
+  it.effect("byType keeps only items (4)", () =>
+    Effect.gen(function* () {
+      const n = yield* count(
+        Dumps.fromFile(slicePath).pipe(
+          Dumps.entityRecords,
+          Dumps.onlyEntities,
+          Dumps.byType("item"),
+        ),
+      );
+      expect(n).toBe(4);
+    }),
+  );
 
-  it("withClaim P569 keeps the 2 items with a date-of-birth claim", async () => {
-    const n = await count(
-      Dumps.fromFile(slicePath).pipe(
-        Dumps.entityRecords,
-        Dumps.onlyEntities,
-        Dumps.withClaim("P569"),
-      ),
-    );
-    expect(n).toBe(2);
-  });
+  it.effect("withClaim P569 keeps the 2 items with a date-of-birth claim", () =>
+    Effect.gen(function* () {
+      const n = yield* count(
+        Dumps.fromFile(slicePath).pipe(
+          Dumps.entityRecords,
+          Dumps.onlyEntities,
+          Dumps.withClaim("P569"),
+        ),
+      );
+      expect(n).toBe(2);
+    }),
+  );
 
-  it("withSitelink enwiki keeps the 1 item with an enwiki sitelink", async () => {
-    const n = await count(
-      Dumps.fromFile(slicePath).pipe(
-        Dumps.entityRecords,
-        Dumps.onlyEntities,
-        Dumps.withSitelink("enwiki"),
-      ),
-    );
-    expect(n).toBe(1);
-  });
+  it.effect("withSitelink enwiki keeps the 1 item with an enwiki sitelink", () =>
+    Effect.gen(function* () {
+      const n = yield* count(
+        Dumps.fromFile(slicePath).pipe(
+          Dumps.entityRecords,
+          Dumps.onlyEntities,
+          Dumps.withSitelink("enwiki"),
+        ),
+      );
+      expect(n).toBe(1);
+    }),
+  );
 });
 
 // ── Constant-memory (heap ceiling) ───────────────────────────────────────
@@ -324,59 +338,64 @@ describe("constant memory", () => {
   // every `SAMPLE_EVERY` items: whatever the pipeline holds at that point
   // (buffered lines, chunks, decoded items) is reachable, and nothing else
   // is counted.
-  it("streams a dump larger than the heap ceiling without buffering it", async () => {
-    // The ~300k-item dump (~57 MB uncompressed) was generated in beforeAll,
-    // so only the streaming is measured here.
-    expect(bigUncompressedBytes).toBeGreaterThan(45_000_000);
+  it.effect(
+    "streams a dump larger than the heap ceiling without buffering it",
+    () =>
+      Effect.gen(function* () {
+        // The ~300k-item dump (~57 MB uncompressed) was generated in beforeAll,
+        // so only the streaming is measured here.
+        expect(bigUncompressedBytes).toBeGreaterThan(45_000_000);
 
-    const base = retained();
-    const samples: Array<Retained> = [];
-    let seen = 0;
+        const base = retained();
+        const samples: Array<Retained> = [];
+        let seen = 0;
 
-    const n = await count(
-      Dumps.fromFile(bigPath).pipe(
-        Dumps.entityRecords,
-        Dumps.onlyEntities,
-        Dumps.withClaim("P569"),
-        Stream.tap(() =>
-          Effect.sync(() => {
-            seen += 1;
-            if (seen % SAMPLE_EVERY === 0) {
-              const r = retained();
-              samples.push({ heap: r.heap - base.heap, offHeap: r.offHeap - base.offHeap });
-            }
-          }),
-        ),
-      ),
-    );
+        const n = yield* count(
+          Dumps.fromFile(bigPath).pipe(
+            Dumps.entityRecords,
+            Dumps.onlyEntities,
+            Dumps.withClaim("P569"),
+            Stream.tap(() =>
+              Effect.sync(() => {
+                seen += 1;
+                if (seen % SAMPLE_EVERY === 0) {
+                  const r = retained();
+                  samples.push({ heap: r.heap - base.heap, offHeap: r.offHeap - base.offHeap });
+                }
+              }),
+            ),
+          ),
+        );
 
-    expect(n).toBe(BIG_ITEM_COUNT);
-    expect(samples).toHaveLength(BIG_ITEM_COUNT / SAMPLE_EVERY);
-    const mb = (bytes: number) => bytes / 1_000_000;
-    const peakHeapMb = mb(Math.max(...samples.map((s) => s.heap)));
-    const peakOffHeapMb = mb(Math.max(...samples.map((s) => s.offHeap)));
-    // Growth, on- and off-heap, from the first sample (pipeline warmed up,
-    // 10k items in) to the last (the whole dump read): a pipeline that holds
-    // one line at a time retains the same at both, while one that keeps
-    // something per line grows with the number of lines read in between.
-    const [first] = samples;
-    const last = samples.at(-1);
-    const growthMb =
-      first && last ? mb(last.heap + last.offHeap - first.heap - first.offHeap) : Number.NaN;
+        expect(n).toBe(BIG_ITEM_COUNT);
+        expect(samples).toHaveLength(BIG_ITEM_COUNT / SAMPLE_EVERY);
+        const mb = (bytes: number) => bytes / 1_000_000;
+        const peakHeapMb = mb(Math.max(...samples.map((s) => s.heap)));
+        const peakOffHeapMb = mb(Math.max(...samples.map((s) => s.offHeap)));
+        // Growth, on- and off-heap, from the first sample (pipeline warmed up,
+        // 10k items in) to the last (the whole dump read): a pipeline that holds
+        // one line at a time retains the same at both, while one that keeps
+        // something per line grows with the number of lines read in between.
+        const [first] = samples;
+        const last = samples.at(-1);
+        const growthMb =
+          first && last ? mb(last.heap + last.offHeap - first.heap - first.offHeap) : Number.NaN;
 
-    // Retained working set is one line at a time (observed: heap and off-heap
-    // each under 1 MB, growth within about 0.1 MB, with or without coverage).
-    // The 40 MB ceiling sits below the ~57 MB uncompressed dump, so a
-    // regression that kept the file, on- or off-heap, would blow it; the growth
-    // bound catches a leak too small to reach the ceiling. Observed growth is
-    // about -0.1 to -0.02 MB (Node 20-26), so the 2 MB bound is ~20x the
-    // largest drift, and still fails a pipeline that keeps one number per line
-    // (~2.9 MB over the 290k lines between the first and last samples). (The
-    // stronger proof, a 600 MB dump completing under a hard
-    // `--max-old-space-size=250` cap, is documented in the PR, not run in CI,
-    // to keep this suite fast.)
-    expect(peakHeapMb).toBeLessThan(40);
-    expect(peakOffHeapMb).toBeLessThan(40);
-    expect(growthMb).toBeLessThan(2);
-  }, 120_000);
+        // Retained working set is one line at a time (observed: heap and off-heap
+        // each under 1 MB, growth within about 0.1 MB, with or without coverage).
+        // The 40 MB ceiling sits below the ~57 MB uncompressed dump, so a
+        // regression that kept the file, on- or off-heap, would blow it; the growth
+        // bound catches a leak too small to reach the ceiling. Observed growth is
+        // about -0.1 to -0.02 MB (Node 20-26), so the 2 MB bound is ~20x the
+        // largest drift, and still fails a pipeline that keeps one number per line
+        // (~2.9 MB over the 290k lines between the first and last samples). (The
+        // stronger proof, a 600 MB dump completing under a hard
+        // `--max-old-space-size=250` cap, is documented in the PR, not run in CI,
+        // to keep this suite fast.)
+        expect(peakHeapMb).toBeLessThan(40);
+        expect(peakOffHeapMb).toBeLessThan(40);
+        expect(growthMb).toBeLessThan(2);
+      }),
+    120_000,
+  );
 });

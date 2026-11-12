@@ -10,16 +10,18 @@
 
 import { fileURLToPath } from "node:url";
 import unbzip2 from "unbzip2-stream";
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assertInstanceOf } from "@effect/vitest/utils";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Layer from "effect/Layer";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { RpcClient, RpcServer } from "effect/rpc";
 import type { WorkerError } from "effect/workers";
 import { Dumps } from "../../src/index.ts";
-import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
 import { inProcessWorkers } from "../helpers/workers.ts";
 
 /** The worker's `open` failing, as a disk read can. */
@@ -43,8 +45,8 @@ const ranges = (): Stream.Stream<
 const openRange = (range: Dumps.MultistreamRange) =>
   Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
 
-const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
-  runTest(Stream.runCollect(stream));
+const collect = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<ReadonlyArray<A>, E> =>
+  Stream.runCollect(stream);
 
 const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
   Arr.map(records, (r) => Option.getOrNull(r.page.title));
@@ -68,16 +70,18 @@ const pool = <E>(
   );
 
 describe("record schemas", () => {
-  it("round-trips every fixture record through JSON and structuredClone", async () => {
-    const records = await collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
-    expect(records.length).toBeGreaterThan(0);
-    const json = Schema.fromJsonString(Schema.toCodecJson(Dumps.PageRevisionRecord));
-    Arr.forEach(records, (record) => {
-      const wire = structuredClone(Schema.encodeSync(Dumps.PageRevisionRecord)(record));
-      expect(Schema.decodeSync(Dumps.PageRevisionRecord)(wire)).toEqual(record);
-      expect(Schema.decodeSync(json)(Schema.encodeSync(json)(record))).toEqual(record);
-    });
-  });
+  it.effect("round-trips every fixture record through JSON and structuredClone", () =>
+    Effect.gen(function* () {
+      const records = yield* collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
+      expect(records.length).toBeGreaterThan(0);
+      const json = Schema.fromJsonString(Schema.toCodecJson(Dumps.PageRevisionRecord));
+      Arr.forEach(records, (record) => {
+        const wire = structuredClone(Schema.encodeSync(Dumps.PageRevisionRecord)(record));
+        expect(Schema.decodeSync(Dumps.PageRevisionRecord)(wire)).toEqual(record);
+        expect(Schema.decodeSync(json)(Schema.encodeSync(json)(record))).toEqual(record);
+      });
+    }),
+  );
 
   it("writes an absent field as null on the wire", () => {
     const range: Dumps.MultistreamRange = {
@@ -92,44 +96,52 @@ describe("record schemas", () => {
 });
 
 describe("multistreamPageRecordsInWorkers", () => {
-  it("decodes every range on the pool, with the records the main thread would decode", async () => {
-    const local = await collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
-    const remote = await collect(
-      ranges().pipe(
-        Dumps.multistreamPageRecordsInWorkers({ concurrency: 4 }),
-        Stream.provide(pool(2, openRange)),
-      ),
-    );
-    expect(remote).toHaveLength(local.length);
-    expect(remote).toEqual(expect.arrayContaining([...local]));
-    expect(titles(remote)).toEqual(expect.arrayContaining(["Ada Lovelace", "Zebra"]));
-  });
+  it.effect("decodes every range on the pool, with the records the main thread would decode", () =>
+    Effect.gen(function* () {
+      const local = yield* collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
+      const remote = yield* collect(
+        ranges().pipe(
+          Dumps.multistreamPageRecordsInWorkers({ concurrency: 4 }),
+          Stream.provide(pool(2, openRange)),
+        ),
+      );
+      expect(remote).toHaveLength(local.length);
+      expect(remote).toEqual(expect.arrayContaining([...local]));
+      expect(titles(remote)).toEqual(expect.arrayContaining(["Ada Lovelace", "Zebra"]));
+    }),
+  );
 
-  it("keeps the range order at concurrency 1", async () => {
-    const local = await collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
-    const remote = await collect(
-      ranges().pipe(
-        Dumps.multistreamPageRecordsInWorkers({ concurrency: 1 }),
-        Stream.provide(pool(1, openRange)),
-      ),
-    );
-    expect(remote).toEqual(local);
-  });
-
-  it("fails with MultistreamRangeFailed, carrying the range and message, when a worker cannot open it", async () => {
-    const [first] = await collect(ranges());
-    const failing = (): Stream.Stream<Uint8Array, DiskGone> =>
-      Stream.fail(new DiskGone({ message: "disk gone" }));
-    const error = await expectFailureInstanceOf(
-      Stream.runDrain(
+  it.effect("keeps the range order at concurrency 1", () =>
+    Effect.gen(function* () {
+      const local = yield* collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
+      const remote = yield* collect(
         ranges().pipe(
           Dumps.multistreamPageRecordsInWorkers({ concurrency: 1 }),
-          Stream.provide(pool(1, failing)),
+          Stream.provide(pool(1, openRange)),
         ),
-      ),
-      Dumps.MultistreamRangeFailed,
-    );
-    expect(error.description).toBe("disk gone");
-    expect(error.range).toEqual(first);
-  });
+      );
+      expect(remote).toEqual(local);
+    }),
+  );
+
+  it.effect(
+    "fails with MultistreamRangeFailed, carrying the range and message, when a worker cannot open it",
+    () =>
+      Effect.gen(function* () {
+        const [first] = yield* collect(ranges());
+        const failing = (): Stream.Stream<Uint8Array, DiskGone> =>
+          Stream.fail(new DiskGone({ message: "disk gone" }));
+        const error = yield* Effect.flip(
+          Stream.runDrain(
+            ranges().pipe(
+              Dumps.multistreamPageRecordsInWorkers({ concurrency: 1 }),
+              Stream.provide(pool(1, failing)),
+            ),
+          ),
+        );
+        assertInstanceOf(error, Dumps.MultistreamRangeFailed);
+        expect(error.description).toBe("disk gone");
+        expect(error.range).toEqual(first);
+      }),
+  );
 });

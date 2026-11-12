@@ -167,6 +167,12 @@ export default defineConfig({
       // JSON a Wikimedia API returns before its schema decodes it.
       "effect/no-unknown-parameters": "warn",
       "vite-plus/prefer-vite-plus-imports": "error",
+      // Effects run and get their layers at the edge (#224): in `src/` that is
+      // the caller, in tests it is `@effect/vitest` (`it.effect`, `it.live`,
+      // `layer(...)`), so no module, test or helper calls `Effect.provide`
+      // inside a program or `Effect.run*` itself. No exceptions.
+      "effecttsgo/strict-effect-provide": "error",
+      "effect/effect-run-in-body": "error",
       // ---- Oxlint categories: rules this package's conventions cut across --
       // `_tag` is Effect's discriminator, on every tagged error and union this
       // package defines and matches.
@@ -184,6 +190,22 @@ export default defineConfig({
       "vitest/expect-expect": [
         "error",
         { assertFunctionNames: ["expect", "expect*", "assert", "assert*"] },
+      ],
+      // `@effect/vitest`'s Effect tests are test blocks too (#224): an
+      // `expect` inside one is not standalone.
+      "vitest/no-standalone-expect": [
+        "error",
+        {
+          additionalTestBlockFunctions: [
+            // A plain test in a `layer(...)` block, on the block's own `it`.
+            "it",
+            "it.effect",
+            "it.effect.each",
+            "it.live",
+            "it.live.each",
+            "it.live.skipIf",
+          ],
+        },
       ],
     },
     overrides: [
@@ -248,9 +270,6 @@ export default defineConfig({
           // with the caller's schema. Held at error so none comes back; the
           // global `warn` stays for the `src/` sites still to go.
           "effect/casting-awareness": "error",
-          // Each test is an entry point: it provides its stubbed layers once,
-          // at the edge, which is what this diagnostic asks for.
-          "effecttsgo/strict-effect-provide": "off",
           // Tests narrow a union with `if (!guard) return expect.unreachable(…)`
           // and then assert on the narrowed value; that return and the
           // assertions after it are the idiom, not a missing return or a
@@ -260,15 +279,10 @@ export default defineConfig({
           // A helper sits next to the one test that reads it, inside that
           // test's `describe`, so the test reads top to bottom.
           "unicorn/consistent-function-scoping": "off",
-        },
-      },
-      // The unit suite's runtime boundary: `@effect/vitest`'s `it.effect`
-      // cannot load under the Vite+ vitest (see the module comment), so these
-      // helpers are where every test runs its Effect.
-      {
-        files: ["tests/helpers/effect.ts"],
-        rules: {
-          "effect/effect-run-in-body": "off",
+          // `@effect/vitest`'s `layer(...)` hands each block its own `it`,
+          // which carries the block's services, so a block's `it` shadows the
+          // module's by design (#224).
+          "no-shadow": ["error", { allow: ["it"] }],
         },
       },
     ],

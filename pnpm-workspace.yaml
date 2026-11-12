@@ -40,6 +40,13 @@ catalog:
   # carries, but takes `@oxlint/plugins` as a caret range, so Dependabot
   # proposes it on its own, outside the `toolchain` group.
   "@enfect/oxlint": 0.10.0
+  # Effect's Vitest integration (#224): `it.effect` / `it.live` / `layer(...)`
+  # run each test's Effect and provide its layers, so no test calls
+  # `Effect.provide` or `Effect.run*` itself. It peers on `effect` at its own
+  # version (`^4.1.2` for 4.1.2), so it moves with the `effect` pin below, and
+  # on `vitest >=5 <6`, which the `vitest@*` override resolves to the
+  # vite-plus copy `vp test` runs.
+  "@effect/vitest": 4.1.2
   "@types/node": ^26.1.2
   # Types for `unbzip2-stream` below (test-only). They describe its stream as a
   # `stream.Transform`, which it isn't: see that entry.

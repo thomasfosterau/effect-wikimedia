@@ -11,13 +11,14 @@
 import * as Struct from "effect/Struct";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
-import { runTest } from "../helpers/effect.ts";
 
 const fixtureXml = readFileSync(
   fileURLToPath(new URL("../fixtures/dumps/pages-slice.xml", import.meta.url)),
@@ -26,8 +27,8 @@ const fixtureXml = readFileSync(
 const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
   Stream.make(new TextEncoder().encode(text));
 
-const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
-  runTest(Stream.runCollect(stream));
+const collect = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<ReadonlyArray<A>, E> =>
+  Stream.runCollect(stream);
 
 // ── tagName (table-driven) ───────────────────────────────────────────────
 
@@ -225,40 +226,42 @@ const pageRef = (
 });
 
 describe("pageRecords pipeline", () => {
-  it("round-trips page/revision metadata and degrades the malformed revision", async () => {
-    const records = await collect(Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))));
-    expect(records.length).toBe(3);
+  it.effect("round-trips page/revision metadata and degrades the malformed revision", () =>
+    Effect.gen(function* () {
+      const records = yield* collect(Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))));
+      expect(records.length).toBe(3);
 
-    const hits = records.filter(P.isTagged("revision"));
-    const errors = records.filter(P.isTagged("error"));
-    expect(hits.length).toBe(2);
-    expect(errors.length).toBe(1);
+      const hits = records.filter(P.isTagged("revision"));
+      const errors = records.filter(P.isTagged("error"));
+      expect(hits.length).toBe(2);
+      expect(errors.length).toBe(1);
 
-    const first = hits[0];
-    if (!P.isTagged(first, "revision")) return expect.unreachable("expected revision");
-    expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091, null));
-    expect(first.revision.id).toBe(100);
-    expect(first.revision.isMinor).toBe(true);
-    expect(first.revision.comment).toEqual(Option.some("first version"));
-    expect(first.revision.contributor).toEqual(
-      Option.some({ username: Option.some("AxelBoldt"), id: Option.some(2), ip: Option.none() }),
-    );
-    expect(first.revision.text).toEqual(Option.some("'''Douglas Adams''' < check 1 & 2 > 0"));
+      const first = hits[0];
+      if (!P.isTagged(first, "revision")) return expect.unreachable("expected revision");
+      expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091, null));
+      expect(first.revision.id).toBe(100);
+      expect(first.revision.isMinor).toBe(true);
+      expect(first.revision.comment).toEqual(Option.some("first version"));
+      expect(first.revision.contributor).toEqual(
+        Option.some({ username: Option.some("AxelBoldt"), id: Option.some(2), ip: Option.none() }),
+      );
+      expect(first.revision.text).toEqual(Option.some("'''Douglas Adams''' < check 1 & 2 > 0"));
 
-    const second = hits[1];
-    if (!P.isTagged(second, "revision")) return expect.unreachable("expected revision");
-    expect(second.revision.id).toBe(101);
-    expect(second.revision.parentId).toEqual(Option.some(100));
-    expect(second.revision.contributor).toEqual(
-      Option.some({ username: Option.none(), id: Option.none(), ip: Option.some("10.0.0.1") }),
-    );
-    expect(second.revision.isMinor).toBe(false);
+      const second = hits[1];
+      if (!P.isTagged(second, "revision")) return expect.unreachable("expected revision");
+      expect(second.revision.id).toBe(101);
+      expect(second.revision.parentId).toEqual(Option.some(100));
+      expect(second.revision.contributor).toEqual(
+        Option.some({ username: Option.none(), id: Option.none(), ip: Option.some("10.0.0.1") }),
+      );
+      expect(second.revision.isMinor).toBe(false);
 
-    const error = errors[0];
-    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
-    expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.page).toEqual(pageRef("Category:Writers", 14, 200, null));
-  });
+      const error = errors[0];
+      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      expect(error.reason).toBe("dumps/malformed-revision");
+      expect(error.page).toEqual(pageRef("Category:Writers", 14, 200, null));
+    }),
+  );
 
   const perByte = (text: string): Stream.Stream<Uint8Array> => {
     const encoded = new TextEncoder().encode(text);
@@ -267,96 +270,120 @@ describe("pageRecords pipeline", () => {
     return Stream.fromIterable([...encoded].map((b) => Uint8Array.of(b)));
   };
 
-  it("is chunk-boundary safe: byte-by-byte input yields the same records", async () => {
-    const text = fixtureXml.toString("utf8");
-    const whole = await collect(Dumps.pageRecords(bytesOf(text)));
-    const chunked = await collect(Dumps.pageRecords(perByte(text)));
-    expect(chunked).toEqual(whole);
-  });
+  it.effect("is chunk-boundary safe: byte-by-byte input yields the same records", () =>
+    Effect.gen(function* () {
+      const text = fixtureXml.toString("utf8");
+      const whole = yield* collect(Dumps.pageRecords(bytesOf(text)));
+      const chunked = yield* collect(Dumps.pageRecords(perByte(text)));
+      expect(chunked).toEqual(whole);
+    }),
+  );
 
-  it("is multibyte-safe: a title / text with multibyte code points survives a per-byte split", async () => {
-    const xml =
-      "<mediawiki><page><title>Café 日本語</title><ns>0</ns><id>5</id>" +
-      "<revision><id>3</id><timestamp>t</timestamp><text>é 漢 &amp; ok</text></revision></page></mediawiki>";
-    const whole = await collect(Dumps.pageRecords(bytesOf(xml)));
-    const chunked = await collect(Dumps.pageRecords(perByte(xml)));
-    expect(chunked).toEqual(whole);
-    const hit = whole[0];
-    if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
-    expect(hit.page.title).toEqual(Option.some("Café 日本語"));
-    expect(hit.revision.text).toEqual(Option.some("é 漢 & ok"));
-  });
+  it.effect(
+    "is multibyte-safe: a title / text with multibyte code points survives a per-byte split",
+    () =>
+      Effect.gen(function* () {
+        const xml =
+          "<mediawiki><page><title>Café 日本語</title><ns>0</ns><id>5</id>" +
+          "<revision><id>3</id><timestamp>t</timestamp><text>é 漢 &amp; ok</text></revision></page></mediawiki>";
+        const whole = yield* collect(Dumps.pageRecords(bytesOf(xml)));
+        const chunked = yield* collect(Dumps.pageRecords(perByte(xml)));
+        expect(chunked).toEqual(whole);
+        const hit = whole[0];
+        if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
+        expect(hit.page.title).toEqual(Option.some("Café 日本語"));
+        expect(hit.revision.text).toEqual(Option.some("é 漢 & ok"));
+      }),
+  );
 
-  it("incrementalRecords decodes the same schema", async () => {
-    const records = await collect(Dumps.incrementalRecords(bytesOf(fixtureXml.toString("utf8"))));
-    expect(records.length).toBe(3);
-  });
+  it.effect("incrementalRecords decodes the same schema", () =>
+    Effect.gen(function* () {
+      const records = yield* collect(
+        Dumps.incrementalRecords(bytesOf(fixtureXml.toString("utf8"))),
+      );
+      expect(records.length).toBe(3);
+    }),
+  );
 
-  it("flushes a truncated trailing revision as a per-record error", async () => {
-    const truncated =
-      "<mediawiki><page><title>T</title><ns>0</ns><id>1</id><revision><id>5</id><text>hi";
-    const records = await collect(Dumps.pageRecords(bytesOf(truncated)));
-    expect(records.length).toBe(1);
-    const error = records[0];
-    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
-    expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.detail).toContain("truncated");
-    expect(error.page).toEqual(pageRef("T", 0, 1, null));
-  });
+  it.effect("flushes a truncated trailing revision as a per-record error", () =>
+    Effect.gen(function* () {
+      const truncated =
+        "<mediawiki><page><title>T</title><ns>0</ns><id>1</id><revision><id>5</id><text>hi";
+      const records = yield* collect(Dumps.pageRecords(bytesOf(truncated)));
+      expect(records.length).toBe(1);
+      const error = records[0];
+      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      expect(error.reason).toBe("dumps/malformed-revision");
+      expect(error.detail).toContain("truncated");
+      expect(error.page).toEqual(pageRef("T", 0, 1, null));
+    }),
+  );
 
-  it("degrades a revision left unclosed before </page> (not silently dropped)", async () => {
-    const xml =
-      "<mediawiki><page><title>A</title><ns>0</ns><id>1</id>" +
-      "<revision><id>7</id><text>hi</text></page></mediawiki>";
-    const records = await collect(Dumps.pageRecords(bytesOf(xml)));
-    expect(records.length).toBe(1);
-    const error = records[0];
-    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
-    expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.detail).toContain("not closed");
-    expect(error.page).toEqual(pageRef("A", 0, 1, null));
-  });
+  it.effect("degrades a revision left unclosed before </page> (not silently dropped)", () =>
+    Effect.gen(function* () {
+      const xml =
+        "<mediawiki><page><title>A</title><ns>0</ns><id>1</id>" +
+        "<revision><id>7</id><text>hi</text></page></mediawiki>";
+      const records = yield* collect(Dumps.pageRecords(bytesOf(xml)));
+      expect(records.length).toBe(1);
+      const error = records[0];
+      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      expect(error.reason).toBe("dumps/malformed-revision");
+      expect(error.detail).toContain("not closed");
+      expect(error.page).toEqual(pageRef("A", 0, 1, null));
+    }),
+  );
 
-  it("degrades a revision left unclosed before the next <revision>, keeping the next one", async () => {
-    const xml =
-      "<mediawiki><page><title>B</title><ns>0</ns><id>2</id>" +
-      "<revision><id>8</id><text>x</text>" +
-      "<revision><id>9</id><timestamp>t</timestamp><text>y</text></revision></page></mediawiki>";
-    const records = await collect(Dumps.pageRecords(bytesOf(xml)));
-    expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["error", "revision"]);
-    const good = records[1];
-    if (!P.isTagged(good, "revision")) return expect.unreachable("expected revision");
-    expect(good.revision.id).toBe(9);
-  });
+  it.effect(
+    "degrades a revision left unclosed before the next <revision>, keeping the next one",
+    () =>
+      Effect.gen(function* () {
+        const xml =
+          "<mediawiki><page><title>B</title><ns>0</ns><id>2</id>" +
+          "<revision><id>8</id><text>x</text>" +
+          "<revision><id>9</id><timestamp>t</timestamp><text>y</text></revision></page></mediawiki>";
+        const records = yield* collect(Dumps.pageRecords(bytesOf(xml)));
+        expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["error", "revision"]);
+        const good = records[1];
+        if (!P.isTagged(good, "revision")) return expect.unreachable("expected revision");
+        expect(good.revision.id).toBe(9);
+      }),
+  );
 
-  it("degrades a revision whose text exceeds the field cap (bounded memory)", async () => {
-    // 17 MB > the 16 MB MAX_TEXT_LENGTH — the buffer is capped, and the
-    // revision degrades rather than being retained without limit.
-    const huge = "z".repeat(17 * 1024 * 1024);
-    const xml =
-      "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
-      `<revision><id>10</id><timestamp>t</timestamp><text>${huge}</text></revision></page></mediawiki>`;
-    const records = await collect(Dumps.pageRecords(bytesOf(xml)));
-    expect(records.length).toBe(1);
-    const error = records[0];
-    if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
-    expect(error.reason).toBe("dumps/malformed-revision");
-    expect(error.detail).toBe("revision field exceeds the 16777216-code-unit cap");
-  });
+  it.effect("degrades a revision whose text exceeds the field cap (bounded memory)", () =>
+    Effect.gen(function* () {
+      // 17 MB > the 16 MB MAX_TEXT_LENGTH — the buffer is capped, and the
+      // revision degrades rather than being retained without limit.
+      const huge = "z".repeat(17 * 1024 * 1024);
+      const xml =
+        "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
+        `<revision><id>10</id><timestamp>t</timestamp><text>${huge}</text></revision></page></mediawiki>`;
+      const records = yield* collect(Dumps.pageRecords(bytesOf(xml)));
+      expect(records.length).toBe(1);
+      const error = records[0];
+      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      expect(error.reason).toBe("dumps/malformed-revision");
+      expect(error.detail).toBe("revision field exceeds the 16777216-code-unit cap");
+    }),
+  );
 
-  it("counts the cap in UTF-16 code units of the escaped text, not bytes (#155)", async () => {
-    const revisionWith = (text: string) =>
-      "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
-      `<revision><id>10</id><text>${text}</text></revision></page></mediawiki>`;
-    // 16,777,216 code units of 3-byte UTF-8 (50 MB) is within the cap.
-    const atCap = await collect(Dumps.pageRecords(bytesOf(revisionWith("€".repeat(16_777_216)))));
-    expect(atCap.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
-    // 3,355,444 `&amp;` decode to that many characters but are 16,777,220 escaped code units.
-    const escaped = await collect(
-      Dumps.pageRecords(bytesOf(revisionWith("&amp;".repeat(3_355_444)))),
-    );
-    expect(escaped.map((r) => Struct.get(r, "_tag"))).toEqual(["error"]);
-  });
+  it.effect("counts the cap in UTF-16 code units of the escaped text, not bytes (#155)", () =>
+    Effect.gen(function* () {
+      const revisionWith = (text: string) =>
+        "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
+        `<revision><id>10</id><text>${text}</text></revision></page></mediawiki>`;
+      // 16,777,216 code units of 3-byte UTF-8 (50 MB) is within the cap.
+      const atCap = yield* collect(
+        Dumps.pageRecords(bytesOf(revisionWith("€".repeat(16_777_216)))),
+      );
+      expect(atCap.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
+      // 3,355,444 `&amp;` decode to that many characters but are 16,777,220 escaped code units.
+      const escaped = yield* collect(
+        Dumps.pageRecords(bytesOf(revisionWith("&amp;".repeat(3_355_444)))),
+      );
+      expect(escaped.map((r) => Struct.get(r, "_tag"))).toEqual(["error"]);
+    }),
+  );
 
   describe("a multi-slot revision (export schema 0.11) (#154)", () => {
     const multiSlot = (extraSlotText: string) =>
@@ -366,26 +393,30 @@ describe("pageRecords pipeline", () => {
       `<format>application/json</format><text bytes="2">${extraSlotText}</text></content>\n` +
       "<sha1>x</sha1></revision></page></mediawiki>";
 
-    it("reads model, format and text from the main slot (the issue's repro)", async () => {
-      const records = await collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
-      expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
-      const hit = records[0];
-      if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
-      expect(hit.revision).toMatchObject({
-        id: 5,
-        model: Option.some("wikitext"),
-        format: Option.some("text/x-wiki"),
-        text: Option.some("main"),
-        sha1: Option.some("x"),
-      });
-    });
+    it.effect("reads model, format and text from the main slot (the issue's repro)", () =>
+      Effect.gen(function* () {
+        const records = yield* collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
+        expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
+        const hit = records[0];
+        if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
+        expect(hit.revision).toMatchObject({
+          id: 5,
+          model: Option.some("wikitext"),
+          format: Option.some("text/x-wiki"),
+          text: Option.some("main"),
+          sha1: Option.some("x"),
+        });
+      }),
+    );
 
-    it("doesn't count another slot's text towards the field cap", async () => {
-      const records = await collect(
-        Dumps.pageRecords(bytesOf(multiSlot("z".repeat(17 * 1024 * 1024)))),
-      );
-      expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
-    });
+    it.effect("doesn't count another slot's text towards the field cap", () =>
+      Effect.gen(function* () {
+        const records = yield* collect(
+          Dumps.pageRecords(bytesOf(multiSlot("z".repeat(17 * 1024 * 1024)))),
+        );
+        expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
+      }),
+    );
   });
 
   describe("redirects (#207)", () => {
@@ -402,66 +433,80 @@ describe("pageRecords pipeline", () => {
       page(7, "", `<revision><id>70</id><redirect title="Inside" /></revision>`) +
       "</mediawiki>";
 
-    it("reads <redirect title> onto PageRef.redirect, decoded and trimmed", async () => {
-      const records = await collect(Dumps.pageRecords(bytesOf(dump)));
-      expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual([
-        'Ada & "Lovelace"',
-        null,
-        "Single quoted",
-        null,
-        null,
-        "Gone",
-        null,
-      ]);
-      expect(records[0]?.page).toEqual(pageRef("P1", 0, 1, 'Ada & "Lovelace"'));
-    });
-
-    it("doesn't carry a redirect over to the next page", async () => {
-      const records = await collect(
-        Dumps.pageRecords(bytesOf("<mediawiki>" + page(1, '<redirect title="X"/>') + page(2, ""))),
-      );
-      expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual(["X", null]);
-    });
-
-    it("is chunk-boundary safe", async () => {
-      const whole = await collect(Dumps.pageRecords(bytesOf(dump)));
-      const chunked = await collect(Dumps.pageRecords(perByte(dump)));
-      expect(chunked).toEqual(whole);
-    });
-
-    it("cuts a long redirect title to 4,096 code units", async () => {
-      const long = "x".repeat(5000);
-      const records = await collect(
-        Dumps.pageRecords(bytesOf(page(1, `<redirect title="${long}" />`))),
-      );
-      expect(Option.getOrNull(records[0]?.page.redirect ?? Option.none())).toBe("x".repeat(4096));
-    });
-
-    it("skipRedirects drops redirect pages' records, errors included", async () => {
-      const records = await collect(Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.skipRedirects));
-      expect(records.map((r) => Option.getOrNull(r.page.id))).toEqual([2, 4, 5, 7]);
-      const hits = await collect(
-        Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.onlyRevisions, Dumps.skipRedirects),
-      );
-      expect(hits.map((r) => r.revision.id)).toEqual([20, 40, 50, 70]);
-    });
-    it("skipRedirects keeps an error record on a page that isn't a redirect", async () => {
-      const orphan: Dumps.PageRevisionError = {
-        _tag: "error",
-        reason: "dumps/malformed-revision",
-        page: pageRef("P", 0, 1, null),
-        detail: "revision missing id",
-      };
-      expect(await collect(Stream.make(orphan).pipe(Dumps.skipRedirects))).toEqual([orphan]);
-    });
-  });
-
-  it("onlyRevisions drops the error elements", async () => {
-    const revs = await runTest(
-      Stream.runCount(
-        Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))).pipe(Dumps.onlyRevisions),
-      ),
+    it.effect("reads <redirect title> onto PageRef.redirect, decoded and trimmed", () =>
+      Effect.gen(function* () {
+        const records = yield* collect(Dumps.pageRecords(bytesOf(dump)));
+        expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual([
+          'Ada & "Lovelace"',
+          null,
+          "Single quoted",
+          null,
+          null,
+          "Gone",
+          null,
+        ]);
+        expect(records[0]?.page).toEqual(pageRef("P1", 0, 1, 'Ada & "Lovelace"'));
+      }),
     );
-    expect(revs).toBe(2);
+
+    it.effect("doesn't carry a redirect over to the next page", () =>
+      Effect.gen(function* () {
+        const records = yield* collect(
+          Dumps.pageRecords(
+            bytesOf("<mediawiki>" + page(1, '<redirect title="X"/>') + page(2, "")),
+          ),
+        );
+        expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual(["X", null]);
+      }),
+    );
+
+    it.effect("is chunk-boundary safe", () =>
+      Effect.gen(function* () {
+        const whole = yield* collect(Dumps.pageRecords(bytesOf(dump)));
+        const chunked = yield* collect(Dumps.pageRecords(perByte(dump)));
+        expect(chunked).toEqual(whole);
+      }),
+    );
+
+    it.effect("cuts a long redirect title to 4,096 code units", () =>
+      Effect.gen(function* () {
+        const long = "x".repeat(5000);
+        const records = yield* collect(
+          Dumps.pageRecords(bytesOf(page(1, `<redirect title="${long}" />`))),
+        );
+        expect(Option.getOrNull(records[0]?.page.redirect ?? Option.none())).toBe("x".repeat(4096));
+      }),
+    );
+
+    it.effect("skipRedirects drops redirect pages' records, errors included", () =>
+      Effect.gen(function* () {
+        const records = yield* collect(Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.skipRedirects));
+        expect(records.map((r) => Option.getOrNull(r.page.id))).toEqual([2, 4, 5, 7]);
+        const hits = yield* collect(
+          Dumps.pageRecords(bytesOf(dump)).pipe(Dumps.onlyRevisions, Dumps.skipRedirects),
+        );
+        expect(hits.map((r) => r.revision.id)).toEqual([20, 40, 50, 70]);
+      }),
+    );
+    it.effect("skipRedirects keeps an error record on a page that isn't a redirect", () =>
+      Effect.gen(function* () {
+        const orphan: Dumps.PageRevisionError = {
+          _tag: "error",
+          reason: "dumps/malformed-revision",
+          page: pageRef("P", 0, 1, null),
+          detail: "revision missing id",
+        };
+        expect(yield* collect(Stream.make(orphan).pipe(Dumps.skipRedirects))).toEqual([orphan]);
+      }),
+    );
   });
+
+  it.effect("onlyRevisions drops the error elements", () =>
+    Effect.gen(function* () {
+      const revs = yield* Stream.runCount(
+        Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))).pipe(Dumps.onlyRevisions),
+      );
+      expect(revs).toBe(2);
+    }),
+  );
 });
