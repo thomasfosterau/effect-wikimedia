@@ -31,7 +31,10 @@
  * `Schema.Error`, a lib base such as `Error`, or a subclass of a trimmed
  * class), so its page would render the base's internals.
  */
-import { Converter, ReflectionFlag, ReflectionKind } from "typedoc";
+import * as Arr from "effect/Array";
+import * as HashSet from "effect/HashSet";
+import * as Option from "effect/Option";
+import { Converter, DeclarationReflection, ReflectionFlag, ReflectionKind } from "typedoc";
 
 /** @typedef {import("typedoc").DeclarationReflection} Declaration */
 /** @typedef {import("typedoc").ProjectReflection} Project */
@@ -186,12 +189,12 @@ function isInheritedExternal(member) {
  * @param {Declaration} cls
  */
 function rehome(member, cls) {
-  for (const reflection of [member, ...member.getAllSignatures()]) {
+  Arr.forEach([member, ...member.getAllSignatures()], (reflection) => {
     delete reflection.inheritedFrom;
     if (reflection.flags.isExternal && cls.sources) reflection.sources = [...cls.sources];
     reflection.setFlag(ReflectionFlag.Inherited, false);
     reflection.setFlag(ReflectionFlag.External, false);
-  }
+  });
 }
 
 /**
@@ -209,24 +212,22 @@ function trimClass(project, cls, keep) {
   const isKept = (/** @type {Declaration} */ member) => keep.includes(memberKey(member));
   const isDropped = (/** @type {Declaration} */ member) =>
     !isKept(member) && isInheritedExternal(member);
-  for (const member of members.filter(isKept)) rehome(member, cls);
-  for (const member of members.filter(isDropped)) project.removeReflection(member);
-  const present = new Set(members.map(memberKey));
-  return keep.filter((key) => !present.has(key));
+  Arr.forEach(Arr.filter(members, isKept), (member) => rehome(member, cls));
+  Arr.forEach(Arr.filter(members, isDropped), (member) => project.removeReflection(member));
+  const present = HashSet.fromIterable(Arr.map(members, memberKey));
+  return Arr.filter(keep, (key) => !HashSet.has(present, key));
 }
 
 /**
  * The base `cls` is built on and the member keys to keep, if any.
  *
  * @param {Declaration} cls
- * @returns {{ cls: Declaration, base: EffectBase, keep: string[] } | undefined}
+ * @returns {Option.Option<{ cls: Declaration, base: EffectBase, keep: string[] }>}
  */
 function matchBase(cls) {
-  for (const base of EFFECT_BASES) {
-    const keep = base.keep(cls);
-    if (keep) return { cls, base, keep };
-  }
-  return undefined;
+  return Arr.findFirst(EFFECT_BASES, (base) =>
+    Option.map(Option.fromNullishOr(base.keep(cls)), (keep) => ({ cls, base, keep })),
+  );
 }
 
 /**
@@ -239,11 +240,11 @@ function matchBase(cls) {
  * @param {{ cls: Declaration, base: EffectBase, keep: string[] }} match
  */
 function trimMatch(logger, project, { cls, base, keep }) {
-  for (const key of trimClass(project, cls, keep)) {
+  Arr.forEach(trimClass(project, cls, keep), (key) => {
     logger.error(
       `typedoc-effect-bases: ${cls.getFriendlyFullName()} has no \`${key}\` member to keep; update the plugin (${base.issue}).`,
     );
-  }
+  });
   return base;
 }
 
@@ -253,14 +254,37 @@ function trimMatch(logger, project, { cls, base, keep }) {
  * trimming that base's classes.
  *
  * @param {import("typedoc").Logger} logger
- * @param {Set<EffectBase>} matched
+ * @param {HashSet.HashSet<EffectBase>} matched
  */
 function reportUnmatched(logger, matched) {
-  for (const base of EFFECT_BASES.filter((entry) => !matched.has(entry))) {
-    logger.error(
-      `typedoc-effect-bases: no class extends ${base.recorded}; update or remove its entry in the plugin (${base.issue}).`,
-    );
-  }
+  Arr.forEach(
+    Arr.filter(EFFECT_BASES, (entry) => !HashSet.has(matched, entry)),
+    (base) => {
+      logger.error(
+        `typedoc-effect-bases: no class extends ${base.recorded}; update or remove its entry in the plugin (${base.issue}).`,
+      );
+    },
+  );
+}
+
+/**
+ * Whether `reflection` is a declaration (every class reflection is).
+ *
+ * @param {import("typedoc").Reflection} reflection
+ * @returns {reflection is Declaration}
+ */
+function isDeclaration(reflection) {
+  return reflection instanceof DeclarationReflection;
+}
+
+/**
+ * Every class reflection in `project`, as a declaration.
+ *
+ * @param {Project} project
+ * @returns {Declaration[]}
+ */
+function classesOf(project) {
+  return Arr.filter(project.getReflectionsByKind(ReflectionKind.Class), isDeclaration);
 }
 
 /**
@@ -282,14 +306,13 @@ function inheritedExternalCount(cls) {
  * @param {Project} project
  */
 function reportUntrimmed(logger, project) {
-  for (const reflection of project.getReflectionsByKind(ReflectionKind.Class)) {
-    const cls = /** @type {Declaration} */ (reflection);
+  Arr.forEach(classesOf(project), (cls) => {
     const count = inheritedExternalCount(cls);
-    if (count <= MAX_INHERITED_EXTERNALS) continue;
+    if (count <= MAX_INHERITED_EXTERNALS) return;
     logger.error(
       `typedoc-effect-bases: ${cls.getFriendlyFullName()} still inherits ${count} external members (more than ${MAX_INHERITED_EXTERNALS}), so its page renders its base's internals; if the base is an Effect one, add it to \`EFFECT_BASES\` in the plugin with the members a consumer uses, otherwise change the base (#115).`,
     );
-  }
+  });
 }
 
 /**
@@ -301,12 +324,10 @@ function reportUntrimmed(logger, project) {
  * @param {Project} project
  */
 function trimEffectBases(logger, project) {
-  /** @type {Set<EffectBase>} */
-  const matched = new Set();
-  for (const reflection of project.getReflectionsByKind(ReflectionKind.Class)) {
-    const match = matchBase(/** @type {Declaration} */ (reflection));
-    if (match) matched.add(trimMatch(logger, project, match));
-  }
+  const matches = Arr.getSomes(Arr.map(classesOf(project), matchBase));
+  const matched = HashSet.fromIterable(
+    Arr.map(matches, (match) => trimMatch(logger, project, match)),
+  );
   reportUnmatched(logger, matched);
   reportUntrimmed(logger, project);
 }
