@@ -23,6 +23,7 @@ import * as Str from "effect/String";
 import * as Schema from "effect/Schema";
 import {
   DEFAULT_RETRY_OPTIONS,
+  lenientField,
   normaliseTitle,
   requireTitle,
   type RetryOptions,
@@ -79,11 +80,17 @@ export function filePathUrl(filename: string, options?: FilePathOptions): Option
 
 /** Lenient schema for one `imageinfo` entry. */
 const ImageInfoEntry = Schema.Struct({
-  url: Schema.optional(Schema.Unknown),
-  descriptionurl: Schema.optional(Schema.Unknown),
+  /** The file's direct URL, which {@link FileInfo.url} re-validates. */
+  url: lenientField(Schema.String),
+  /** The file description page's URL, which {@link FileInfo.descriptionUrl} re-validates. */
+  descriptionurl: lenientField(Schema.String),
+  /** The width in pixels. */
   width: Schema.optional(Schema.Unknown),
+  /** The height in pixels. */
   height: Schema.optional(Schema.Unknown),
-  mime: Schema.optional(Schema.Unknown),
+  /** The MIME type. */
+  mime: lenientField(Schema.String),
+  /** The size in bytes. */
   size: Schema.optional(Schema.Unknown),
 });
 type ImageInfoEntry = typeof ImageInfoEntry.Type;
@@ -139,9 +146,9 @@ function isMediaUrl(url: URL): boolean {
 }
 
 /** A URL string re-validated against a fixed allowed-host set, or `None`. */
-function toWikimediaMediaUrl(value: unknown): Option.Option<string> {
+function toWikimediaMediaUrl(value: string | undefined): Option.Option<string> {
   const candidate =
-    P.isString(value) && Str.isNonEmpty(value) && value.length <= 2000
+    value !== undefined && Str.isNonEmpty(value) && value.length <= 2000
       ? parseUrl(value)
       : Option.none();
   return Option.map(Option.filter(candidate, isMediaUrl), (url) => url.toString());
@@ -162,7 +169,7 @@ function normaliseFileInfo(response: FileInfoResponse, title: string): Option.Op
     descriptionUrl: toWikimediaMediaUrl(entry.descriptionurl),
     width: Option.fromNullOr(toNonNegativeInt(entry.width, 100_000)),
     height: Option.fromNullOr(toNonNegativeInt(entry.height, 100_000)),
-    mime: P.isString(entry.mime) ? Option.some(entry.mime.slice(0, 100)) : Option.none(),
+    mime: Option.map(Option.fromUndefinedOr(entry.mime), (mime) => mime.slice(0, 100)),
     size: Option.fromNullOr(toNonNegativeInt(entry.size, 10_000_000_000)),
   });
 }
