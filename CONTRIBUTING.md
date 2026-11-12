@@ -31,7 +31,7 @@ Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pr
 1. The gates in [AGENTS.md](AGENTS.md#verification), each with its final pass/fail.
 2. A changeset (`pnpm changeset`) where [AGENTS.md](AGENTS.md#branches-and-pull-requests) requires one: a breaking change is `minor` while the package is on 0.x.
 3. `git fetch origin trunk && git rebase origin/trunk`
-4. Docs: `README.md` for any change to the public surface, and the doc comment of every export you touch.
+4. Docs: the doc comment of every export you touch, which is the API reference. Update a `docs/*.md` guide when you change what it shows, and the README's entry-point table only when a namespace is added or its purpose changes.
 
 ## Commands
 
