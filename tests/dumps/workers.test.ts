@@ -95,6 +95,10 @@ describe("record schemas", () => {
   });
 });
 
+/** A byte stream that fails at once with `DiskGone`. */
+const failingStream = (): Stream.Stream<Uint8Array, DiskGone> =>
+  Stream.fail(new DiskGone({ message: "disk gone" }));
+
 describe("multistreamPageRecordsInWorkers", () => {
   it.effect("decodes every range on the pool, with the records the main thread would decode", () =>
     Effect.gen(function* () {
@@ -129,13 +133,11 @@ describe("multistreamPageRecordsInWorkers", () => {
     () =>
       Effect.gen(function* () {
         const [first] = yield* collect(ranges());
-        const failing = (): Stream.Stream<Uint8Array, DiskGone> =>
-          Stream.fail(new DiskGone({ message: "disk gone" }));
         const error = yield* Effect.flip(
           Stream.runDrain(
             ranges().pipe(
               Dumps.multistreamPageRecordsInWorkers({ concurrency: 1 }),
-              Stream.provide(pool(1, failing)),
+              Stream.provide(pool(1, failingStream)),
             ),
           ),
         );

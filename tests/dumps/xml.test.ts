@@ -221,6 +221,31 @@ const pageRef = (title: string, ns: number, id: number, redirect?: string): Dump
   redirect: Option.fromUndefinedOr(redirect),
 });
 
+/** Streams `text` as UTF-8, one byte per chunk. */
+const perByte = (text: string): Stream.Stream<Uint8Array> => {
+  const encoded = new TextEncoder().encode(text);
+  // One UTF-8 *byte* per chunk — the worst case for tag / entity straddling
+  // and for multibyte code points split mid-sequence.
+  return Stream.fromIterable([...encoded].map((b) => Uint8Array.of(b)));
+};
+
+/** A one-page dump whose revision text is `text`. */
+const revisionWith = (text: string) =>
+  "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
+  `<revision><id>10</id><text>${text}</text></revision></page></mediawiki>`;
+
+/** A multi-slot dump page whose extra slot holds `extraSlotText`. */
+const multiSlot = (extraSlotText: string) =>
+  "<mediawiki><page><title>File:T.jpg</title><ns>6</ns><id>1</id><revision><id>5</id>\n" +
+  '<model>wikitext</model><format>text/x-wiki</format><text bytes="4">main</text>\n' +
+  "<content><role>mediainfo</role><origin>5</origin><model>wikibase-mediainfo</model>\n" +
+  `<format>application/json</format><text bytes="2">${extraSlotText}</text></content>\n` +
+  "<sha1>x</sha1></revision></page></mediawiki>";
+
+/** A `<page>` element with id `id`, `head` fields before its revision, and a default revision. */
+const pageXml = (id: number, head: string, revision = `<revision><id>${id}0</id></revision>`) =>
+  `<page><title>P${id}</title><ns>0</ns><id>${id}</id>${head}${revision}</page>`;
+
 describe("pageRecords pipeline", () => {
   it.effect("round-trips page/revision metadata and degrades the malformed revision", () =>
     Effect.gen(function* () {
@@ -255,13 +280,6 @@ describe("pageRecords pipeline", () => {
       expect(error.page).toEqual(pageRef("Category:Writers", 14, 200));
     }),
   );
-
-  const perByte = (text: string): Stream.Stream<Uint8Array> => {
-    const encoded = new TextEncoder().encode(text);
-    // One UTF-8 *byte* per chunk — the worst case for tag / entity straddling
-    // and for multibyte code points split mid-sequence.
-    return Stream.fromIterable([...encoded].map((b) => Uint8Array.of(b)));
-  };
 
   it.effect("is chunk-boundary safe: byte-by-byte input yields the same records", () =>
     Effect.gen(function* () {
@@ -357,9 +375,6 @@ describe("pageRecords pipeline", () => {
 
   it.effect("counts the cap in UTF-16 code units of the escaped text, not bytes (#155)", () =>
     Effect.gen(function* () {
-      const revisionWith = (text: string) =>
-        "<mediawiki><page><title>C</title><ns>0</ns><id>3</id>" +
-        `<revision><id>10</id><text>${text}</text></revision></page></mediawiki>`;
       // 16,777,216 code units of 3-byte UTF-8 (50 MB) is within the cap.
       const atCap = yield* collect(
         Dumps.pageRecords(bytesOf(revisionWith("€".repeat(16_777_216)))),
@@ -374,13 +389,6 @@ describe("pageRecords pipeline", () => {
   );
 
   describe("a multi-slot revision (export schema 0.11) (#154)", () => {
-    const multiSlot = (extraSlotText: string) =>
-      "<mediawiki><page><title>File:T.jpg</title><ns>6</ns><id>1</id><revision><id>5</id>\n" +
-      '<model>wikitext</model><format>text/x-wiki</format><text bytes="4">main</text>\n' +
-      "<content><role>mediainfo</role><origin>5</origin><model>wikibase-mediainfo</model>\n" +
-      `<format>application/json</format><text bytes="2">${extraSlotText}</text></content>\n` +
-      "<sha1>x</sha1></revision></page></mediawiki>";
-
     it.effect("reads model, format and text from the main slot (the issue's repro)", () =>
       Effect.gen(function* () {
         const records = yield* collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
@@ -407,17 +415,15 @@ describe("pageRecords pipeline", () => {
   });
 
   describe("redirects (#207)", () => {
-    const page = (id: number, head: string, revision = `<revision><id>${id}0</id></revision>`) =>
-      `<page><title>P${id}</title><ns>0</ns><id>${id}</id>${head}${revision}</page>`;
     const dump =
       "<mediawiki>" +
-      page(1, '<redirect title="Ada &amp; &quot;Lovelace&quot;" />') +
-      page(2, "") +
-      page(3, "<redirect title='  Single quoted  ' />") +
-      page(4, "<redirect />") +
-      page(5, '<redirect title="   " />') +
-      page(6, '<redirect title="Gone" />', "<revision><text>no id</text></revision>") +
-      page(7, "", `<revision><id>70</id><redirect title="Inside" /></revision>`) +
+      pageXml(1, '<redirect title="Ada &amp; &quot;Lovelace&quot;" />') +
+      pageXml(2, "") +
+      pageXml(3, "<redirect title='  Single quoted  ' />") +
+      pageXml(4, "<redirect />") +
+      pageXml(5, '<redirect title="   " />') +
+      pageXml(6, '<redirect title="Gone" />', "<revision><text>no id</text></revision>") +
+      pageXml(7, "", `<revision><id>70</id><redirect title="Inside" /></revision>`) +
       "</mediawiki>";
 
     it.effect("reads <redirect title> onto PageRef.redirect, decoded and trimmed", () =>
@@ -440,7 +446,7 @@ describe("pageRecords pipeline", () => {
       Effect.gen(function* () {
         const records = yield* collect(
           Dumps.pageRecords(
-            bytesOf("<mediawiki>" + page(1, '<redirect title="X"/>') + page(2, "")),
+            bytesOf("<mediawiki>" + pageXml(1, '<redirect title="X"/>') + pageXml(2, "")),
           ),
         );
         expect(records.map((r) => Option.getOrNull(r.page.redirect))).toEqual(["X", null]);
@@ -459,7 +465,7 @@ describe("pageRecords pipeline", () => {
       Effect.gen(function* () {
         const long = "x".repeat(5000);
         const records = yield* collect(
-          Dumps.pageRecords(bytesOf(page(1, `<redirect title="${long}" />`))),
+          Dumps.pageRecords(bytesOf(pageXml(1, `<redirect title="${long}" />`))),
         );
         expect(Option.getOrNull(records[0]?.page.redirect ?? Option.none())).toBe("x".repeat(4096));
       }),

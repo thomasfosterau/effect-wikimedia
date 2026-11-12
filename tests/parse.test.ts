@@ -443,22 +443,26 @@ describe("wikitables (issue #1287)", () => {
   });
 });
 
+/** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
+function table(src: string): Table {
+  const doc = parse(src);
+  expect(serialize(doc)).toBe(src);
+  walk(doc, (n) => {
+    expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
+      src.slice(n.span.start, n.span.end),
+    );
+  });
+  return only(src, "Table");
+}
+
+/** The trimmed name of every template in `nodes`. */
+const names = (nodes: readonly Node[]): string[] =>
+  findTemplates(nodes).map((t) => text(t.name).trim());
+
+/** The cells of the first row of the table `src` parses to. */
+const firstRowCells = (src: string) => table(src).rows[0].cells;
+
 describe("wikitables: nested constructs in cells and captions (#132)", () => {
-  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
-  function table(src: string): Table {
-    const doc = parse(src);
-    expect(serialize(doc)).toBe(src);
-    walk(doc, (n) => {
-      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
-        src.slice(n.span.start, n.span.end),
-      );
-    });
-    return only(src, "Table");
-  }
-
-  const names = (nodes: readonly Node[]): string[] =>
-    findTemplates(nodes).map((t) => text(t.name).trim());
-
   it("keeps a template's own pipe out of the attribute split (the issue's example)", () => {
     const doc = parse("{|\n| {{flag|France}}\n|}");
     const cell = only("{|\n| {{flag|France}}\n|}", "Table").rows[0].cells[0];
@@ -586,24 +590,22 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
   it("matches unbalanced brackets as the rest of the parser does", () => {
     // A closer matches the nearest opener of its kind; an opener of the other
     // kind left open inside it stays literal, as recursive descent leaves it.
-    const cells = (src: string) => table(src).rows[0].cells;
-    const [braces] = cells("{|\n| {{a|[[b}} || c\n|}");
+    const [braces] = firstRowCells("{|\n| {{a|[[b}} || c\n|}");
     expect(braces.attrs).toEqual(Option.none());
     expect(names(braces.content)).toEqual(["a"]);
-    const [link] = cells("{|\n| [[a|{{b]] || c\n|}");
+    const [link] = firstRowCells("{|\n| [[a|{{b]] || c\n|}");
     expect(link.attrs).toEqual(Option.none());
     expect(link.content.some(P.isTagged("Wikilink"))).toBe(true);
     // Three braces closed by two: the first is literal, the rest a template.
-    const [three] = cells("{|\n| {{{a|b}} || c\n|}");
+    const [three] = firstRowCells("{|\n| {{{a|b}} || c\n|}");
     expect(three.attrs).toEqual(Option.none());
     expect(text(three.content)).toBe(" {{{a|b}} ");
     // A single `}` or `]` closes nothing.
-    expect(cells("{|\n| {{a|b} || c\n|}").map((c) => Option.getOrUndefined(c.attrs))).toEqual([
-      " {{a",
-      undefined,
-    ]);
+    expect(
+      firstRowCells("{|\n| {{a|b} || c\n|}").map((c) => Option.getOrUndefined(c.attrs)),
+    ).toEqual([" {{a", undefined]);
     // Five braces closed by five: an argument inside a template.
-    const [five] = cells("{|\n| {{{{{a|b}}}}} || c\n|}");
+    const [five] = firstRowCells("{|\n| {{{{{a|b}}}}} || c\n|}");
     expect(five.attrs).toEqual(Option.none());
     expect(text(five.content)).toBe(" {{{{{a|b}}}}} ");
   });
@@ -624,18 +626,6 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
 });
 
 describe("wikitables: separators on header and caption lines (#157)", () => {
-  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
-  function table(src: string): Table {
-    const doc = parse(src);
-    expect(serialize(doc)).toBe(src);
-    walk(doc, (n) => {
-      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
-        src.slice(n.span.start, n.span.end),
-      );
-    });
-    return only(src, "Table");
-  }
-
   it("splits a header line on || as well as !!, every piece a header cell", () => {
     const cells = table("{|\n! a || b !! c\n|}").rows[0].cells;
     expect(
@@ -694,35 +684,23 @@ describe("wikitables: separators on header and caption lines (#157)", () => {
   });
 });
 
+/** The table's captions and rows in source order, as `caption:<text>` / `row:<cell texts>`. */
+const layout = (t: Table): string[] => {
+  const last = t.rows.length;
+  const captionsAt = (index: number): string[] =>
+    t.captions
+      .filter((c) => Math.min(Math.max(c.row, 0), last) === index)
+      .map((c) => `caption:${text(c.content).trim()}`);
+  return [
+    ...t.rows.flatMap((row, index) => [
+      ...captionsAt(index),
+      `row:${row.cells.map((c) => text(c.content).trim()).join(",")}`,
+    ]),
+    ...captionsAt(last),
+  ];
+};
+
 describe("wikitables: a caption after a row or cell (#131)", () => {
-  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
-  function table(src: string): Table {
-    const doc = parse(src);
-    expect(serialize(doc)).toBe(src);
-    walk(doc, (n) => {
-      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
-        src.slice(n.span.start, n.span.end),
-      );
-    });
-    return only(src, "Table");
-  }
-
-  /** The table's captions and rows in source order, as `caption:<text>` / `row:<cell texts>`. */
-  const layout = (t: Table): string[] => {
-    const last = t.rows.length;
-    const captionsAt = (index: number): string[] =>
-      t.captions
-        .filter((c) => Math.min(Math.max(c.row, 0), last) === index)
-        .map((c) => `caption:${text(c.content).trim()}`);
-    return [
-      ...t.rows.flatMap((row, index) => [
-        ...captionsAt(index),
-        `row:${row.cells.map((c) => text(c.content).trim()).join(",")}`,
-      ]),
-      ...captionsAt(last),
-    ];
-  };
-
   it("keeps a caption between two cells where it was, ending the first row (the issue's first repro)", () => {
     const t = table("{|\n|a\n|+cap\n|b\n|}");
     expect(layout(t)).toEqual(["row:a", "caption:cap", "row:b"]);
@@ -763,18 +741,6 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
 });
 
 describe("wikitables: the -{ attribute guard (#158)", () => {
-  /** The table `src` parses to, after checking it round-trips and every node's span is its own slice. */
-  function table(src: string): Table {
-    const doc = parse(src);
-    expect(serialize(doc)).toBe(src);
-    walk(doc, (n) => {
-      expect(serializeNode(n), `${Struct.get(n, "_tag")} @ ${n.span.start}`).toBe(
-        src.slice(n.span.start, n.span.end),
-      );
-    });
-    return only(src, "Table");
-  }
-
   it("reads a cell with -{ before its first | as all content (the issue's example)", () => {
     const cells = table("{|\n| -{ a|b }- || c\n|}").rows[0].cells;
     expect(cells.map((c) => [Option.getOrUndefined(c.attrs), text(c.content)])).toEqual([
@@ -804,16 +770,16 @@ describe("wikitables: the -{ attribute guard (#158)", () => {
   });
 });
 
-describe("openers closed only at the page end (#179)", () => {
-  /** The one construct `src` parses to, as `[tag, start, end]`, after checking it round-trips. */
-  function sole(src: string): readonly [string, number, number] {
-    const doc = parse(src);
-    expect(serialize(doc)).toBe(src);
-    const structural = doc.children.filter(P.not(P.isTagged("Text")));
-    expect(structural.length).toBe(1);
-    return [Struct.get(structural[0], "_tag"), structural[0].span.start, structural[0].span.end];
-  }
+/** The one construct `src` parses to, as `[tag, start, end]`, after checking it round-trips. */
+function sole(src: string): readonly [string, number, number] {
+  const doc = parse(src);
+  expect(serialize(doc)).toBe(src);
+  const structural = doc.children.filter(P.not(P.isTagged("Text")));
+  expect(structural.length).toBe(1);
+  return [Struct.get(structural[0], "_tag"), structural[0].span.start, structural[0].span.end];
+}
 
+describe("openers closed only at the page end (#179)", () => {
   // Past the nesting limit (100), so the memos that make these linear are
   // all exercised; only the last opener closes, as before they were added.
   it.each([

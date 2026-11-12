@@ -373,25 +373,28 @@ describe("normaliseCommonsImage", () => {
   });
 });
 
+/** The tag of the first `P569` main snak value in `item`, or None when there is none. */
+const mainValue = (item: Option.Option<Wikidata.WikidataItem>) =>
+  Option.flatMap(item, (i) =>
+    Option.fromNullishOr(i.claims["P569"]?.[0]?.mainsnak).pipe(
+      Option.flatMap((snak) =>
+        P.isTagged(snak, "value") ? Option.some(Struct.get(snak.value, "_tag")) : Option.none(),
+      ),
+    ),
+  );
+
+/** Decodes an entity whose `P569` main snak carries `value` as its raw datavalue. */
+const p569 = (value: Schema.Json) =>
+  Wikidata.decodeEntity({
+    id: "Q1",
+    claims: {
+      P569: [{ mainsnak: { snaktype: "value", property: "P569", datavalue: value } }],
+    },
+  });
+
 // The validators take `string` now; a non-string is stopped where the wire
 // is decoded, before it can reach them. These pin that boundary.
 describe("non-string wire values never reach the validators", () => {
-  const p569 = (value: Schema.Json) =>
-    Wikidata.decodeEntity({
-      id: "Q1",
-      claims: {
-        P569: [{ mainsnak: { snaktype: "value", property: "P569", datavalue: value } }],
-      },
-    });
-  const mainValue = (item: Option.Option<Wikidata.WikidataItem>) =>
-    Option.flatMap(item, (i) =>
-      Option.fromNullishOr(i.claims["P569"]?.[0]?.mainsnak).pipe(
-        Option.flatMap((snak) =>
-          P.isTagged(snak, "value") ? Option.some(Struct.get(snak.value, "_tag")) : Option.none(),
-        ),
-      ),
-    );
-
   it("a non-string time degrades to an unknown datavalue", () => {
     expect(mainValue(p569({ type: "time", value: { time: 42 } }))).toEqual(Option.some("unknown"));
   });

@@ -483,107 +483,139 @@ layer(stubLookupLayer)("WikidataLookup.searchByIdentifier", (it) => {
   );
 });
 
-layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
-  /** A single `value`-snak external-id claim, for the `sameAs`-authority fixture below. */
-  const externalIdClaim = (property: string, value: string) => ({
-    mainsnak: {
-      snaktype: "value",
-      property,
-      datatype: "external-id",
-      datavalue: { type: "string", value },
-    },
-  });
+/** A single `value`-snak external-id claim, for the `sameAs`-authority fixture below. */
+const externalIdClaim = (property: string, value: string) => ({
+  mainsnak: {
+    snaktype: "value",
+    property,
+    datatype: "external-id",
+    datavalue: { type: "string", value },
+  },
+});
 
-  /**
-   * A `wbgetentities` wire body for `qid` carrying every curated `sameAs`
-   * authority (not just VIAF), a birth date, two images (one accepted, one
-   * a hostile filename `normaliseCommonsImage` rejects), and P31 claims.
-   */
-  const enrichBody = (qid: string) => ({
-    entities: {
-      [qid]: {
-        id: qid,
-        claims: {
-          P214: [externalIdClaim("P214", "113230702")],
-          P213: [externalIdClaim("P213", "0000000121032683")],
-          P496: [externalIdClaim("P496", "0000-0002-1825-0097")],
-          P244: [externalIdClaim("P244", "n79021164")],
-          P227: [externalIdClaim("P227", "118540238")],
-          P268: [externalIdClaim("P268", "119008064")],
-          P569: [
-            {
-              mainsnak: {
-                snaktype: "value",
-                property: "P569",
-                datatype: "time",
-                datavalue: {
-                  type: "time",
-                  value: {
-                    time: "+1952-03-11T00:00:00Z",
-                    precision: 11,
-                    calendarmodel: "http://www.wikidata.org/entity/Q1985727",
-                  },
+/**
+ * A `wbgetentities` wire body for `qid` carrying every curated `sameAs`
+ * authority (not just VIAF), a birth date, two images (one accepted, one
+ * a hostile filename `normaliseCommonsImage` rejects), and P31 claims.
+ */
+const enrichBody = (qid: string) => ({
+  entities: {
+    [qid]: {
+      id: qid,
+      claims: {
+        P214: [externalIdClaim("P214", "113230702")],
+        P213: [externalIdClaim("P213", "0000000121032683")],
+        P496: [externalIdClaim("P496", "0000-0002-1825-0097")],
+        P244: [externalIdClaim("P244", "n79021164")],
+        P227: [externalIdClaim("P227", "118540238")],
+        P268: [externalIdClaim("P268", "119008064")],
+        P569: [
+          {
+            mainsnak: {
+              snaktype: "value",
+              property: "P569",
+              datatype: "time",
+              datavalue: {
+                type: "time",
+                value: {
+                  time: "+1952-03-11T00:00:00Z",
+                  precision: 11,
+                  calendarmodel: "http://www.wikidata.org/entity/Q1985727",
                 },
               },
             },
-          ],
-          P18: [
-            {
-              mainsnak: {
-                snaktype: "value",
-                property: "P18",
-                datatype: "commonsMedia",
-                datavalue: { type: "string", value: "Douglas adams portrait.jpg" },
+          },
+        ],
+        P18: [
+          {
+            mainsnak: {
+              snaktype: "value",
+              property: "P18",
+              datatype: "commonsMedia",
+              datavalue: { type: "string", value: "Douglas adams portrait.jpg" },
+            },
+          },
+          // A hostile filename (`#` would break out of the path segment)
+          // — rejected by `normaliseCommonsImage`, dropped silently.
+          {
+            mainsnak: {
+              snaktype: "value",
+              property: "P18",
+              datatype: "commonsMedia",
+              datavalue: { type: "string", value: "evil#name.jpg" },
+            },
+          },
+        ],
+        P31: [
+          {
+            mainsnak: {
+              snaktype: "value",
+              property: "P31",
+              datatype: "wikibase-item",
+              datavalue: {
+                type: "wikibase-entityid",
+                value: { "entity-type": "item", id: "Q5" },
               },
             },
-            // A hostile filename (`#` would break out of the path segment)
-            // — rejected by `normaliseCommonsImage`, dropped silently.
-            {
-              mainsnak: {
-                snaktype: "value",
-                property: "P18",
-                datatype: "commonsMedia",
-                datavalue: { type: "string", value: "evil#name.jpg" },
-              },
-            },
-          ],
-          P31: [
-            {
-              mainsnak: {
-                snaktype: "value",
-                property: "P31",
-                datatype: "wikibase-item",
-                datavalue: {
-                  type: "wikibase-entityid",
-                  value: { "entity-type": "item", id: "Q5" },
-                },
-              },
-            },
-          ],
-        },
+          },
+        ],
       },
     },
-  });
+  },
+});
 
-  const enrichEffect = (provideStub: ProvideStub, qid: string) =>
-    Effect.gen(function* () {
-      const lookup = yield* WikidataLookup;
-      return yield* lookup.enrich(qid);
-    }).pipe(provideStub);
+/** Runs `WikidataLookup.enrich` for `qid` through `provideStub`. */
+const enrichEffect = (provideStub: ProvideStub, qid: string) =>
+  Effect.gen(function* () {
+    const lookup = yield* WikidataLookup;
+    return yield* lookup.enrich(qid);
+  }).pipe(provideStub);
 
-  /**
-   * Runs {@link enrichEffect} and asserts a non-null result, narrowing the
-   * type once so the assertion bodies below read plain fields instead of
-   * repeating `facts?.` on every line.
-   */
-  const loadFacts = (
-    provideStub: ProvideStub,
-    qid: string,
-  ): Effect.Effect<WikidataFacts, LookupError, WikidataLookup> =>
-    Effect.map(enrichEffect(provideStub, qid), (facts) =>
-      Option.getOrElse(facts, () => expect.unreachable(`expected facts for ${qid}`)),
-    );
+/**
+ * Runs {@link enrichEffect} and asserts a non-null result, narrowing the
+ * type once so the assertion bodies below read plain fields instead of
+ * repeating `facts?.` on every line.
+ */
+const loadFacts = (
+  provideStub: ProvideStub,
+  qid: string,
+): Effect.Effect<WikidataFacts, LookupError, WikidataLookup> =>
+  Effect.map(enrichEffect(provideStub, qid), (facts) =>
+    Option.getOrElse(facts, () => expect.unreachable(`expected facts for ${qid}`)),
+  );
 
+/** A `P569` time claim carrying `calendarmodel`. */
+const calendarTimeClaim = (calendarmodel?: string | number) => ({
+  mainsnak: {
+    snaktype: "value",
+    property: "P569",
+    datatype: "time",
+    datavalue: {
+      type: "time",
+      // `calendarTimeClaim()` omits the key rather than sending `undefined`.
+      value: R.filter(
+        { time: "+1452-04-15T00:00:00Z", precision: 11, calendarmodel },
+        P.isNotUndefined,
+      ),
+    },
+  },
+});
+
+/** A `P569` time claim carrying `precision`. */
+const precisionTimeClaim = (precision?: number) => ({
+  mainsnak: {
+    snaktype: "value",
+    property: "P569",
+    datatype: "time",
+    datavalue: {
+      type: "time",
+      // `precisionTimeClaim()` omits the key rather than sending `undefined`.
+      value: R.filter({ time: "+1952-00-00T00:00:00Z", precision }, P.isNotUndefined),
+    },
+  },
+});
+
+layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
   it.effect("returns the item fact first, then every curated authority as an Identifier fact", () =>
     Effect.gen(function* () {
       const { requests, provideStub } = stubClient({
@@ -688,21 +720,6 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
 
   it.effect("maps the calendar model to gregorian, julian or null", () =>
     Effect.gen(function* () {
-      const timeClaim = (calendarmodel?: string | number) => ({
-        mainsnak: {
-          snaktype: "value",
-          property: "P569",
-          datatype: "time",
-          datavalue: {
-            type: "time",
-            // `timeClaim()` omits the key rather than sending `undefined`.
-            value: R.filter(
-              { time: "+1452-04-15T00:00:00Z", precision: 11, calendarmodel },
-              P.isNotUndefined,
-            ),
-          },
-        },
-      });
       const { provideStub } = stubClient({
         "action=wbgetentities": {
           body: {
@@ -713,21 +730,21 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
                   P569: [
                     // Proleptic Gregorian and proleptic Julian, as Wikibase
                     // spells them (its `http` concept URI)…
-                    timeClaim("http://www.wikidata.org/entity/Q1985727"),
-                    timeClaim("http://www.wikidata.org/entity/Q1985786"),
+                    calendarTimeClaim("http://www.wikidata.org/entity/Q1985727"),
+                    calendarTimeClaim("http://www.wikidata.org/entity/Q1985786"),
                     // …and as `https` entity IRIs.
-                    timeClaim("https://www.wikidata.org/entity/Q1985727"),
-                    timeClaim("https://www.wikidata.org/entity/Q1985786"),
+                    calendarTimeClaim("https://www.wikidata.org/entity/Q1985727"),
+                    calendarTimeClaim("https://www.wikidata.org/entity/Q1985786"),
                     // No calendar model at all.
-                    timeClaim(),
+                    calendarTimeClaim(),
                     // Another entity (Q12138, the non-proleptic Gregorian
                     // calendar item), a bare QID, another host, a page URL,
                     // and a non-string.
-                    timeClaim("http://www.wikidata.org/entity/Q12138"),
-                    timeClaim("Q1985727"),
-                    timeClaim("http://test.wikidata.org/entity/Q1985727"),
-                    timeClaim("https://www.wikidata.org/wiki/Q1985786"),
-                    timeClaim(1985727),
+                    calendarTimeClaim("http://www.wikidata.org/entity/Q12138"),
+                    calendarTimeClaim("Q1985727"),
+                    calendarTimeClaim("http://test.wikidata.org/entity/Q1985727"),
+                    calendarTimeClaim("https://www.wikidata.org/wiki/Q1985786"),
+                    calendarTimeClaim(1985727),
                   ],
                 },
               },
@@ -753,18 +770,6 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
 
   it.effect("reports a missing or out-of-range precision as null", () =>
     Effect.gen(function* () {
-      const timeClaim = (precision?: number) => ({
-        mainsnak: {
-          snaktype: "value",
-          property: "P569",
-          datatype: "time",
-          datavalue: {
-            type: "time",
-            // `timeClaim()` omits the key rather than sending `undefined`.
-            value: R.filter({ time: "+1952-00-00T00:00:00Z", precision }, P.isNotUndefined),
-          },
-        },
-      });
       const { provideStub } = stubClient({
         "action=wbgetentities": {
           body: {
@@ -772,7 +777,13 @@ layer(stubLookupLayer)("WikidataLookup.enrich", (it) => {
               Q1: {
                 id: "Q1",
                 claims: {
-                  P569: [timeClaim(9), timeClaim(), timeClaim(15), timeClaim(9.5), timeClaim(-1)],
+                  P569: [
+                    precisionTimeClaim(9),
+                    precisionTimeClaim(),
+                    precisionTimeClaim(15),
+                    precisionTimeClaim(9.5),
+                    precisionTimeClaim(-1),
+                  ],
                 },
               },
             },

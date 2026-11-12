@@ -337,6 +337,9 @@ function retained(): Retained {
 /** How many streamed items pass between retained-memory samples. */
 const SAMPLE_EVERY = 10_000;
 
+/** Converts a byte count to megabytes. */
+const toMegabytes = (bytes: number) => bytes / 1_000_000;
+
 describe("constant memory", () => {
   // `heapUsed` read without a collection counts garbage V8 hasn't collected
   // yet, so a peak of raw samples measures V8's GC heuristics (how far it has
@@ -378,9 +381,8 @@ describe("constant memory", () => {
 
         expect(n).toBe(BIG_ITEM_COUNT);
         expect(samples).toHaveLength(BIG_ITEM_COUNT / SAMPLE_EVERY);
-        const mb = (bytes: number) => bytes / 1_000_000;
-        const peakHeapMb = mb(Math.max(...samples.map((s) => s.heap)));
-        const peakOffHeapMb = mb(Math.max(...samples.map((s) => s.offHeap)));
+        const peakHeapMb = toMegabytes(Math.max(...samples.map((s) => s.heap)));
+        const peakOffHeapMb = toMegabytes(Math.max(...samples.map((s) => s.offHeap)));
         // Growth, on- and off-heap, from the first sample (pipeline warmed up,
         // 10k items in) to the last (the whole dump read): a pipeline that holds
         // one line at a time retains the same at both, while one that keeps
@@ -388,7 +390,9 @@ describe("constant memory", () => {
         const [first] = samples;
         const last = samples.at(-1);
         const growthMb =
-          first && last ? mb(last.heap + last.offHeap - first.heap - first.offHeap) : Number.NaN;
+          first && last
+            ? toMegabytes(last.heap + last.offHeap - first.heap - first.offHeap)
+            : Number.NaN;
 
         // Retained working set is one line at a time (observed: heap and off-heap
         // each under 1 MB, growth within about 0.1 MB, with or without coverage).

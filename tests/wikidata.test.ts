@@ -110,18 +110,17 @@ describe("Wikidata id parsers", () => {
 
 // ── List caps (hand-built entities) ─────────────────────────────────────
 
+/** `count` sitelinks keyed `site0wiki`, `site1wiki`, …, each with a title. */
+const numberedSitelinks = (count: number) =>
+  R.fromEntries(Array.from({ length: count }, (_, i) => [`site${i}wiki`, { title: `Page ${i}` }]));
+
 describe("Wikidata sitelink caps", () => {
   const cap = Wikidata.MAX_SITELINKS;
   const badgeCap = Wikidata.MAX_LIST_ENTRIES;
-  /** `count` sitelinks keyed `site0wiki`, `site1wiki`, …, each with a title. */
-  const sitelinks = (count: number) =>
-    R.fromEntries(
-      Array.from({ length: count }, (_, i) => [`site${i}wiki`, { title: `Page ${i}` }]),
-    );
 
   it("keeps at most MAX_SITELINKS sitelinks per entity, the first in order", () => {
     const entities = Wikidata.normaliseEntities({
-      entities: { Q1: { id: "Q1", sitelinks: sitelinks(cap + 5) } },
+      entities: { Q1: { id: "Q1", sitelinks: numberedSitelinks(cap + 5) } },
     });
     const keys = R.keys(entities.Q1?.sitelinks ?? {});
     expect(keys).toHaveLength(cap);
@@ -132,7 +131,7 @@ describe("Wikidata sitelink caps", () => {
   it("does not count a dropped (title-less) sitelink towards the cap", () => {
     const item = decoded({
       id: "Q1",
-      sitelinks: { untitledwiki: { site: "untitledwiki" }, ...sitelinks(cap) },
+      sitelinks: { untitledwiki: { site: "untitledwiki" }, ...numberedSitelinks(cap) },
     });
     const keys = R.keys(item.sitelinks);
     expect(keys).toHaveLength(cap);
@@ -296,15 +295,16 @@ describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
 
 // ── Fixture round-trip: decode → typed access ────────────────────────────
 
-layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip", (it) => {
-  const load = () => {
-    const { urls, provideFetch } = stubWikidata(() => fixture);
-    return { urls, provideFetch };
-  };
+/** Stubs Wikidata to serve the recorded fixture, returning the requested URLs and the fetch provider. */
+const loadFixtureStub = () => {
+  const { urls, provideFetch } = stubWikidata(() => fixture);
+  return { urls, provideFetch };
+};
 
+layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip", (it) => {
   it.effect("decodes the item's identity, labels, descriptions, aliases, and sitelinks", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const entities = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const item = expectDefined(entities.Q42, "Q42");
       expect(item.id).toBe("Q42");
@@ -319,7 +319,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("decodes a wikibase-entityid main snak with rank, qualifiers, and references", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const statement = Q42?.claims.P31?.[0];
       expect(statement?.rank).toBe("preferred");
@@ -336,7 +336,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("decodes a time value with precision and calendar model", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const time = claimValue(Q42, "P569", "time");
       expect(time.time).toBe("+1952-03-11T00:00:00Z");
@@ -347,7 +347,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("decodes a globecoordinate value", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const coord = claimValue(Q42, "P625", "globecoordinate");
       expect(Option.getOrNull(coord.latitude)).toBeCloseTo(52.2053);
@@ -359,7 +359,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("decodes a quantity value with unit and bounds (raw decimal strings)", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const quantity = claimValue(Q42, "P2048", "quantity");
       expect(quantity.amount).toBe("+1.96");
@@ -371,7 +371,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("decodes a monolingualtext value", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const text = claimValue(Q42, "P1813", "monolingualtext");
       expect(text.text).toBe("Douglas Adams");
@@ -381,7 +381,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("splits a string datavalue by datatype: external-id vs plain string", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       // P214 (VIAF) has datatype external-id → external-id member.
       expect(claimValue(Q42, "P214", "external-id").value).toBe("113230702");
@@ -393,7 +393,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("decodes somevalue and novalue snaks", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       expect(Q42?.claims.P1477?.[0]?.mainsnak).toMatchObject({ _tag: "somevalue" });
       expect(Q42?.claims.P40?.[0]?.mainsnak).toMatchObject({ _tag: "novalue" });
@@ -402,7 +402,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
 
   it.effect("degrades an unknown datatype to a typed Unknown member (never a decode failure)", () =>
     Effect.gen(function* () {
-      const { provideFetch } = load();
+      const { provideFetch } = loadFixtureStub();
       const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
       const unknown = claimValue(Q42, "P9999", "unknown");
       expect(unknown.type).toEqual(Option.some("future-datatype-not-yet-modelled"));
