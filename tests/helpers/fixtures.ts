@@ -11,7 +11,6 @@
  * @module tests/helpers/fixtures
  */
 
-import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -94,13 +93,23 @@ export const writeTestFile = (
     P.isString(data) ? fs.writeFileString(path, data) : fs.writeFile(path, data),
   );
 
+/**
+ * A promise a test helper awaits rejected: the test's own setup failed, not the
+ * code under test. `cause` is the rejection reason.
+ */
+export class PromiseRejected extends Schema.TaggedError<
+  PromiseRejected,
+  { readonly brand: unique symbol }
+>()("PromiseRejected", { cause: Schema.Defect() }) {}
+
 /** Gzips `data` with the Web `CompressionStream`, available on Node and in browsers. */
-export const gzip = (data: Uint8Array): Effect.Effect<Uint8Array, Cause.UnknownError> =>
-  Effect.tryPromise(
-    async () =>
+export const gzip = (data: Uint8Array): Effect.Effect<Uint8Array, PromiseRejected> =>
+  Effect.tryPromise({
+    try: async () =>
       new Uint8Array(
         await new Response(
           new Blob([new Uint8Array(data)]).stream().pipeThrough(new CompressionStream("gzip")),
         ).arrayBuffer(),
       ),
-  );
+    catch: (cause) => new PromiseRejected({ cause }),
+  });

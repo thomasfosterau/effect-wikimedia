@@ -32,7 +32,6 @@ import unbzip2 from "unbzip2-stream";
 import { it, layer } from "@effect/vitest";
 import { assertInstanceOf } from "@effect/vitest/utils";
 import { describe, expect, expectTypeOf, onTestFinished, vi } from "vite-plus/test";
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -50,6 +49,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Core, Dumps } from "../../src/index.ts";
 import {
   fixturePath,
+  PromiseRejected,
   readFixture,
   readFixtureBytes,
   TempDir,
@@ -114,9 +114,13 @@ const orHung = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A | "hung", E>
     return outcome === "hung" ? outcome : yield* outcome;
   });
 
+/** Awaits `promise`, failing with a {@link PromiseRejected} if it rejects. */
+const awaitPromise = <A>(promise: () => Promise<A>): Effect.Effect<A, PromiseRejected> =>
+  Effect.tryPromise({ try: promise, catch: (cause) => new PromiseRejected({ cause }) });
+
 /** {@link orHung} for a promise a Node stream or callback settles. */
-const promiseOrHung = <A>(promise: Promise<A>): Effect.Effect<A | "hung", Cause.UnknownError> =>
-  orHung(Effect.tryPromise(() => promise));
+const promiseOrHung = <A>(promise: Promise<A>): Effect.Effect<A | "hung", PromiseRejected> =>
+  orHung(awaitPromise(() => promise));
 
 /**
  * Runs `body`, then fails if an uncaught exception surfaced while it ran: an
@@ -368,7 +372,7 @@ layer(NodeServices.layer, { excludeTestServices: true })(
           Stream.runCollect(
             Stream.fromIterable(chunks).pipe(
               Dumps.decompressWith(() => stage),
-              Stream.tap(() => Effect.tryPromise(() => wait(0))),
+              Stream.tap(() => awaitPromise(() => wait(0))),
             ),
           ),
         );
@@ -602,7 +606,7 @@ layer(platform, { excludeTestServices: true })(
       "fails decompressWith with a SourceError and opens no upstream when the stage is %s",
       ([, used]) =>
         Effect.gen(function* () {
-          const stage = yield* Effect.tryPromise(used);
+          const stage = yield* awaitPromise(used);
           let opened = false;
           const source = Dumps.fromNodeReadable(() => {
             opened = true;
@@ -624,7 +628,7 @@ layer(platform, { excludeTestServices: true })(
       "fails fromFile with a SourceError and leaks no file descriptor when the stage is %s",
       ([, used]) =>
         Effect.gen(function* () {
-          const stage = yield* Effect.tryPromise(used);
+          const stage = yield* awaitPromise(used);
           const path = yield* tempPath("used-decompressor.bin");
           yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
           // Every `fs.ReadStream` calls `_construct`, which opens the file, on a
@@ -700,7 +704,7 @@ const stalledReadable = (options: { readonly emitClose?: boolean } = {}): Stalle
 const interruptsPromptly = <A, E>(
   stream: Stream.Stream<A, E>,
   reading: Promise<void>,
-): Effect.Effect<void, Cause.UnknownError> =>
+): Effect.Effect<void, PromiseRejected> =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkDetach(Stream.runDrain(stream));
     expect(yield* promiseOrHung(reading)).toBeUndefined();
