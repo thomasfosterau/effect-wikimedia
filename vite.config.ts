@@ -187,19 +187,6 @@ export default defineConfig({
       ],
     },
     overrides: [
-      // The TypeDoc plugin (`scripts/typedoc-effect-bases.mjs`) is plain
-      // JavaScript that TypeDoc loads in bare Node and calls back with its
-      // own mutable reflection tree, before any Effect runtime exists: it
-      // walks that tree with native loops and collects names in a native
-      // `Set`, with no `effect` import to reach for. (`vite.config.ts` needs
-      // no override: it trips none of the Effect rules, #224.)
-      {
-        files: ["scripts/**"],
-        rules: {
-          "effect/imperative-loops": "off",
-          "effect/avoid-native-object-helpers": "off",
-        },
-      },
       // The one Node-only module (AGENTS.md: "Node imports stay in
       // `src/dumps/sources.ts`"). Its contract is Node interop: it adapts
       // `node:fs` read streams and `node:zlib` / caller-supplied Node
