@@ -79,7 +79,7 @@ const RevisionSlot = Schema.Struct({
 
 const Revision = Schema.Struct({
   /** The revision ID. */
-  revid: lenientField(Schema.Number),
+  revid: lenientField(Schema.Int),
   /** When the revision was saved, as an ISO 8601 UTC string. */
   timestamp: lenientField(Schema.String),
   /** The revision's content slots; only `main` is requested. */
@@ -93,7 +93,7 @@ const Revision = Schema.Struct({
 
 const WikitextPage = Schema.Struct({
   /** The page ID; absent for a missing, invalid or special title. */
-  pageid: lenientField(Schema.Number),
+  pageid: lenientField(Schema.Int),
   /** The page title, in prefixed display form. */
   title: lenientField(Schema.String),
   /** Present (as `""`) when the page does not exist. */
@@ -212,7 +212,7 @@ export const getWikitext = Effect.fn("Action.getWikitext")(function* (
 
 const MetadataPage = Schema.Struct({
   /** The page ID; absent for a missing, invalid or special title. */
-  pageid: lenientField(Schema.Number),
+  pageid: lenientField(Schema.Int),
   /** The page title, in prefixed display form. */
   title: lenientField(Schema.String),
   /** Present (as `""`) when the page does not exist. */
@@ -228,9 +228,9 @@ const MetadataPage = Schema.Struct({
   /** When the page was last touched, as an ISO 8601 UTC string. */
   touched: lenientField(Schema.String),
   /** The ID of the page's latest revision. */
-  lastrevid: lenientField(Schema.Number),
+  lastrevid: lenientField(Schema.Int),
   /** The latest revision's size in bytes. */
-  length: lenientField(Schema.Number),
+  length: lenientField(Schema.Int),
   /**
    * The page's full URL (`fullurl`, requested with `inprop=url`); not
    * MediaWiki's separate `canonicalurl`.
@@ -393,13 +393,13 @@ export const MAX_SEARCH_RESULTS = 50;
 
 const SearchHit = Schema.Struct({
   /** The matching page's ID. */
-  pageid: lenientField(Schema.Number),
+  pageid: lenientField(Schema.Int),
   /** The matching page's title, in prefixed display form. */
   title: lenientField(Schema.String),
   /** An HTML excerpt around the match. */
   snippet: lenientField(Schema.String),
   /** The page's word count. */
-  wordcount: lenientField(Schema.Number),
+  wordcount: lenientField(Schema.Int),
 });
 
 /**
@@ -505,7 +505,7 @@ const ParseSection = Schema.Struct({
   /** The heading's nesting depth in the table of contents; not read. */
   tocLevel: Schema.optional(Schema.Unknown),
   /** The heading level, as a number (`2` for `== x ==`). */
-  hLevel: lenientField(Schema.Union([Schema.Number, Schema.NumberFromString])),
+  hLevel: lenientField(Schema.Union([Schema.Finite, Schema.FiniteFromString])),
   /** The heading's text, as HTML. */
   line: lenientField(Schema.String),
   /** The heading's fragment ID. */
@@ -528,7 +528,7 @@ const ParseResult = Schema.Struct({
   /** The parsed page's title, in prefixed display form. */
   title: lenientField(Schema.String),
   /** The parsed page's ID. */
-  pageid: lenientField(Schema.Number),
+  pageid: lenientField(Schema.Int),
   /**
    * The page's table of contents (`prop=tocdata`, which replaced
    * `prop=sections`, deprecated in MediaWiki 1.46).
@@ -696,7 +696,7 @@ export const parsePage = Effect.fn("Action.parsePage")(function* (
 
 const SiteNamespace = Schema.Struct({
   /** The namespace number (6 is File, 14 is Category). */
-  id: lenientField(Schema.Number),
+  id: lenientField(Schema.Int),
   /** The namespace's canonical (English) name. */
   canonical: lenientField(Schema.String),
   /** The namespace's localised name (`formatversion=1` writes it under `*`). */
@@ -705,7 +705,7 @@ const SiteNamespace = Schema.Struct({
 
 const SiteNamespaceAlias = Schema.Struct({
   /** The number of the namespace the alias names. */
-  id: lenientField(Schema.Number),
+  id: lenientField(Schema.Int),
   /** The alias (`formatversion=1` writes it under `*`). */
   "*": lenientField(Schema.String),
 });

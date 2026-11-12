@@ -12,7 +12,7 @@ import { Core } from "../src/index.ts";
 
 const Response = Schema.Struct({
   title: Core.lenientField(Schema.String),
-  id: Core.lenientField(Schema.Number),
+  id: Core.lenientField(Schema.Int),
   aliases: Core.lenientField(Core.lenientArray(Schema.String)),
 });
 const decode = Schema.decodeUnknownSync(Response);
@@ -28,6 +28,12 @@ describe("lenient response fields", () => {
 
   it("drops a leaf of the wrong kind instead of failing the decode", () => {
     expect(decode({ title: 7, id: "six", aliases: "not a list" })).toEqual({});
+  });
+
+  it("drops a fractional or non-finite integer leaf", () => {
+    expect(decode({ id: 6.5 })).toEqual({});
+    expect(decode({ id: Number.NaN })).toEqual({});
+    expect(decode({ id: Number.POSITIVE_INFINITY })).toEqual({});
   });
 
   it("leaves an array element of the wrong kind undefined, in place", () => {

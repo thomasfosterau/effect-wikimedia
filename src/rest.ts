@@ -41,7 +41,7 @@ const License = Schema.Struct({
 
 const LatestRevision = Schema.Struct({
   /** The id of the page's latest revision. */
-  id: lenientField(Schema.Number),
+  id: lenientField(Schema.Int),
   /** When the latest revision was saved, as an ISO 8601 UTC timestamp (`"2024-01-01T00:00:00Z"`). */
   timestamp: lenientField(Schema.String),
 });
@@ -58,7 +58,7 @@ const LatestRevision = Schema.Struct({
  */
 export const PageMetadataResponse = Schema.Struct({
   /** The page id. */
-  id: lenientField(Schema.Number),
+  id: lenientField(Schema.Int),
   /**
    * The title in database-key form, with underscores for spaces and no
    * percent-encoding (`"Douglas_Adams"`).
@@ -93,9 +93,9 @@ export type PageMetadataResponse = typeof PageMetadataResponse.Type;
  */
 export const RevisionMetadataResponse = Schema.Struct({
   /** The revision id. */
-  id: lenientField(Schema.Number),
+  id: lenientField(Schema.Int),
   /** The size of the revision's content, in bytes. */
-  size: lenientField(Schema.Number),
+  size: lenientField(Schema.Int),
   /** `true` when the editor marked the edit as minor. */
   minor: lenientField(Schema.Boolean),
   /** When the revision was saved, as an ISO 8601 UTC timestamp (`"2024-01-01T00:00:00Z"`). */
@@ -106,7 +106,7 @@ export const RevisionMetadataResponse = Schema.Struct({
   page: Schema.optional(
     Schema.Struct({
       /** The page id. */
-      id: lenientField(Schema.Number),
+      id: lenientField(Schema.Int),
       /** The page's current title in database-key form, with underscores for spaces; not read. */
       key: Schema.optional(Schema.Unknown),
       /** The page's current title in display form, with spaces. */
