@@ -278,12 +278,12 @@ export interface StripToTextOptions {
    * matches a bare key. {@link basicTemplateRenderers} is a starting set to
    * spread into it.
    */
-  readonly templates?: Readonly<Record<string, TemplateRenderer>> | undefined;
+  readonly templates?: Readonly<Record<string, TemplateRenderer>>;
   /**
    * Renders a template that `templates` has no entry for. Defaults to
    * rendering it as `""`.
    */
-  readonly templateFallback?: TemplateRenderer | undefined;
+  readonly templateFallback?: TemplateRenderer;
   /**
    * More link prefixes whose wikilinks render as nothing, added to the
    * canonical `File`, `Image` and `Category` that every wiki accepts: the
@@ -298,7 +298,7 @@ export interface StripToTextOptions {
    * {@link TemplateRenderContext.strip}, so text a renderer strips hides
    * the same links.
    */
-  readonly hiddenLinkPrefixes?: Iterable<string> | undefined;
+  readonly hiddenLinkPrefixes?: Iterable<string>;
 }
 
 /** Renders a template as its first positional parameter, or `""` without one. */
@@ -437,7 +437,7 @@ function renderContext(template: Template, strip: Strip): TemplateRenderContext 
 }
 
 /** The canonical prefixes plus `extra`, normalised; the canonical set itself without `extra`. */
-function hiddenPrefixes(extra: Iterable<string> | undefined): HashSet.HashSet<string> {
+function hiddenPrefixes(extra?: Iterable<string>): HashSet.HashSet<string> {
   if (extra === undefined) return CANONICAL_HIDDEN_PREFIXES;
   return HashSet.union(
     CANONICAL_HIDDEN_PREFIXES,

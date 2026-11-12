@@ -10,43 +10,43 @@ import { describe, expect, it } from "vite-plus/test";
 import { parse, redirectTarget, serialize } from "../src/wikitext/index.ts";
 
 describe("redirectTarget", () => {
-  const cases: ReadonlyArray<readonly [string, string | null]> = [
-    ["#REDIRECT [[Target]]", "Target"],
-    ["#REDIRECT[[Target]]", "Target"],
-    ["#redirect [[Target]]", "Target"],
-    ["#ReDiReCt [[Target]]", "Target"],
-    ["  \n\t#REDIRECT [[Target]]", "Target"],
-    ["#REDIRECT:[[Target]]", "Target"],
-    ["#REDIRECT : [[Target]]", "Target"],
-    ["#REDIRECT [[ Target ]]", "Target"],
-    ["#REDIRECT [[Target|label]]", "Target"],
-    ["#REDIRECT [[Foo#Bar]]", "Foo#Bar"],
-    ["#REDIRECT [[:Category:Writers]]", "Category:Writers"],
-    ["#REDIRECT [[Category:Writers]]", "Category:Writers"],
-    ["#REDIRECT [[A &amp; B]]", "A & B"],
-    ["#REDIRECT [[Under_score]]", "Under_score"],
-    ["#REDIRECT [[Target]]\n\n{{R from move}}\n[[Category:X]]", "Target"],
+  const cases: ReadonlyArray<readonly [string, Option.Option<string>]> = [
+    ["#REDIRECT [[Target]]", Option.some("Target")],
+    ["#REDIRECT[[Target]]", Option.some("Target")],
+    ["#redirect [[Target]]", Option.some("Target")],
+    ["#ReDiReCt [[Target]]", Option.some("Target")],
+    ["  \n\t#REDIRECT [[Target]]", Option.some("Target")],
+    ["#REDIRECT:[[Target]]", Option.some("Target")],
+    ["#REDIRECT : [[Target]]", Option.some("Target")],
+    ["#REDIRECT [[ Target ]]", Option.some("Target")],
+    ["#REDIRECT [[Target|label]]", Option.some("Target")],
+    ["#REDIRECT [[Foo#Bar]]", Option.some("Foo#Bar")],
+    ["#REDIRECT [[:Category:Writers]]", Option.some("Category:Writers")],
+    ["#REDIRECT [[Category:Writers]]", Option.some("Category:Writers")],
+    ["#REDIRECT [[A &amp; B]]", Option.some("A & B")],
+    ["#REDIRECT [[Under_score]]", Option.some("Under_score")],
+    ["#REDIRECT [[Target]]\n\n{{R from move}}\n[[Category:X]]", Option.some("Target")],
     // Not redirects.
-    ["", null],
-    ["Target", null],
-    ["[[Target]]", null],
-    ["#REDIRECT", null],
-    ["#REDIRECT Target", null],
-    ["Text #REDIRECT [[Target]]", null],
-    ["<!-- c -->#REDIRECT [[Target]]", null],
-    ["#REDIRECT <!-- c --> [[Target]]", null],
-    ["#REDIRECT :: [[Target]]", null],
-    ["#REDIRECTION [[Target]]", null],
-    ["#WEITERLEITUNG [[Ziel]]", null],
-    ["#REDIRECT {{Target}}", null],
-    ["#REDIRECT [[{{Target}}]]", null],
-    ["#REDIRECT [[Target<!-- c -->]]", null],
-    ["#REDIRECT [[#Section]]", null],
-    ["#REDIRECT [[ : ]]", null],
-    [" #REDIRECT [[Target]]", null],
+    ["", Option.none()],
+    ["Target", Option.none()],
+    ["[[Target]]", Option.none()],
+    ["#REDIRECT", Option.none()],
+    ["#REDIRECT Target", Option.none()],
+    ["Text #REDIRECT [[Target]]", Option.none()],
+    ["<!-- c -->#REDIRECT [[Target]]", Option.none()],
+    ["#REDIRECT <!-- c --> [[Target]]", Option.none()],
+    ["#REDIRECT :: [[Target]]", Option.none()],
+    ["#REDIRECTION [[Target]]", Option.none()],
+    ["#WEITERLEITUNG [[Ziel]]", Option.none()],
+    ["#REDIRECT {{Target}}", Option.none()],
+    ["#REDIRECT [[{{Target}}]]", Option.none()],
+    ["#REDIRECT [[Target<!-- c -->]]", Option.none()],
+    ["#REDIRECT [[#Section]]", Option.none()],
+    ["#REDIRECT [[ : ]]", Option.none()],
+    [" #REDIRECT [[Target]]", Option.none()],
   ];
   it.each(cases)("%j → %j", (source, expected) => {
-    expect(redirectTarget(parse(source))).toEqual(Option.fromNullOr(expected));
+    expect(redirectTarget(parse(source))).toEqual(expected);
   });
 
   it("accepts a fragment as well as a document", () => {
@@ -67,9 +67,7 @@ describe("redirectTarget", () => {
     // An alias is literal text, not a pattern.
     expect(redirectTarget(parse("#a.b [[T]]"), { aliases })).toEqual(Option.some("T"));
     expect(redirectTarget(parse("#axb [[T]]"), { aliases })).toEqual(Option.none());
-    expect(redirectTarget(parse("#REDIRECT [[T]]"), { aliases: undefined })).toEqual(
-      Option.some("T"),
-    );
+    expect(redirectTarget(parse("#REDIRECT [[T]]"), {})).toEqual(Option.some("T"));
   });
 
   it("leaves the document's round trip untouched", () => {

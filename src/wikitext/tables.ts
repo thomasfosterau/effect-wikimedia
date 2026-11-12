@@ -122,7 +122,7 @@ const byColumn: Order.Order<GridCell> = Order.mapInput(
 );
 
 /** A header cell's text as a key: its plain text, trimmed, or the 1-based column number when that is empty. */
-const columnKey = (slot: GridCell, options: StripToTextOptions | undefined): string => {
+const columnKey = (slot: GridCell, options?: StripToTextOptions): string => {
   const text = stripToText(slot.cell.content, options).trim();
   return Str.isEmpty(text) ? String(slot.column + 1) : text;
 };

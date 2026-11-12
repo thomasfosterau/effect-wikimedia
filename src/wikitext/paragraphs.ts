@@ -46,10 +46,7 @@ const isBlock = (line: Line): boolean =>
   Arr.some(line.pieces, (node) => P.isTagged(node, "Table") || P.isTagged(node, "Heading"));
 
 /** A run of prose lines as a paragraph, the newline between each pair as a text node. */
-function paragraphOf(
-  lines: readonly [Line, ...Line[]],
-  options: StripToTextOptions | undefined,
-): Paragraph {
+function paragraphOf(lines: readonly [Line, ...Line[]], options?: StripToTextOptions): Paragraph {
   const first = lines[0];
   const last = Arr.lastNonEmpty(lines);
   const nodes = Arr.flatMap(lines, (line, i) =>

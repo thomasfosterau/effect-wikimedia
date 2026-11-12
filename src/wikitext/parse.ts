@@ -124,7 +124,7 @@ interface SessionState {
    * Where each bracketed construct in the source ends (`matchBrackets`),
    * built on the first table scan that needs it.
    */
-  nestedEnds: BracketEnds | undefined;
+  nestedEnds: Option.Option<BracketEnds>;
   /** The last search for each closing delimiter (see {@link nextClose}), keyed by delimiter. */
   readonly closes: MutableHashMap.MutableHashMap<string, CloseSearch>;
   /**
@@ -173,7 +173,7 @@ interface CloseMatch {
 /** One {@link nextClose} search: the offset it ran from, and its first match (if any). */
 interface CloseSearch {
   readonly from: number;
-  readonly match: CloseMatch | undefined;
+  readonly match: Option.Option<CloseMatch>;
 }
 
 /** The per-parse state, provided to the grammar through the parse context. */
@@ -383,14 +383,15 @@ function nextClose(
   state: State,
   key: string,
   from: number,
-  search: (from: number) => CloseMatch | undefined,
-): CloseMatch | undefined {
+  search: (from: number) => Option.Option<CloseMatch>,
+): Option.Option<CloseMatch> {
   const closes = session(state).closes;
   const last = Option.getOrUndefined(MutableHashMap.get(closes, key));
+  // `last.match` is returned as stored, so a repeat search allocates nothing.
   if (
     last !== undefined &&
     last.from <= from &&
-    (last.match === undefined || from <= last.match.index)
+    (Option.isNone(last.match) || from <= last.match.value.index)
   ) {
     return last.match;
   }
@@ -400,16 +401,22 @@ function nextClose(
 }
 
 /** {@link nextClose} for a fixed string. */
-function nextLiteral(state: State, needle: string, from: number): CloseMatch | undefined {
+function nextLiteral(state: State, needle: string, from: number): Option.Option<CloseMatch> {
   return nextClose(state, needle, from, (at) => {
     const index = state.input.indexOf(needle, at);
-    return index < 0 ? undefined : { index, length: needle.length };
+    return index < 0 ? Option.none() : Option.some({ index, length: needle.length });
   });
 }
 
-/** Whether `match` lies wholly within the current region. */
-const endsInRegion = (state: State, match: CloseMatch | undefined): match is CloseMatch =>
-  match !== undefined && match.index + match.length <= state.end;
+/**
+ * `match` when it lies wholly within the current region, else `None`. It
+ * returns its argument rather than a new `Option`, so the check allocates
+ * nothing.
+ */
+const inRegion = (state: State, match: Option.Option<CloseMatch>): Option.Option<CloseMatch> =>
+  Option.isSome(match) && match.value.index + match.value.length <= state.end
+    ? match
+    : Option.none();
 
 /**
  * Succeeds, consuming nothing, when `close` occurs in the rest of the
@@ -419,7 +426,7 @@ const endsInRegion = (state: State, match: CloseMatch | undefined): match is Clo
  */
 const canClose = (close: string): WikiParser<void> =>
   Parser.make((state) =>
-    endsInRegion(state, nextLiteral(state, close, state.pos))
+    Option.isSome(inRegion(state, nextLiteral(state, close, state.pos)))
       ? undefined
       : state.backtrack("Verify"),
   );
@@ -541,8 +548,8 @@ function atStop(state: State, stop: Stop): boolean {
  */
 function firstStop(state: State, stop: Stop): number {
   return Arr.reduce(stop.delimiters, state.end, (first, delimiter) => {
-    const match = nextLiteral(state, delimiter, state.pos);
-    return endsInRegion(state, match) ? Math.min(first, match.index) : first;
+    const match = inRegion(state, nextLiteral(state, delimiter, state.pos));
+    return Option.isSome(match) ? Math.min(first, match.value.index) : first;
   });
 }
 
@@ -745,9 +752,16 @@ function skipNested(state: State, at: number): number {
   const c = state.input.charCodeAt(at);
   if (c !== 0x7b && c !== 0x5b && c !== 0x3c) return at + 1; // only `{`, `[` and `<` open one
   const s = session(state);
-  s.nestedEnds ??= matchBrackets(state.input, (i) => extensionTagEnd(state, i));
-  const end = s.nestedEnds[at];
+  const ends = Option.isSome(s.nestedEnds) ? s.nestedEnds.value : buildNestedEnds(state, s);
+  const end = ends[at];
   return end > at && end <= state.end ? end : at + 1;
+}
+
+/** Builds, and stores in `s`, where each bracketed construct in the source ends. */
+function buildNestedEnds(state: State, s: SessionState): BracketEnds {
+  const ends = matchBrackets(state.input, (i) => extensionTagEnd(state, i));
+  s.nestedEnds = Option.some(ends);
+  return ends;
 }
 
 /**
@@ -1046,14 +1060,16 @@ interface TableBody {
 
 /** {@link tableRows}' running state: the body so far and the row still open. */
 interface TableBodyBuilder extends TableBody {
-  row: { start: number; open: Option.Option<string>; cells: TableCell[] } | undefined;
+  row: Option.Option<{ start: number; open: Option.Option<string>; cells: TableCell[] }>;
 }
 
 /** Closes the open row (if any) at `end`. */
 function flushRow(body: TableBodyBuilder, end: number): void {
-  const { row } = body;
-  if (row) body.rows.push({ span: { start: row.start, end }, open: row.open, cells: row.cells });
-  body.row = undefined;
+  if (Option.isSome(body.row)) {
+    const { start, open, cells } = body.row.value;
+    body.rows.push({ span: { start, end }, open, cells });
+  }
+  body.row = Option.none();
 }
 
 /** Adds one item to the table body being built (see {@link tableRows}). */
@@ -1064,7 +1080,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
         ({ start, open }) =>
         (body: TableBodyBuilder) => {
           flushRow(body, start);
-          body.row = { start, open: Option.some(open), cells: [] };
+          body.row = Option.some({ start, open: Option.some(open), cells: [] });
         },
       Captions:
         ({ captions }) =>
@@ -1078,8 +1094,11 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
       Cells:
         ({ cells }) =>
         (body: TableBodyBuilder) => {
-          body.row ??= { start: cells[0].span.start, open: Option.none(), cells: [] };
-          body.row.cells.push(...cells);
+          const row = Option.isSome(body.row)
+            ? body.row.value
+            : { start: cells[0].span.start, open: Option.none<string>(), cells: [] };
+          body.row = Option.some(row);
+          row.cells.push(...cells);
         },
     }),
   );
@@ -1093,7 +1112,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
  * cell (#131); each caption records the index of the row it precedes.
  */
 function tableRows(items: readonly TableItem[], closeStart: number): TableBody {
-  const body: TableBodyBuilder = { captions: [], rows: [], row: undefined };
+  const body: TableBodyBuilder = { captions: [], rows: [], row: Option.none() };
   Arr.forEach(items, (item) => addTableItem(item)(body));
   flushRow(body, closeStart);
   return { captions: body.captions, rows: body.rows };
@@ -1302,8 +1321,9 @@ const autoLink: WikiParser<AutoLink> = Parser.make((state) => {
  * (#152).
  */
 const commentBody: WikiParser<string> = Parser.make((state) => {
-  const close = nextLiteral(state, "-->", state.pos);
-  if (!endsInRegion(state, close)) return state.backtrack("TakeUntil");
+  const found = inRegion(state, nextLiteral(state, "-->", state.pos));
+  if (Option.isNone(found)) return state.backtrack("TakeUntil");
+  const close = found.value;
   const body = state.slice(state.pos, close.index);
   state.pos = close.index + close.length;
   return body;
@@ -1367,14 +1387,18 @@ function extensionBody(name: string): WikiParser<readonly [string, string]> {
 
 function closeTagParser(name: string): WikiParser<readonly [string, string]> {
   const re = new RegExp(`</${name}\\s*>`, "ig");
-  const search = (input: string, from: number): CloseMatch | undefined => {
+  const search = (input: string, from: number): Option.Option<CloseMatch> => {
     re.lastIndex = from;
     const m = re.exec(input);
-    return m === null ? undefined : { index: m.index, length: m[0].length };
+    return m === null ? Option.none() : Option.some({ index: m.index, length: m[0].length });
   };
   return Parser.make((state) => {
-    const close = nextClose(state, `</${name}`, state.pos, (from) => search(state.input, from));
-    if (!endsInRegion(state, close)) return state.backtrack("TakeUntil");
+    const found = inRegion(
+      state,
+      nextClose(state, `</${name}`, state.pos, (from) => search(state.input, from)),
+    );
+    if (Option.isNone(found)) return state.backtrack("TakeUntil");
+    const close = found.value;
     const rawContent = state.slice(state.pos, close.index);
     state.pos = close.index + close.length;
     return [rawContent, state.slice(close.index, state.pos)] as const;
@@ -1566,7 +1590,7 @@ export interface ParseOptions {
    * arithmetic. `Document.source` is still `source` itself, so slice it at
    * `span.start - offset`. A non-negative safe integer; defaults to `0`.
    */
-  readonly offset?: number | undefined;
+  readonly offset?: number;
 }
 
 /** A copy of every span in a parsed tree, moved by a fixed number of code units (see {@link ParseOptions.offset}). */
@@ -1656,7 +1680,7 @@ function parseAt0(source: string): Document {
       failed: MutableHashSet.empty<number>(),
       failedKinds: new Uint8Array(source.length + 1),
       depth: 0,
-      nestedEnds: undefined,
+      nestedEnds: Option.none(),
       closes: MutableHashMap.empty<string, CloseSearch>(),
       doomed: [],
       tableEnds: MutableHashMap.empty<number, number>(),
