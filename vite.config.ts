@@ -125,6 +125,28 @@ export default defineConfig({
         command: "fallow health --no-cache --complexity",
         dependsOn: ["test:unit"],
       },
+      // Every gate, in CI's order: the one command the CI workflow runs, so a
+      // local `vp run ci` and CI are the same thing (AGENTS.md "Verification").
+      // Static checks first (format, lint and type-check; the Effect
+      // diagnostics; dead code and duplication), then the tests and the
+      // complexity ratchet that reads their coverage, then the published
+      // surface (build, the dist-consumer declarations, the API docs), and the
+      // audit last as the one step that needs the npm registry. Each command
+      // runs only if the one before it passed.
+      ci: {
+        command: [
+          "vp check",
+          "vp run check",
+          "vp run fallow",
+          "vp run test:unit",
+          "vp run fallow:health",
+          "vp run build",
+          "vp run check:dist",
+          "vp run docgen",
+          "pnpm audit --audit-level high",
+        ],
+        cache: false,
+      },
     },
   },
 
