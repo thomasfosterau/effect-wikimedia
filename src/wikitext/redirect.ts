@@ -8,6 +8,7 @@
  */
 
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Str from "effect/String";
 import type { Node, Wikilink } from "./ast.ts";
@@ -46,16 +47,16 @@ const nodesOf = (input: Fragment): readonly Node[] =>
 const isTitleNode = (node: Node): boolean =>
   P.isTagged(node, "Text") || P.isTagged(node, "HtmlEntity");
 
-/** The link's target as a title string; `null` when it is not one. */
-function linkTitle(link: Wikilink): string | null {
-  if (!Arr.every(link.target, isTitleNode)) return null;
+/** The link's target as a title string; `None` when it is not one. */
+function linkTitle(link: Wikilink): Option.Option<string> {
+  if (!Arr.every(link.target, isTitleNode)) return Option.none();
   const title = stripToText(link.target).trim().replace(/^:\s*/, "").trim();
   const page = title.split("#", 1)[0] ?? "";
-  return Str.isEmpty(page.trim()) ? null : title;
+  return Str.isEmpty(page.trim()) ? Option.none() : Option.some(title);
 }
 
 /**
- * The page a redirect points to, or `null` when `input` is not a redirect:
+ * The page a redirect points to, or `None` when `input` is not a redirect:
  * MediaWiki's rule, so `#REDIRECT` (or one of `options.aliases`) must open
  * the page, after nothing but whitespace, case-insensitively, followed by
  * whitespace and an optional `:` and then a wikilink, as in
@@ -68,14 +69,17 @@ function linkTitle(link: Wikilink): string | null {
  * `#section` kept (`Foo#Bar`), but otherwise not normalised: underscores,
  * first-letter case and `%`-escapes stay as written, where MediaWiki would
  * normalise them. A target holding markup (a template, a comment) or nothing
- * before its `#` gives `null`, as MediaWiki rejects it. Pure and total.
+ * before its `#` gives `None`, as MediaWiki rejects it. Pure and total.
  */
-export function redirectTarget(input: Fragment, options?: RedirectTargetOptions): string | null {
+export function redirectTarget(
+  input: Fragment,
+  options?: RedirectTargetOptions,
+): Option.Option<string> {
   const nodes = nodesOf(input);
   const linkAt = nodes.findIndex((node) => !P.isTagged(node, "Text"));
   const link = linkAt === -1 ? undefined : nodes[linkAt];
-  if (link === undefined || !P.isTagged(link, "Wikilink")) return null;
+  if (link === undefined || !P.isTagged(link, "Wikilink")) return Option.none();
   const aliases = options?.aliases ?? [];
   const pattern = Arr.isReadonlyArrayNonEmpty(aliases) ? prefixPattern(aliases) : DEFAULT_PREFIX;
-  return pattern.test(stripToText(nodes.slice(0, linkAt))) ? linkTitle(link) : null;
+  return pattern.test(stripToText(nodes.slice(0, linkAt))) ? linkTitle(link) : Option.none();
 }

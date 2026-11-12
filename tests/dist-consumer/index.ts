@@ -112,7 +112,9 @@ assert<
 const document: Wikitext.Document = Wikitext.parse("{{Infobox person|name=Ada}}");
 const templates: Wikitext.Template[] = Wikitext.findTemplates(document, "Infobox person");
 const roundTrip: string = Wikitext.serialize(document);
-const redirect: string | null = Wikitext.redirectTarget(document, { aliases: ["#WEITERLEITUNG"] });
+const redirect: Option.Option<string> = Wikitext.redirectTarget(document, {
+  aliases: ["#WEITERLEITUNG"],
+});
 
 // --- Dumps ------------------------------------------------------------------
 

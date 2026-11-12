@@ -5,6 +5,7 @@
  * @module tests/query
  */
 
+import * as Option from "effect/Option";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -51,14 +52,14 @@ describe("template extraction against a real infobox", () => {
 
   it("extracts named parameter values", () => {
     const box = findTemplates(doc, "Infobox person")[0];
-    expect(getParam(box, "name")).toBe("Ada Lovelace");
-    expect(getParam(box, "birth_name")).toBe("Augusta Ada Byron");
-    expect(getParam(box, "nationality")).toBe("British");
+    expect(getParam(box, "name")).toEqual(Option.some("Ada Lovelace"));
+    expect(getParam(box, "birth_name")).toEqual(Option.some("Augusta Ada Byron"));
+    expect(getParam(box, "nationality")).toEqual(Option.some("British"));
   });
 
   it("keeps nested-template values as their raw wikitext", () => {
     const box = findTemplates(doc, "Infobox person")[0];
-    expect(getParam(box, "birth_date")).toBe("{{birth date|1815|12|10|df=y}}");
+    expect(getParam(box, "birth_date")).toEqual(Option.some("{{birth date|1815|12|10|df=y}}"));
   });
 
   it("finds nested templates too", () => {
@@ -70,14 +71,14 @@ describe("template extraction against a real infobox", () => {
   it("reads positional parameters by 1-based index", () => {
     const t = parse("{{convert|10|km|mi}}");
     const conv = findTemplates(t, "convert")[0];
-    expect(getParam(conv, 1)).toBe("10");
-    expect(getParam(conv, 2)).toBe("km");
-    expect(getParam(conv, 3)).toBe("mi");
+    expect(getParam(conv, 1)).toEqual(Option.some("10"));
+    expect(getParam(conv, 2)).toEqual(Option.some("km"));
+    expect(getParam(conv, 3)).toEqual(Option.some("mi"));
   });
 
   it("lets an explicit numbered param override the positional slot", () => {
     const t = parse("{{t|first|1=override}}");
-    expect(getParam(findTemplates(t, "t")[0], 1)).toBe("override");
+    expect(getParam(findTemplates(t, "t")[0], 1)).toEqual(Option.some("override"));
   });
 
   it("returns the effective parameters as a HashMap, later duplicates winning", () => {
@@ -234,7 +235,8 @@ describe("strip to plain text: template renderers (#210)", () => {
   });
 
   it("keeps positional whitespace and trims named values, as MediaWiki does", () => {
-    const show: TemplateRenderer = (_, { param }) => `[${param(1) ?? "-"}|${param("k") ?? "-"}]`;
+    const show: TemplateRenderer = (_, { param }) =>
+      `[${Option.getOrElse(param(1), () => "-")}|${Option.getOrElse(param("k"), () => "-")}]`;
     const strip = (src: string) => stripToText(parse(src), { templates: { show } });
     expect(strip("{{show| a b | k = v }}")).toBe("[ a b |v]");
     expect(strip("{{show|x|1= y }}")).toBe("[y|-]");

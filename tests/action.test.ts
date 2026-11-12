@@ -478,8 +478,8 @@ describe("Action.getRedirectAliases (#220)", () => {
     const { layer } = stubRouter({ "meta=siteinfo": { status: 200, body: dewikiMagicWords } });
     const aliases = await run(layer, Action.getRedirectAliases("de.wikipedia.org"));
     const doc = Wikitext.parse("#weiterleitung [[Berlin]]");
-    expect(Wikitext.redirectTarget(doc)).toBeNull();
-    expect(Wikitext.redirectTarget(doc, { aliases })).toBe("Berlin");
+    expect(Wikitext.redirectTarget(doc)).toEqual(Option.none());
+    expect(Wikitext.redirectTarget(doc, { aliases })).toEqual(Option.some("Berlin"));
   });
 
   it("drops unusable values and returns nothing without a redirect entry", async () => {

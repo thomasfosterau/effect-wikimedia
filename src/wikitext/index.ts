@@ -10,7 +10,7 @@
  * import { Wikitext } from "@thomasfosterau/effect-wikimedia";
  *
  * const doc = Wikitext.parse("{{Infobox|name=Ada|born=1815}}");
- * Wikitext.getParam(Wikitext.findTemplates(doc, "Infobox")[0], "name"); // "Ada"
+ * Wikitext.getParam(Wikitext.findTemplates(doc, "Infobox")[0], "name"); // Option.some("Ada")
  * Wikitext.serialize(doc) === "{{Infobox|name=Ada|born=1815}}";         // true
  * ```
  *
