@@ -48,7 +48,7 @@ Before you report work as done, run `vp run ci`, the `ci` task in `vite.config.t
 9. `pnpm audit --audit-level high`
 10. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step). Its verdict must not be `fail`.
 
-Steps 1–9 are the `ci` task, in its order; the required check is the workflow's `ci` gate job, which passes only when every matrix run of `vp run ci` did.
+Steps 1–9 are the `ci` task, in its order. The required checks are the workflow's matrix legs, `ci (node lts)` and `ci (node latest)`, each running `vp run ci`.
 
 Before pushing, start from a clean tree: `rm -rf node_modules dist && pnpm install --frozen-lockfile`. None of the gates needs a credential or Docker. If a gate can't run here (the audit needs the registry), say which and why in the PR body; never imply it ran.
 

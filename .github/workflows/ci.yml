@@ -21,7 +21,9 @@ concurrency:
 permissions: {}
 
 jobs:
-  test:
+  # One check per Node.js line, `ci (node lts)` and `ci (node latest)`: the
+  # ruleset requires each by name.
+  ci:
     name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -69,17 +71,3 @@ jobs:
 
       - name: Run every gate
         run: vp run ci
-
-  # One stable check name for rulesets, whatever the matrix holds.
-  ci:
-    name: ci
-    needs: [test]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Every matrix run passed
-        env:
-          RESULT: ${{ needs.test.result }}
-        run: test "$RESULT" = success
