@@ -21,6 +21,7 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import { build } from "esbuild";
+import { expectDefined } from "./helpers/narrow.ts";
 
 const srcDir = fileURLToPath(new URL("../src", import.meta.url));
 
@@ -94,9 +95,7 @@ async function bundleImporting(namespace: Surface): Promise<string> {
     // external too — the Dumps sources module is the one Node-only module.
     external: ["effect", "effect/*", "@thomasfosterau/effect-parse", "node:*"],
   });
-  const output = result.outputFiles?.[0]?.text;
-  if (output === undefined) return expect.unreachable("esbuild produced no output");
-  return output;
+  return expectDefined(result.outputFiles?.[0]?.text, "esbuild output");
 }
 
 /** Each surface, its own markers, and the marker groups it must NOT pull. */

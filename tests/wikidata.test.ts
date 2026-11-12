@@ -22,6 +22,7 @@ import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Core, Wikidata } from "../src/index.ts";
+import { expectDefined } from "./helpers/narrow.ts";
 
 /** JSON text ↔ a JSON value, through the Schema JSON codec. */
 const Json = Schema.fromJsonString(Schema.Json);
@@ -305,9 +306,7 @@ layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip
     Effect.gen(function* () {
       const { provideFetch } = load();
       const entities = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const item = entities.Q42;
-      expect(item).toBeDefined();
-      if (item === undefined) return expect.unreachable("Q42 missing");
+      const item = expectDefined(entities.Q42, "Q42");
       expect(item.id).toBe("Q42");
       expect(item.type).toEqual(Option.some("item"));
       expect(item.labels.en).toBe("Douglas Adams");

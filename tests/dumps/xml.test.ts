@@ -19,6 +19,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
+import { expectTagged } from "../helpers/narrow.ts";
 
 const fixtureXml = readFileSync(
   fileURLToPath(new URL("../fixtures/dumps/pages-slice.xml", import.meta.url)),
@@ -231,8 +232,7 @@ describe("pageRecords pipeline", () => {
       expect(hits.length).toBe(2);
       expect(errors.length).toBe(1);
 
-      const first = hits[0];
-      if (!P.isTagged(first, "revision")) return expect.unreachable("expected revision");
+      const first = expectTagged(hits[0], "revision");
       expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091));
       expect(first.revision.id).toBe(100);
       expect(first.revision.isMinor).toBe(true);
@@ -242,8 +242,7 @@ describe("pageRecords pipeline", () => {
       );
       expect(first.revision.text).toEqual(Option.some("'''Douglas Adams''' < check 1 & 2 > 0"));
 
-      const second = hits[1];
-      if (!P.isTagged(second, "revision")) return expect.unreachable("expected revision");
+      const second = expectTagged(hits[1], "revision");
       expect(second.revision.id).toBe(101);
       expect(second.revision.parentId).toEqual(Option.some(100));
       expect(second.revision.contributor).toEqual(
@@ -251,8 +250,7 @@ describe("pageRecords pipeline", () => {
       );
       expect(second.revision.isMinor).toBe(false);
 
-      const error = errors[0];
-      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      const error = expectTagged(errors[0], "error");
       expect(error.reason).toBe("dumps/malformed-revision");
       expect(error.page).toEqual(pageRef("Category:Writers", 14, 200));
     }),
@@ -284,8 +282,7 @@ describe("pageRecords pipeline", () => {
         const whole = yield* collect(Dumps.pageRecords(bytesOf(xml)));
         const chunked = yield* collect(Dumps.pageRecords(perByte(xml)));
         expect(chunked).toEqual(whole);
-        const hit = whole[0];
-        if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
+        const hit = expectTagged(whole[0], "revision");
         expect(hit.page.title).toEqual(Option.some("Café 日本語"));
         expect(hit.revision.text).toEqual(Option.some("é 漢 & ok"));
       }),
@@ -306,8 +303,7 @@ describe("pageRecords pipeline", () => {
         "<mediawiki><page><title>T</title><ns>0</ns><id>1</id><revision><id>5</id><text>hi";
       const records = yield* collect(Dumps.pageRecords(bytesOf(truncated)));
       expect(records.length).toBe(1);
-      const error = records[0];
-      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      const error = expectTagged(records[0], "error");
       expect(error.reason).toBe("dumps/malformed-revision");
       expect(error.detail).toContain("truncated");
       expect(error.page).toEqual(pageRef("T", 0, 1));
@@ -321,8 +317,7 @@ describe("pageRecords pipeline", () => {
         "<revision><id>7</id><text>hi</text></page></mediawiki>";
       const records = yield* collect(Dumps.pageRecords(bytesOf(xml)));
       expect(records.length).toBe(1);
-      const error = records[0];
-      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      const error = expectTagged(records[0], "error");
       expect(error.reason).toBe("dumps/malformed-revision");
       expect(error.detail).toContain("not closed");
       expect(error.page).toEqual(pageRef("A", 0, 1));
@@ -339,8 +334,7 @@ describe("pageRecords pipeline", () => {
           "<revision><id>9</id><timestamp>t</timestamp><text>y</text></revision></page></mediawiki>";
         const records = yield* collect(Dumps.pageRecords(bytesOf(xml)));
         expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["error", "revision"]);
-        const good = records[1];
-        if (!P.isTagged(good, "revision")) return expect.unreachable("expected revision");
+        const good = expectTagged(records[1], "revision");
         expect(good.revision.id).toBe(9);
       }),
   );
@@ -355,8 +349,7 @@ describe("pageRecords pipeline", () => {
         `<revision><id>10</id><timestamp>t</timestamp><text>${huge}</text></revision></page></mediawiki>`;
       const records = yield* collect(Dumps.pageRecords(bytesOf(xml)));
       expect(records.length).toBe(1);
-      const error = records[0];
-      if (!P.isTagged(error, "error")) return expect.unreachable("expected error");
+      const error = expectTagged(records[0], "error");
       expect(error.reason).toBe("dumps/malformed-revision");
       expect(error.detail).toBe("revision field exceeds the 16777216-code-unit cap");
     }),
@@ -392,8 +385,7 @@ describe("pageRecords pipeline", () => {
       Effect.gen(function* () {
         const records = yield* collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
         expect(records.map((r) => Struct.get(r, "_tag"))).toEqual(["revision"]);
-        const hit = records[0];
-        if (!P.isTagged(hit, "revision")) return expect.unreachable("expected revision");
+        const hit = expectTagged(records[0], "revision");
         expect(hit.revision).toMatchObject({
           id: 5,
           model: Option.some("wikitext"),
