@@ -159,3 +159,5 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
   - `TableRow.open`: `None` for an implicit row.
 
   Code that builds nodes by hand passes `Option.none()` or `Option.some(…)`. `serialize(parse(s)) === s` still holds.
+
+- Optional members of the options objects (`ParseOptions.offset`, `CitationsOptions.names`, `InfoboxesOptions.names`, `RedirectTargetOptions.aliases`, `StripToTextOptions.templates` / `templateFallback` / `hiddenLinkPrefixes`) are `?: T`, no longer `?: T | undefined`: omit the key instead of passing `undefined`.

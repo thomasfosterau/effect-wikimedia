@@ -59,7 +59,7 @@ export interface CitationsOptions {
    * a wiki's localised `Literatur`, compared by {@link normaliseTemplateName}.
    * Defaults to none.
    */
-  readonly names?: Iterable<string> | undefined;
+  readonly names?: Iterable<string>;
 }
 
 /** An attribute's value in a tag's raw text, quoted or bare, trimmed; `None` when absent or empty. */

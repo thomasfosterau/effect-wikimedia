@@ -80,7 +80,7 @@ export interface InfoboxesOptions extends StripToTextOptions {
    * which differ from one wiki to the next. Compared by
    * {@link normaliseTemplateName}. Defaults to none.
    */
-  readonly names?: Iterable<string> | undefined;
+  readonly names?: Iterable<string>;
 }
 
 /** PHP's `trim` set, which MediaWiki trims a named parameter value with. */

@@ -120,7 +120,7 @@ const levelOf = (opening: Opening): number =>
   Option.match(opening.heading, { onNone: () => 0, onSome: (heading) => heading.level });
 
 /** A heading's title as MediaWiki reads it, surplus `=` included. */
-const titleOf = (heading: Heading, options: StripToTextOptions | undefined): string =>
+const titleOf = (heading: Heading, options?: StripToTextOptions): string =>
   (
     heading.leftEquals.slice(heading.level) +
     stripToText(heading.title, options) +

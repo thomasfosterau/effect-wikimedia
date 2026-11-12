@@ -22,7 +22,7 @@ export interface RedirectTargetOptions {
    * (`#WEITERLEITUNG` on the German Wikipedia, `#REDIRECTION` on the French).
    * Matched case-insensitively, as `#REDIRECT` is. Defaults to none.
    */
-  readonly aliases?: readonly string[] | undefined;
+  readonly aliases?: readonly string[];
 }
 
 // PHP's `ltrim` and PCRE's `\s` without the `u` flag: the ASCII whitespace
