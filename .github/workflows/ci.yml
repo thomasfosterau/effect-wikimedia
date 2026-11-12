@@ -30,12 +30,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `lts` is the active LTS line. The Current line is pinned by major,
-        # not given as `latest`: `vp env use latest` resolves pre-releases
-        # (v27.0.0-alpha on 2026-11-12), and CI must test a released line.
-        # Today the Current line is 26, the same as `lts`; move this to 27
-        # once Node.js 27 is released. Both satisfy `engines.node` (>=22).
-        node: [lts, "26"]
+        # The active LTS line and the Current line: setup-vp resolves `latest`
+        # to the newest released Node.js, so the matrix moves to each new
+        # Current line by itself. Both satisfy `engines.node` (>=22).
+        node: [lts, latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
