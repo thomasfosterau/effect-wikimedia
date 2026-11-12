@@ -39,7 +39,7 @@ catalog:
   # TypeScript 7.0.2, oxlint 1.88.0 – 1.90.0 and tsgolint 7.0.2004 / 7.0.2005,
   # and vite-plus 1.4.0 carries oxlint 1.89.0 and tsgolint 7.0.2004. Bump
   # `@effect/tsgo`, `@typescript/native` and `vite-plus` together.
-  "@effect/tsgo": 0.63.0
+  "@effect/tsgo": 0.67.7
   # The Effect lint rules `vp check` runs (`effect.configs.recommended` in
   # vite.config.ts, every rule under the `effect/` namespace; it replaced
   # `@mpsuesser/oxlint-plugin-effect`, #221). It depends on `effect` 4.1.0
@@ -63,7 +63,7 @@ catalog:
   # coverage/coverage-final.json for the coverage-backed CRAP scores in `vp run
   # fallow:health` (#102). It peers on vitest at the exact version, so it moves
   # with `vite-plus` / `vite` / `vitest` (see the comment on those below).
-  "@vitest/coverage-istanbul": 5.0.5
+  "@vitest/coverage-istanbul": 5.1.0
   # `effect` is a peerDependency of the published package and a devDependency
   # here, so the repo resolves exactly one copy while consumers bring their
   # own. Two copies break `Context` / `Layer` / `Schema` identity at runtime.
@@ -121,9 +121,9 @@ catalog:
   # with `@vitest/coverage-istanbul` above, which peers on that exact `vitest`.
   # 1.4.0 carries oxlint 1.89.0, oxfmt 0.74.0, tsgolint 7.0.2004 and vitest
   # 5.0.5.
-  vite-plus: 1.4.0
+  vite-plus: 1.6.0
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
-  vitest: 5.0.5
+  vitest: 5.1.0
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
