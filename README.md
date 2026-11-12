@@ -16,6 +16,8 @@ pnpm add @thomasfosterau/effect-wikimedia effect
 
 The package's declarations need no `@types/node`: the Node-only `Dumps` byte sources type their stream parameters structurally. A project that type-checks dependencies' declarations (`skipLibCheck: false`) still needs a `lib` that covers `effect`'s own: `ESNext.Disposable` (or `ESNext`) for `Disposable` / `AsyncDisposable`, and `DOM` for the web types they name (`URL`, `Request`, `ReadableStream`; `WebWorker` alone lacks the `Storage` that `effect/persistence` names).
 
+Upgrading from 0.9? [MIGRATION.md](MIGRATION.md) lists every breaking change in 0.10 (the move to `Option` for absent values), with what to write instead.
+
 ## Usage
 
 ```ts
