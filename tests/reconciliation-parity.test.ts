@@ -36,13 +36,10 @@ class FixtureEntityMissing extends Schema.TaggedError<
 
 const decodeQ42 = Effect.fnUntraced(function* () {
   const fixture = yield* readFixtureJson("wikidata-q42.json");
-  // The response schema is Unknown-heavy, so a structural view of the parsed
-  // fixture is faithful — `normaliseEntities` does the real validation.
-  // SAFETY: the recorded wbgetentities fixture is that response's JSON; the schema is all
-  // optional `Unknown` leaves, and `normaliseEntities` validates every value it reads.
-  const entities = Wikidata.normaliseEntities(
-    Schema.decodeUnknownSync(Wikidata.WbGetEntitiesResponse)(fixture),
-  );
+  // The response schema's leaves are lenient; `normaliseEntities` does the
+  // real validation of every value it reads.
+  const response = yield* Schema.decodeUnknownEffect(Wikidata.WbGetEntitiesResponse)(fixture);
+  const entities = Wikidata.normaliseEntities(response);
   const item = entities.Q42;
   if (item === undefined) return yield* new FixtureEntityMissing({ id: "Q42" });
   return item;
