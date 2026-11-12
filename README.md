@@ -104,6 +104,47 @@ const pages = ranges.pipe(
 );
 ```
 
+To decode on several cores, `Dumps.multistreamPageRecordsInWorkers({ concurrency })` sends each range to a pool of workers over `effect/rpc`, and the records stream back. The package imports no platform code, so you write the worker's entry file and pick the platform. In Node, with `@effect/platform-node`:
+
+```ts
+// worker.ts: serves the ranges the main thread sends.
+import * as Layer from "effect/Layer";
+import { RpcServer } from "effect/rpc";
+import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node";
+
+RpcServer.layer(Dumps.MultistreamRpcs).pipe(
+  Layer.provide(
+    Dumps.multistreamWorkerHandlers((range) =>
+      Dumps.fromMultistreamRange("enwiki-pages-articles-multistream.xml.bz2", range, () =>
+        unbzip2(),
+      ),
+    ),
+  ),
+  Layer.provide(RpcServer.layerProtocolWorkerRunner),
+  Layer.provide(NodeWorkerRunner.layer),
+  Layer.launch,
+  NodeRuntime.runMain,
+);
+```
+
+```ts
+// main.ts: a pool of 8 worker_threads, each decoding 2 ranges at a time.
+import { Worker } from "node:worker_threads";
+import { RpcClient } from "effect/rpc";
+import { NodeWorker } from "@effect/platform-node";
+
+const pool = RpcClient.layerProtocolWorker({ size: 8, concurrency: 2 }).pipe(
+  Layer.provide(NodeWorker.layer(() => new Worker(new URL("./worker.js", import.meta.url)))),
+);
+
+const pages = ranges.pipe(
+  Dumps.multistreamPageRecordsInWorkers({ concurrency: 16 }),
+  Stream.provide(pool),
+);
+```
+
+The records cross the thread boundary through their schemas (`Dumps.PageRevisionRecord`, `Dumps.MultistreamRange`, …), which encode an absent field as `null`, so they also suit persisting. A worker that can't read a range fails the stream with `Dumps.MultistreamRangeFailed`.
+
 `Dumps.fromFile` takes `start` / `end` for any byte range of a file, and `Dumps.fromHttpRange` takes `startByte` / `endByte` to download one range (`end` and `endByte` are exclusive, as a range's `end` is).
 
 ## API

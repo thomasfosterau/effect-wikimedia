@@ -237,7 +237,7 @@ describe("pageRecords pipeline", () => {
     if (first?._tag !== "revision") return expect.unreachable("expected revision");
     expect(first.page).toEqual(pageRef("Douglas Adams", 0, 8091, null));
     expect(first.revision.id).toBe(100);
-    expect(first.revision.minor).toBe(true);
+    expect(first.revision.isMinor).toBe(true);
     expect(first.revision.comment).toEqual(Option.some("first version"));
     expect(first.revision.contributor).toEqual(
       Option.some({ username: Option.some("AxelBoldt"), id: Option.some(2), ip: Option.none() }),
@@ -251,7 +251,7 @@ describe("pageRecords pipeline", () => {
     expect(second.revision.contributor).toEqual(
       Option.some({ username: Option.none(), id: Option.none(), ip: Option.some("10.0.0.1") }),
     );
-    expect(second.revision.minor).toBe(false);
+    expect(second.revision.isMinor).toBe(false);
 
     const error = errors[0];
     if (error?._tag !== "error") return expect.unreachable("expected error");

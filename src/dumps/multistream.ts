@@ -117,24 +117,26 @@ export class MultistreamIndexError extends Schema.TaggedError<MultistreamIndexEr
  * half-open byte range `[start, end)` of the compressed `.xml.bz2` to read
  * and decompress on its own, and which pages it holds.
  */
-export interface MultistreamRange {
+export const MultistreamRange = Schema.Struct({
   /** The stream's byte offset in the compressed file: the shared `offset` of its entries. */
-  readonly start: number;
+  start: Schema.Int,
   /**
    * The byte offset just past the stream, exclusive, and always above
    * `start`: the next range's `start`. On the last range it is the
-   * `fileSize` given to {@link multistreamRanges}, or `null` without one,
+   * `fileSize` given to {@link multistreamRanges}, or `None` without one,
    * meaning the end of the file. Either way the last range also takes in the
    * trailer stream (`</mediawiki>`), which decodes to no records.
    */
-  readonly end: Option.Option<number>;
+  end: Schema.OptionFromNullOr(Schema.Int),
   /** How many index entries share this stream: Wikimedia writes 100, the last stream fewer. */
-  readonly pageCount: number;
+  pageCount: Schema.Int,
   /** The `pageId` of the stream's first index entry. */
-  readonly firstPageId: number;
+  firstPageId: Schema.Int,
   /** The `pageId` of the stream's last index entry. */
-  readonly lastPageId: number;
-}
+  lastPageId: Schema.Int,
+});
+/** {@link MultistreamRange}'s decoded type. */
+export type MultistreamRange = typeof MultistreamRange.Type;
 
 /** Options for {@link multistreamRanges}. */
 export interface MultistreamRangesOptions {

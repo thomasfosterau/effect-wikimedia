@@ -60,19 +60,30 @@
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Str from "effect/String";
 
 // ── Typed record model ───────────────────────────────────────────────────
 
+/**
+ * An absent-able text field of a record: `Option<string>` in the decoded
+ * record, `string | null` on the wire, so a record survives
+ * `structuredClone` and JSON (a worker's `postMessage`, a persisted row).
+ */
+const OptionalText = Schema.OptionFromNullOr(Schema.String);
+
+/** An absent-able integer field of a record, encoded as for `OptionalText`. */
+const OptionalInt = Schema.OptionFromNullOr(Schema.Int);
+
 /** The page a revision belongs to. */
-export interface PageRef {
+export const PageRef = Schema.Struct({
   /**
    * The page's `<title>`, entity-decoded, trimmed and cut to 4,096 UTF-16
    * code units; `None` when absent or blank. MediaWiki's exporter writes the
    * namespace-prefixed title with spaces, such as `Category:Writers`.
    */
-  readonly title: Option.Option<string>;
+  title: OptionalText,
   /**
    * Namespace number (`0` = main, `14` = category, …), from `<ns>`. `None` when
    * absent, above `Number.MAX_SAFE_INTEGER`, or not a non-negative decimal
@@ -80,9 +91,9 @@ export interface PageRef {
    * digits in all), but a sign, a fraction or an exponent gives `None`, not a
    * rounded value.
    */
-  readonly ns: Option.Option<number>;
-  /** The page id, from the page's own `<id>`; `None` under the same rules as {@link PageRef.ns}. */
-  readonly id: Option.Option<number>;
+  ns: OptionalInt,
+  /** The page id, from the page's own `<id>`; `None` under the same rules as `PageRef.ns`. */
+  id: OptionalInt,
   /**
    * The redirect target when the page is a redirect: the `title` attribute
    * of the page's `<redirect title="…" />`, entity-decoded, trimmed and cut
@@ -93,77 +104,81 @@ export interface PageRef {
    * `<redirect />`. A `<redirect>` inside a `<revision>` is ignored.
    * {@link skipRedirects} drops the records of pages where it is set.
    */
-  readonly redirect: Option.Option<string>;
-}
+  redirect: OptionalText,
+});
+/** {@link PageRef}'s decoded type. */
+export type PageRef = typeof PageRef.Type;
 
 /** Who made a revision. A suppressed / anonymous edit leaves fields `None`. */
-export interface Contributor {
+export const Contributor = Schema.Struct({
   /**
    * The `<username>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
    * units; `None` when absent or blank, as for an anonymous (IP) edit or a
    * suppressed contributor.
    */
-  readonly username: Option.Option<string>;
+  username: OptionalText,
   /**
    * The user id, from the contributor's `<id>`; `None` when absent, under
-   * the same rules as {@link PageRef.ns}. MediaWiki writes `0` for a username
+   * the same rules as `PageRef.ns`. MediaWiki writes `0` for a username
    * with no user id behind it, and that stays `0`.
    */
-  readonly id: Option.Option<number>;
+  id: OptionalInt,
   /**
    * Set instead of `username` for an anonymous (IP) edit: the `<ip>`, which
    * MediaWiki writes in place of `<username>` and `<id>`. Entity-decoded,
    * trimmed and cut like `username`, and not validated as an address; `None`
    * when absent.
    */
-  readonly ip: Option.Option<string>;
-}
+  ip: OptionalText,
+});
+/** {@link Contributor}'s decoded type. */
+export type Contributor = typeof Contributor.Type;
 
 /** One revision's metadata and content (usually wikitext). */
-export interface Revision {
+export const Revision = Schema.Struct({
   /**
    * The revision id, from the revision's `<id>`. Always present: a revision
-   * whose `<id>` is absent or fails the rules of {@link PageRef.ns} becomes a
+   * whose `<id>` is absent or fails the rules of `PageRef.ns` becomes a
    * {@link PageRevisionError} instead.
    */
-  readonly id: number;
+  id: Schema.Int,
   /**
    * The previous revision's id, from `<parentid>`; `None` when absent or
-   * invalid (rules as for {@link PageRef.ns}). MediaWiki omits `<parentid>`
+   * invalid (rules as for `PageRef.ns`). MediaWiki omits `<parentid>`
    * when a revision has no parent, as for a page's first revision.
    */
-  readonly parentId: Option.Option<number>;
+  parentId: OptionalInt,
   /**
    * The `<timestamp>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code
    * units but not parsed or validated; `None` when absent or blank. MediaWiki
    * writes ISO 8601 UTC, such as `2001-01-21T02:12:21Z`.
    */
-  readonly timestamp: Option.Option<string>;
+  timestamp: OptionalText,
   /**
    * The `<contributor>`, or `None` when the revision has none. A suppressed
    * contributor (`<contributor deleted="deleted" />`) still gives a
    * {@link Contributor}, with every field `None`.
    */
-  readonly contributor: Option.Option<Contributor>;
+  contributor: Schema.OptionFromNullOr(Contributor),
   /**
    * The edit summary, from `<comment>`: entity-decoded, trimmed and cut to
    * 4,096 UTF-16 code units. `None` when absent, blank or suppressed
    * (`<comment deleted="deleted" />`); MediaWiki omits an empty summary.
    */
-  readonly comment: Option.Option<string>;
+  comment: OptionalText,
   /**
    * The content model id, from `<model>` (`wikitext`, `css`, `json`, …),
    * entity-decoded, trimmed and cut to 4,096 UTF-16 code units; `None` when
    * absent or blank. It is the main slot's: a slot other than the main one
    * (export schema 0.11 puts each in a `<content>` element) is skipped.
    */
-  readonly model: Option.Option<string>;
+  model: OptionalText,
   /**
    * The serialization format, from `<format>` (`text/x-wiki`, …),
    * entity-decoded, trimmed and cut like `model`; `None` when absent or blank.
    * The main slot's, as for `model`.
    */
-  readonly format: Option.Option<string>;
+  format: OptionalText,
   /**
    * The revision's content, from `<text>`: entity-decoded, but neither
    * trimmed nor cut. It is wikitext when `model` is `wikitext`, and then
@@ -178,32 +193,34 @@ export interface Revision {
    * schema 0.11 puts each other slot in a `<content>` element, which is
    * skipped, so its text neither replaces this nor counts towards the cap.
    */
-  readonly text: Option.Option<string>;
+  text: OptionalText,
   /**
    * The `<sha1>`, entity-decoded, trimmed and cut to 4,096 UTF-16 code units,
    * not validated; `None` when absent or empty, as MediaWiki writes it for a
    * revision whose text is suppressed. Export schema 0.11 defines it as one
    * hash over the content of all the revision's slots.
    */
-  readonly sha1: Option.Option<string>;
+  sha1: OptionalText,
   /** `true` when the revision has a `<minor>` element (MediaWiki writes `<minor/>`), else `false`. */
-  readonly minor: boolean;
-}
+  isMinor: Schema.Boolean,
+});
+/** {@link Revision}'s decoded type. */
+export type Revision = typeof Revision.Type;
 
 /** A successfully decoded page/revision pair. */
-export interface PageRevisionHit {
-  /** Always `"revision"`; tells a hit from a {@link PageRevisionError} (`"error"`). */
-  readonly _tag: "revision";
+export const PageRevisionHit = Schema.TaggedStruct("revision", {
   /**
    * The enclosing `<page>`'s `title`, `ns`, `id` and `redirect` as read up
    * to this revision (MediaWiki writes them before the first `<revision>`), in a
    * fresh object per record. Every field is `None` for a revision outside
    * any `<page>`.
    */
-  readonly page: PageRef;
+  page: PageRef,
   /** The decoded revision. Its `id` is never `None`. */
-  readonly revision: Revision;
-}
+  revision: Revision,
+});
+/** {@link PageRevisionHit}'s decoded type. */
+export type PageRevisionHit = typeof PageRevisionHit.Type;
 
 /**
  * A revision that could not be decoded — the lenient degrade, emitted as an
@@ -212,31 +229,33 @@ export interface PageRevisionHit {
  * `<revision>`, `<page>` or `</page>`, a captured field over the length cap,
  * or a stream that ends inside a revision. `detail` says which.
  */
-export interface PageRevisionError {
-  /** Always `"error"`; tells a per-record error from a {@link PageRevisionHit} (`"revision"`). */
-  readonly _tag: "error";
-  /** Always `"dumps/malformed-revision"`; {@link PageRevisionError.detail} says which case. */
-  readonly reason: "dumps/malformed-revision";
+export const PageRevisionError = Schema.TaggedStruct("error", {
+  /** Always `"dumps/malformed-revision"`; `PageRevisionError.detail` says which case. */
+  reason: Schema.Literal("dumps/malformed-revision"),
   /**
    * The page the revision belonged to, as read so far (see
-   * {@link PageRevisionHit.page}). The reader always sets it.
+   * `PageRevisionHit.page`). The reader always sets it.
    */
-  readonly page: PageRef;
+  page: PageRef,
   /**
    * A short English description for logs. It is currently one of
    * `"revision missing id"`, `"revision not closed before next revision"`,
    * `"revision not closed before end of page"`,
    * `"truncated revision at end of stream"` and
    * `"revision field exceeds the 16777216-code-unit cap"`, which counts
-   * UTF-16 code units of the still-escaped text (see {@link Revision.text}).
+   * UTF-16 code units of the still-escaped text (see `Revision.text`).
    * `"revision missing id"` also covers a `</revision>` with no revision
    * open.
    */
-  readonly detail: string;
-}
+  detail: Schema.String,
+});
+/** {@link PageRevisionError}'s decoded type. */
+export type PageRevisionError = typeof PageRevisionError.Type;
 
 /** One element of the XML page stream: a decoded revision, or a per-record error. */
-export type PageRevisionRecord = PageRevisionHit | PageRevisionError;
+export const PageRevisionRecord = Schema.Union([PageRevisionHit, PageRevisionError]);
+/** {@link PageRevisionRecord}'s decoded type. */
+export type PageRevisionRecord = typeof PageRevisionRecord.Type;
 
 // ── Tokenizer (chunk-boundary-safe angle-bracket scan) ───────────────────
 
@@ -775,7 +794,7 @@ function toRevision(rev: MutableRevision, id: number): Revision {
     format: Option.fromNullOr(rev.format),
     text: Option.fromNullOr(rev.text),
     sha1: Option.fromNullOr(rev.sha1),
-    minor: rev.minor,
+    isMinor: rev.minor,
   };
 }
 
@@ -826,7 +845,7 @@ export const onlyRevisions = <E, R>(
 ): Stream.Stream<PageRevisionHit, E, R> => records.pipe(Stream.filter(isRevisionHit));
 
 /**
- * Drops the records of redirect pages, those whose {@link PageRef.redirect}
+ * Drops the records of redirect pages, those whose `PageRef.redirect`
  * is set, from a {@link PageRevisionRecord} stream: the usual "skip
  * redirects" dump filter, read from the export's `<redirect>` element rather
  * than from each revision's text. A per-record error on a redirect page is

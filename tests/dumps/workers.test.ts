@@ -1,0 +1,135 @@
+/**
+ * Multistream decoding on workers (#211, slice 4): the record schemas'
+ * round trip, the worker handlers, and the main side over an in-process
+ * worker pool whose messages cross a real `structuredClone` boundary
+ * (`tests/helpers/workers.ts`). The fixture dump is the synthetic
+ * three-stream one `tests/dumps/multistream.test.ts` reads.
+ *
+ * @module tests/dumps/workers
+ */
+
+import { fileURLToPath } from "node:url";
+import unbzip2 from "unbzip2-stream";
+import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import { RpcClient, RpcServer } from "effect/rpc";
+import type { WorkerError } from "effect/workers";
+import { Dumps } from "../../src/index.ts";
+import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
+import { inProcessWorkers } from "../helpers/workers.ts";
+
+/** The worker's `open` failing, as a disk read can. */
+class DiskGone extends Schema.TaggedError<DiskGone>()("DiskGone", { message: Schema.String }) {}
+
+const fixturePath = (name: string): string =>
+  fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
+
+const DUMP_PATH = fixturePath("multistream.xml.bz2");
+const INDEX_BZ2 = fixturePath("multistream-index.txt.bz2");
+
+const ranges = (): Stream.Stream<
+  Dumps.MultistreamRange,
+  Dumps.SourceError | Dumps.MultistreamIndexError
+> =>
+  Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
+    Dumps.multistreamIndexRecords,
+    Dumps.multistreamRanges(),
+  );
+
+const openRange = (range: Dumps.MultistreamRange) =>
+  Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
+
+const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
+  runTest(Stream.runCollect(stream));
+
+const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
+  Arr.map(records, (r) => Option.getOrNull(r.page.title));
+
+/** A worker pool of `size` in-process workers serving `open`'s ranges, as an `RpcClient.Protocol`. */
+const pool = <E>(
+  size: number,
+  open: (range: Dumps.MultistreamRange) => Stream.Stream<Uint8Array, E>,
+): Layer.Layer<RpcClient.Protocol, WorkerError.WorkerError> =>
+  RpcClient.layerProtocolWorker({ size, concurrency: 2 }).pipe(
+    Layer.provide(
+      inProcessWorkers((runner) =>
+        RpcServer.layer(Dumps.MultistreamRpcs).pipe(
+          Layer.provide(Dumps.multistreamWorkerHandlers(open)),
+          Layer.provide(RpcServer.layerProtocolWorkerRunner),
+          Layer.provide(runner),
+          Layer.orDie,
+        ),
+      ),
+    ),
+  );
+
+describe("record schemas", () => {
+  it("round-trips every fixture record through JSON and structuredClone", async () => {
+    const records = await collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
+    expect(records.length).toBeGreaterThan(0);
+    const json = Schema.fromJsonString(Schema.toCodecJson(Dumps.PageRevisionRecord));
+    Arr.forEach(records, (record) => {
+      const wire = structuredClone(Schema.encodeSync(Dumps.PageRevisionRecord)(record));
+      expect(Schema.decodeSync(Dumps.PageRevisionRecord)(wire)).toEqual(record);
+      expect(Schema.decodeSync(json)(Schema.encodeSync(json)(record))).toEqual(record);
+    });
+  });
+
+  it("writes an absent field as null on the wire", () => {
+    const range: Dumps.MultistreamRange = {
+      start: 0,
+      end: Option.none(),
+      pageCount: 1,
+      firstPageId: 1,
+      lastPageId: 1,
+    };
+    expect(Schema.encodeSync(Dumps.MultistreamRange)(range)).toEqual({ ...range, end: null });
+  });
+});
+
+describe("multistreamPageRecordsInWorkers", () => {
+  it("decodes every range on the pool, with the records the main thread would decode", async () => {
+    const local = await collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
+    const remote = await collect(
+      ranges().pipe(
+        Dumps.multistreamPageRecordsInWorkers({ concurrency: 4 }),
+        Stream.provide(pool(2, openRange)),
+      ),
+    );
+    expect(remote).toHaveLength(local.length);
+    expect(remote).toEqual(expect.arrayContaining([...local]));
+    expect(titles(remote)).toEqual(expect.arrayContaining(["Ada Lovelace", "Zebra"]));
+  });
+
+  it("keeps the range order at concurrency 1", async () => {
+    const local = await collect(ranges().pipe(Dumps.multistreamPageRecords(openRange)));
+    const remote = await collect(
+      ranges().pipe(
+        Dumps.multistreamPageRecordsInWorkers({ concurrency: 1 }),
+        Stream.provide(pool(1, openRange)),
+      ),
+    );
+    expect(remote).toEqual(local);
+  });
+
+  it("fails with MultistreamRangeFailed, carrying the range and message, when a worker cannot open it", async () => {
+    const [first] = await collect(ranges());
+    const failing = (): Stream.Stream<Uint8Array, DiskGone> =>
+      Stream.fail(new DiskGone({ message: "disk gone" }));
+    const error = await expectFailureInstanceOf(
+      Stream.runDrain(
+        ranges().pipe(
+          Dumps.multistreamPageRecordsInWorkers({ concurrency: 1 }),
+          Stream.provide(pool(1, failing)),
+        ),
+      ),
+      Dumps.MultistreamRangeFailed,
+    );
+    expect(error.description).toBe("disk gone");
+    expect(error.range).toEqual(first);
+  });
+});
