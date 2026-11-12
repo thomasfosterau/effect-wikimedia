@@ -12,14 +12,14 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import { expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Action, Commons, Core, Rest } from "../src/index.ts";
-import { runTest } from "./helpers/effect.ts";
 
 const fixturesPath = fileURLToPath(new URL("./fixtures/douglas-adams.json", import.meta.url));
 const fixtures = Schema.decodeSync(
@@ -55,60 +55,61 @@ const fetch: typeof globalThis.fetch = async (input, init) => {
   return new Response("not found", { status: 404 });
 };
 
-const layer = Core.wikimediaClientLayer.pipe(
+/** The real client over the fixture-backed stub above, shared by every test in this file. */
+const clientLayer = Core.wikimediaClientLayer.pipe(
   Layer.provide(
     FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
   ),
 );
 
-/** Runs a fully-typed `WikimediaClient`-requiring effect against the fixture-backed stub above. */
-const run = <A, E>(effect: Effect.Effect<A, E, Core.WikimediaClient>): Promise<A> =>
-  runTest(effect.pipe(Effect.provide(layer)));
+layer(clientLayer)("wikitext + parsed HTML + Commons file URL for a real title", (it) => {
+  it.effect("fetches Douglas Adams's wikitext via Action", () =>
+    Effect.gen(function* () {
+      const result = Option.getOrElse(
+        yield* Action.getWikitext("en.wikipedia.org", "Douglas Adams"),
+        () => expect.unreachable("no wikitext"),
+      );
+      expect(result.title).toBe("Douglas Adams");
+      expect(result.revisionId).toEqual(Option.some(1198166957));
+      expect(result.wikitext).toContain("Douglas Noel Adams");
+      expect(result.wikitext).toContain("[[Category:English novelists]]");
+    }),
+  );
 
-describe("wikitext + parsed HTML + Commons file URL for a real title", () => {
-  it("fetches Douglas Adams's wikitext via Action", async () => {
-    const result = Option.getOrElse(
-      await run(Action.getWikitext("en.wikipedia.org", "Douglas Adams")),
-      () => expect.unreachable("no wikitext"),
-    );
-    expect(result.title).toBe("Douglas Adams");
-    expect(result.revisionId).toEqual(Option.some(1198166957));
-    expect(result.wikitext).toContain("Douglas Noel Adams");
-    expect(result.wikitext).toContain("[[Category:English novelists]]");
-  });
-
-  it("fetches Douglas Adams's parsed HTML via Rest, matching the wikitext's revision", async () => {
-    const [wikitext, metadata, html] = await run(
-      Effect.all(
+  it.effect("fetches Douglas Adams's parsed HTML via Rest, matching the wikitext's revision", () =>
+    Effect.gen(function* () {
+      const [wikitext, metadata, html] = yield* Effect.all(
         [
           Action.getWikitext("en.wikipedia.org", "Douglas Adams"),
           Rest.getPageMetadata("en.wikipedia.org", "Douglas Adams"),
           Rest.getParsedHtml("en.wikipedia.org", "Douglas Adams"),
         ],
         { concurrency: 1 },
-      ),
-    );
-    expect(html).toContain("<b>Douglas Noel Adams</b>");
-    expect(html).toContain('<h2 id="Life">Life</h2>');
-    // The REST metadata's latest revision matches the Action wikitext's revision — one consistent page.
-    expect(Option.isSome(metadata.latestRevisionId)).toBe(true);
-    expect(metadata.latestRevisionId).toEqual(Option.flatMap(wikitext, (page) => page.revisionId));
-  });
+      );
+      expect(html).toContain("<b>Douglas Noel Adams</b>");
+      expect(html).toContain('<h2 id="Life">Life</h2>');
+      // The REST metadata's latest revision matches the Action wikitext's revision — one consistent page.
+      expect(Option.isSome(metadata.latestRevisionId)).toBe(true);
+      expect(metadata.latestRevisionId).toEqual(
+        Option.flatMap(wikitext, (page) => page.revisionId),
+      );
+    }),
+  );
 
-  it("builds Douglas Adams's Commons portrait file URL and fetches its file info", async () => {
-    const filename = "Douglas adams portrait cropped.jpg";
-    const url = Commons.filePathUrl(filename);
-    expect(Option.getOrNull(url)).toBe(
-      "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas_adams_portrait_cropped.jpg",
-    );
+  it.effect("builds Douglas Adams's Commons portrait file URL and fetches its file info", () =>
+    Effect.gen(function* () {
+      const filename = "Douglas adams portrait cropped.jpg";
+      const url = Commons.filePathUrl(filename);
+      expect(Option.getOrNull(url)).toBe(
+        "https://commons.wikimedia.org/wiki/Special:FilePath/Douglas_adams_portrait_cropped.jpg",
+      );
 
-    const info = Option.getOrNull(
-      await run(Commons.getFileInfo("commons.wikimedia.org", filename)),
-    );
-    expect(info === null ? null : Option.getOrNull(info.url)).toBe(
-      "https://upload.wikimedia.org/wikipedia/commons/d/d1/Douglas_adams_portrait_cropped.jpg",
-    );
-    expect(info?.width).toEqual(Option.some(1200));
-    expect(info?.mime).toEqual(Option.some("image/jpeg"));
-  });
+      const info = Option.getOrNull(yield* Commons.getFileInfo("commons.wikimedia.org", filename));
+      expect(info === null ? null : Option.getOrNull(info.url)).toBe(
+        "https://upload.wikimedia.org/wikipedia/commons/d/d1/Douglas_adams_portrait_cropped.jpg",
+      );
+      expect(info?.width).toEqual(Option.some(1200));
+      expect(info?.mime).toEqual(Option.some("image/jpeg"));
+    }),
+  );
 });

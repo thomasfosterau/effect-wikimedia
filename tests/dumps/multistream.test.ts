@@ -18,14 +18,16 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import unbzip2 from "unbzip2-stream";
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assertInstanceOf } from "@effect/vitest/utils";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
-import { expectFailureInstanceOf, runTest } from "../helpers/effect.ts";
 
 const fixturePath = (name: string): string =>
   fileURLToPath(new URL(`../fixtures/dumps/${name}`, import.meta.url));
@@ -37,18 +39,24 @@ const INDEX_BZ2 = fixturePath("multistream-index.txt.bz2");
 const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
   Stream.make(new TextEncoder().encode(text));
 
-const collect = <A, E>(stream: Stream.Stream<A, E>): Promise<ReadonlyArray<A>> =>
-  runTest(Stream.runCollect(stream));
+const collect = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<ReadonlyArray<A>, E> =>
+  Stream.runCollect(stream);
 
 /** What `stream` emits before it fails with a {@link Dumps.MultistreamIndexError}. */
 const collectUntilIndexError = <A, E>(
   stream: Stream.Stream<A, E | Dumps.MultistreamIndexError>,
-): Promise<ReadonlyArray<A>> =>
+): Effect.Effect<ReadonlyArray<A>, E> =>
   collect(stream.pipe(Stream.catchTag("MultistreamIndexError", () => Stream.empty)));
 
 /** The {@link Dumps.MultistreamIndexError} `stream` fails with. */
-const indexErrorOf = <A, E>(stream: Stream.Stream<A, E>): Promise<Dumps.MultistreamIndexError> =>
-  expectFailureInstanceOf(Stream.runDrain(stream), Dumps.MultistreamIndexError);
+const indexErrorOf = <A, E>(
+  stream: Stream.Stream<A, E>,
+): Effect.Effect<Dumps.MultistreamIndexError, void> =>
+  Effect.gen(function* () {
+    const error = yield* Effect.flip(Stream.runDrain(stream));
+    assertInstanceOf(error, Dumps.MultistreamIndexError);
+    return error;
+  });
 
 const entry = (line: number, offset: number, pageId: number, title: string) => ({
   line,
@@ -108,57 +116,67 @@ describe("decodeIndexLine", () => {
 // ── multistreamIndexRecords ──────────────────────────────────────────────
 
 describe("multistreamIndexRecords", () => {
-  it("decodes the bzip2-compressed fixture index through fromFile", async () => {
-    const entries = await collect(
-      Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-        Dumps.multistreamIndexRecords,
-      ),
-    );
-    expect(entries).toEqual([
-      entry(1, 236, 10, "Ada Lovelace"),
-      entry(2, 236, 12, "AT&T"),
-      entry(3, 533, 15, "Category:Writers"),
-      entry(4, 533, 21, "Talk:Foo:Bar"),
-      entry(5, 814, 30, "Zebra"),
-    ]);
-  });
+  it.effect("decodes the bzip2-compressed fixture index through fromFile", () =>
+    Effect.gen(function* () {
+      const entries = yield* collect(
+        Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
+          Dumps.multistreamIndexRecords,
+        ),
+      );
+      expect(entries).toEqual([
+        entry(1, 236, 10, "Ada Lovelace"),
+        entry(2, 236, 12, "AT&T"),
+        entry(3, 533, 15, "Category:Writers"),
+        entry(4, 533, 21, "Talk:Foo:Bar"),
+        entry(5, 814, 30, "Zebra"),
+      ]);
+    }),
+  );
 
-  it("numbers every line, blank ones included, across \\r\\n and \\n", async () => {
-    const entries = await collect(
-      bytesOf("1:2:A\r\n\n3:4:B\n").pipe(Dumps.multistreamIndexRecords),
-    );
-    expect(entries).toEqual([entry(1, 1, 2, "A"), entry(3, 3, 4, "B")]);
-  });
+  it.effect("numbers every line, blank ones included, across \\r\\n and \\n", () =>
+    Effect.gen(function* () {
+      const entries = yield* collect(
+        bytesOf("1:2:A\r\n\n3:4:B\n").pipe(Dumps.multistreamIndexRecords),
+      );
+      expect(entries).toEqual([entry(1, 1, 2, "A"), entry(3, 3, 4, "B")]);
+    }),
+  );
 
-  it("fails with a malformed-index-line error after the entries before it", async () => {
-    const stream = bytesOf("1:2:A\n\nbad line\n3:4:B\n").pipe(Dumps.multistreamIndexRecords);
-    expect(await collectUntilIndexError(stream)).toEqual([entry(1, 1, 2, "A")]);
-    expect(await indexErrorOf(stream)).toMatchObject({
-      reason: "dumps/malformed-index-line",
-      line: 3,
-      detail: "bad line",
-    });
-  });
+  it.effect("fails with a malformed-index-line error after the entries before it", () =>
+    Effect.gen(function* () {
+      const stream = bytesOf("1:2:A\n\nbad line\n3:4:B\n").pipe(Dumps.multistreamIndexRecords);
+      expect(yield* collectUntilIndexError(stream)).toEqual([entry(1, 1, 2, "A")]);
+      expect(yield* indexErrorOf(stream)).toMatchObject({
+        reason: "dumps/malformed-index-line",
+        line: 3,
+        detail: "bad line",
+      });
+    }),
+  );
 
-  it("numbers lines across chunks of lines", async () => {
-    const stream = Stream.make(
-      new TextEncoder().encode("1:2:A\n3:4:B\n"),
-      new TextEncoder().encode("5:6:C\nbad\n"),
-    ).pipe(Dumps.multistreamIndexRecords);
-    expect((await collectUntilIndexError(stream)).map((e) => e.line)).toEqual([1, 2, 3]);
-    expect((await indexErrorOf(stream)).line).toBe(4);
-  });
+  it.effect("numbers lines across chunks of lines", () =>
+    Effect.gen(function* () {
+      const stream = Stream.make(
+        new TextEncoder().encode("1:2:A\n3:4:B\n"),
+        new TextEncoder().encode("5:6:C\nbad\n"),
+      ).pipe(Dumps.multistreamIndexRecords);
+      expect((yield* collectUntilIndexError(stream)).map((e) => e.line)).toEqual([1, 2, 3]);
+      expect((yield* indexErrorOf(stream)).line).toBe(4);
+    }),
+  );
 
-  it("decodes a line split across chunks, mid-character", async () => {
-    const bytes = new TextEncoder().encode("5:6:Café\n");
-    const split = bytes.length - 2; // inside the two-byte "é"
-    const entries = await collect(
-      Stream.make(bytes.subarray(0, split), bytes.subarray(split)).pipe(
-        Dumps.multistreamIndexRecords,
-      ),
-    );
-    expect(entries).toEqual([entry(1, 5, 6, "Café")]);
-  });
+  it.effect("decodes a line split across chunks, mid-character", () =>
+    Effect.gen(function* () {
+      const bytes = new TextEncoder().encode("5:6:Café\n");
+      const split = bytes.length - 2; // inside the two-byte "é"
+      const entries = yield* collect(
+        Stream.make(bytes.subarray(0, split), bytes.subarray(split)).pipe(
+          Dumps.multistreamIndexRecords,
+        ),
+      );
+      expect(entries).toEqual([entry(1, 5, 6, "Café")]);
+    }),
+  );
 });
 
 // ── multistreamRanges ────────────────────────────────────────────────────
@@ -168,70 +186,88 @@ const entriesOf = (text: string) => bytesOf(text).pipe(Dumps.multistreamIndexRec
 describe("multistreamRanges", () => {
   const INDEX = "10:1:A\n10:2:B\n10:5:C\n40:7:D\n90:9:E\n90:11:F\n";
 
-  it("groups entries by offset, each range ending where the next starts", async () => {
-    expect(await collect(entriesOf(INDEX).pipe(Dumps.multistreamRanges()))).toEqual([
-      { start: 10, end: Option.some(40), pageCount: 3, firstPageId: 1, lastPageId: 5 },
-      { start: 40, end: Option.some(90), pageCount: 1, firstPageId: 7, lastPageId: 7 },
-      { start: 90, end: Option.none(), pageCount: 2, firstPageId: 9, lastPageId: 11 },
-    ]);
-  });
+  it.effect("groups entries by offset, each range ending where the next starts", () =>
+    Effect.gen(function* () {
+      expect(yield* collect(entriesOf(INDEX).pipe(Dumps.multistreamRanges()))).toEqual([
+        { start: 10, end: Option.some(40), pageCount: 3, firstPageId: 1, lastPageId: 5 },
+        { start: 40, end: Option.some(90), pageCount: 1, firstPageId: 7, lastPageId: 7 },
+        { start: 90, end: Option.none(), pageCount: 2, firstPageId: 9, lastPageId: 11 },
+      ]);
+    }),
+  );
 
-  it("closes the last range at fileSize", async () => {
-    const ranges = await collect(entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: 120 })));
-    expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
-      [10, 40],
-      [40, 90],
-      [90, 120],
-    ]);
-  });
+  it.effect("closes the last range at fileSize", () =>
+    Effect.gen(function* () {
+      const ranges = yield* collect(
+        entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: 120 })),
+      );
+      expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
+        [10, 40],
+        [40, 90],
+        [90, 120],
+      ]);
+    }),
+  );
 
-  it("leaves the last end null for an explicit fileSize: undefined", async () => {
-    const ranges = await collect(
-      entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: undefined })),
-    );
-    expect(ranges.map((r) => Option.getOrNull(r.end))).toEqual([40, 90, null]);
-  });
+  it.effect("leaves the last end null for an explicit fileSize: undefined", () =>
+    Effect.gen(function* () {
+      const ranges = yield* collect(
+        entriesOf(INDEX).pipe(Dumps.multistreamRanges({ fileSize: undefined })),
+      );
+      expect(ranges.map((r) => Option.getOrNull(r.end))).toEqual([40, 90, null]);
+    }),
+  );
 
-  it("emits nothing for an empty index", async () => {
-    expect(await collect(entriesOf("").pipe(Dumps.multistreamRanges()))).toEqual([]);
-  });
+  it.effect("emits nothing for an empty index", () =>
+    Effect.gen(function* () {
+      expect(yield* collect(entriesOf("").pipe(Dumps.multistreamRanges()))).toEqual([]);
+    }),
+  );
 
-  it("fails at an offset below the one before it, after the ranges before it", async () => {
-    const stream = entriesOf("10:1:A\n50:2:B\n50:3:C\n20:4:D\n90:5:E\n").pipe(
-      Dumps.multistreamRanges(),
-    );
-    expect(await collectUntilIndexError(stream)).toEqual([
-      { start: 10, end: Option.some(50), pageCount: 1, firstPageId: 1, lastPageId: 1 },
-    ]);
-    expect(await indexErrorOf(stream)).toMatchObject({
-      reason: "dumps/index-offset-decreased",
-      line: 4,
-      detail: "offset 20 is below the previous offset 50",
-    });
-  });
+  it.effect("fails at an offset below the one before it, after the ranges before it", () =>
+    Effect.gen(function* () {
+      const stream = entriesOf("10:1:A\n50:2:B\n50:3:C\n20:4:D\n90:5:E\n").pipe(
+        Dumps.multistreamRanges(),
+      );
+      expect(yield* collectUntilIndexError(stream)).toEqual([
+        { start: 10, end: Option.some(50), pageCount: 1, firstPageId: 1, lastPageId: 1 },
+      ]);
+      expect(yield* indexErrorOf(stream)).toMatchObject({
+        reason: "dumps/index-offset-decreased",
+        line: 4,
+        detail: "offset 20 is below the previous offset 50",
+      });
+    }),
+  );
 
-  it("fails on a non-adjacent repeat of an earlier offset", async () => {
-    const error = await indexErrorOf(
-      entriesOf("10:1:A\n50:2:B\n10:3:C\n").pipe(Dumps.multistreamRanges()),
-    );
-    expect(error).toMatchObject({ reason: "dumps/index-offset-decreased", line: 3 });
-  });
+  it.effect("fails on a non-adjacent repeat of an earlier offset", () =>
+    Effect.gen(function* () {
+      const error = yield* indexErrorOf(
+        entriesOf("10:1:A\n50:2:B\n10:3:C\n").pipe(Dumps.multistreamRanges()),
+      );
+      expect(error).toMatchObject({ reason: "dumps/index-offset-decreased", line: 3 });
+    }),
+  );
 
-  it("fails at an offset at or past fileSize", async () => {
-    const error = await indexErrorOf(
-      entriesOf("10:1:A\n90:2:B\n").pipe(Dumps.multistreamRanges({ fileSize: 90 })),
-    );
-    expect(error).toMatchObject({
-      reason: "dumps/index-offset-past-file-size",
-      line: 2,
-      detail: "offset 90 is at or past the file size 90",
-    });
-  });
+  it.effect("fails at an offset at or past fileSize", () =>
+    Effect.gen(function* () {
+      const error = yield* indexErrorOf(
+        entriesOf("10:1:A\n90:2:B\n").pipe(Dumps.multistreamRanges({ fileSize: 90 })),
+      );
+      expect(error).toMatchObject({
+        reason: "dumps/index-offset-past-file-size",
+        line: 2,
+        detail: "offset 90 is at or past the file size 90",
+      });
+    }),
+  );
 
-  it("passes a malformed line's failure through", async () => {
-    const error = await indexErrorOf(entriesOf("10:1:A\nbad\n").pipe(Dumps.multistreamRanges()));
-    expect(error.reason).toBe("dumps/malformed-index-line");
-  });
+  it.effect("passes a malformed line's failure through", () =>
+    Effect.gen(function* () {
+      const error = yield* indexErrorOf(entriesOf("10:1:A\nbad\n").pipe(Dumps.multistreamRanges()));
+      expect(error.reason).toBe("dumps/malformed-index-line");
+    }),
+  );
 });
 
 // ── End to end: one range decoded on its own ─────────────────────────────
@@ -239,7 +275,7 @@ describe("multistreamRanges", () => {
 /** Decompresses the fixture dump's bytes `[start, end)` alone and decodes them to page records. */
 const pagesInRange = (
   range: Dumps.MultistreamRange,
-): Promise<ReadonlyArray<Dumps.PageRevisionRecord>> =>
+): Effect.Effect<ReadonlyArray<Dumps.PageRevisionRecord>, Dumps.SourceError> =>
   collect(
     Stream.make(
       new Uint8Array(
@@ -255,94 +291,107 @@ const pagesInRange = (
   );
 
 describe("a multistream range decoded on its own", () => {
-  const indexEntries = (): Promise<ReadonlyArray<Dumps.MultistreamIndexEntry>> =>
+  const indexEntries = () =>
     collect(
       Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
         Dumps.multistreamIndexRecords,
       ),
     );
 
-  it.each([
-    ["without fileSize", undefined, null],
-    ["with fileSize", DUMP_BZ2.length, DUMP_BZ2.length],
-  ])("yields exactly the pages the index lists for it (%s)", async (_label, fileSize, lastEnd) => {
-    const entries = await indexEntries();
-    const ranges = await collect(
-      Stream.fromIterable(entries).pipe(Dumps.multistreamRanges({ fileSize })),
-    );
-    expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
-      [236, 533],
-      [533, 814],
-      [814, lastEnd],
-    ]);
-    const decoded = await Promise.all(ranges.map(pagesInRange));
-    Arr.forEach(Arr.zip(ranges, decoded), ([range, records]) => {
-      const listed = entries.filter((e) => e.offset === range.start);
-      expect(records.every((r) => P.isTagged(r, "revision"))).toBe(true);
-      expect(
-        records.map((r) => [Option.getOrNull(r.page.id), Option.getOrNull(r.page.title)]),
-      ).toEqual(listed.map((e) => [e.pageId, e.title]));
-    });
-  });
+  it.effect.each([
+    { label: "without fileSize", fileSize: undefined, lastEnd: null },
+    { label: "with fileSize", fileSize: DUMP_BZ2.length, lastEnd: DUMP_BZ2.length },
+  ])("yields exactly the pages the index lists for it ($label)", ({ fileSize, lastEnd }) =>
+    Effect.gen(function* () {
+      const entries = yield* indexEntries();
+      const ranges = yield* collect(
+        Stream.fromIterable(entries).pipe(Dumps.multistreamRanges({ fileSize })),
+      );
+      expect(ranges.map((r) => [r.start, Option.getOrNull(r.end)])).toEqual([
+        [236, 533],
+        [533, 814],
+        [814, lastEnd],
+      ]);
+      const decoded = yield* Effect.forEach(ranges, pagesInRange, { concurrency: "unbounded" });
+      Arr.forEach(Arr.zip(ranges, decoded), ([range, records]) => {
+        const listed = entries.filter((e) => e.offset === range.start);
+        expect(records.every((r) => P.isTagged(r, "revision"))).toBe(true);
+        expect(
+          records.map((r) => [Option.getOrNull(r.page.id), Option.getOrNull(r.page.title)]),
+        ).toEqual(listed.map((e) => [e.pageId, e.title]));
+      });
+    }),
+  );
 
-  it("decodes the header stream at offset 0, which the index doesn't list, to no records", async () => {
-    const [first] = await indexEntries();
-    expect(first?.offset).toBeGreaterThan(0);
-    expect(
-      await pagesInRange({
-        start: 0,
-        end: Option.some(first?.offset ?? 0),
-        pageCount: 0,
-        firstPageId: 0,
-        lastPageId: 0,
+  it.effect(
+    "decodes the header stream at offset 0, which the index doesn't list, to no records",
+    () =>
+      Effect.gen(function* () {
+        const [first] = yield* indexEntries();
+        expect(first?.offset).toBeGreaterThan(0);
+        expect(
+          yield* pagesInRange({
+            start: 0,
+            end: Option.some(first?.offset ?? 0),
+            pageCount: 0,
+            firstPageId: 0,
+            lastPageId: 0,
+          }),
+        ).toEqual([]);
       }),
-    ).toEqual([]);
-  });
+  );
 
-  it("decodes the whole dump to the same pages as the ranges together", async () => {
-    const whole = await collect(
-      Stream.make(new Uint8Array(DUMP_BZ2)).pipe(
-        Dumps.decompressWith(() => unbzip2()),
-        Dumps.pageRecords,
-      ),
-    );
-    expect(whole.map((r) => Option.getOrNull(r.page.title))).toEqual([
-      "Ada Lovelace",
-      "AT&T",
-      "Category:Writers",
-      "Talk:Foo:Bar",
-      "Zebra",
-    ]);
-  });
+  it.effect("decodes the whole dump to the same pages as the ranges together", () =>
+    Effect.gen(function* () {
+      const whole = yield* collect(
+        Stream.make(new Uint8Array(DUMP_BZ2)).pipe(
+          Dumps.decompressWith(() => unbzip2()),
+          Dumps.pageRecords,
+        ),
+      );
+      expect(whole.map((r) => Option.getOrNull(r.page.title))).toEqual([
+        "Ada Lovelace",
+        "AT&T",
+        "Category:Writers",
+        "Talk:Foo:Bar",
+        "Zebra",
+      ]);
+    }),
+  );
 });
 
 // ── fromMultistreamRange: one range read straight from the file ──────────
 
 describe("fromMultistreamRange", () => {
-  it("reads each range of the dump file to the same pages as its sliced bytes", async () => {
-    const entries = await collect(
-      Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-        Dumps.multistreamIndexRecords,
-      ),
-    );
-    const ranges = await collect(Stream.fromIterable(entries).pipe(Dumps.multistreamRanges()));
-    expect(ranges).toHaveLength(3);
-    const fromFile = await Promise.all(
-      ranges.map((range) =>
-        collect(
-          Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2()).pipe(Dumps.pageRecords),
+  it.effect("reads each range of the dump file to the same pages as its sliced bytes", () =>
+    Effect.gen(function* () {
+      const entries = yield* collect(
+        Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
+          Dumps.multistreamIndexRecords,
         ),
-      ),
-    );
-    expect(fromFile).toEqual(await Promise.all(ranges.map(pagesInRange)));
-    expect(fromFile.flat().map((r) => Option.getOrNull(r.page.title))).toEqual([
-      "Ada Lovelace",
-      "AT&T",
-      "Category:Writers",
-      "Talk:Foo:Bar",
-      "Zebra",
-    ]);
-  });
+      );
+      const ranges = yield* collect(Stream.fromIterable(entries).pipe(Dumps.multistreamRanges()));
+      expect(ranges).toHaveLength(3);
+      const fromFile = yield* Effect.forEach(
+        ranges,
+        (range) =>
+          collect(
+            Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2()).pipe(Dumps.pageRecords),
+          ),
+        { concurrency: "unbounded" },
+      );
+      expect(fromFile).toEqual(
+        yield* Effect.forEach(ranges, pagesInRange, { concurrency: "unbounded" }),
+      );
+      expect(fromFile.flat().map((r) => Option.getOrNull(r.page.title))).toEqual([
+        "Ada Lovelace",
+        "AT&T",
+        "Category:Writers",
+        "Talk:Foo:Bar",
+        "Zebra",
+      ]);
+    }),
+  );
 });
 
 // ── Random access, iteration and resume ──────────────────────────────────
@@ -360,83 +409,93 @@ describe("random access and iteration over the fixture dump", () => {
   const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
     records.map((r) => Option.getOrNull(r.page.title));
 
-  it("finds the whole range holding a page by title, then reads just that range", async () => {
-    const found = await runTest(
-      entries().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Category:Writers"))),
-    );
-    expect(Option.isSome(found)).toBe(true);
-    if (Option.isNone(found)) return;
-    expect(found.value).toMatchObject({ start: 533, end: Option.some(814) });
-    const records = await collect(openRange(found.value).pipe(Dumps.pageRecords));
-    expect(titles(records)).toContain("Category:Writers");
-  });
+  it.effect("finds the whole range holding a page by title, then reads just that range", () =>
+    Effect.gen(function* () {
+      const found = yield* entries().pipe(
+        Dumps.findMultistreamRange(Dumps.byTitle("Category:Writers")),
+      );
+      expect(Option.isSome(found)).toBe(true);
+      if (Option.isNone(found)) return;
+      expect(found.value).toMatchObject({ start: 533, end: Option.some(814) });
+      const records = yield* collect(openRange(found.value).pipe(Dumps.pageRecords));
+      expect(titles(records)).toContain("Category:Writers");
+    }),
+  );
 
-  it("finds by page id, closes the last range with fileSize, and gives None for a miss", async () => {
-    const all = await collect(entries());
-    const lastId = all.at(-1)?.pageId ?? -1;
-    const last = await runTest(
-      entries().pipe(
-        Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: DUMP_BZ2.length }),
-      ),
-    );
-    expect(Option.map(last, (range) => [range.start, Option.getOrNull(range.end)])).toEqual(
-      Option.some([814, DUMP_BZ2.length]),
-    );
-    expect(
-      await runTest(entries().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Nope")))),
-    ).toEqual(Option.none());
-  });
+  it.effect(
+    "finds by page id, closes the last range with fileSize, and gives None for a miss",
+    () =>
+      Effect.gen(function* () {
+        const all = yield* collect(entries());
+        const lastId = all.at(-1)?.pageId ?? -1;
+        const last = yield* entries().pipe(
+          Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: DUMP_BZ2.length }),
+        );
+        expect(Option.map(last, (range) => [range.start, Option.getOrNull(range.end)])).toEqual(
+          Option.some([814, DUMP_BZ2.length]),
+        );
+        expect(yield* entries().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Nope")))).toEqual(
+          Option.none(),
+        );
+      }),
+  );
 
-  it("counts every entry of the matched range, ones before the match included", async () => {
-    const first = await runTest(entries().pipe(Dumps.findMultistreamRange(() => true)));
-    const ranges = await collect(entries().pipe(Dumps.multistreamRanges()));
-    const byLaterEntry = await runTest(
-      entries().pipe(Dumps.findMultistreamRange(Dumps.byPageId(ranges[0]?.lastPageId ?? -1))),
-    );
-    expect(byLaterEntry).toEqual(first);
-    expect(first).toEqual(Option.fromNullOr(ranges[0]));
-  });
+  it.effect("counts every entry of the matched range, ones before the match included", () =>
+    Effect.gen(function* () {
+      const first = yield* entries().pipe(Dumps.findMultistreamRange(() => true));
+      const ranges = yield* collect(entries().pipe(Dumps.multistreamRanges()));
+      const byLaterEntry = yield* entries().pipe(
+        Dumps.findMultistreamRange(Dumps.byPageId(ranges[0]?.lastPageId ?? -1)),
+      );
+      expect(byLaterEntry).toEqual(first);
+      expect(first).toEqual(Option.fromNullOr(ranges[0]));
+    }),
+  );
 
-  it("fails with the index's error when it rejects the index before a match", async () => {
-    const stream = bytesOf("10:1:A\n5:2:B\n").pipe(Dumps.multistreamIndexRecords);
-    const error = await expectFailureInstanceOf(
-      stream.pipe(Dumps.findMultistreamRange(Dumps.byTitle("B"))),
-      Dumps.MultistreamIndexError,
-    );
-    expect(error.reason).toBe("dumps/index-offset-decreased");
-  });
+  it.effect("fails with the index's error when it rejects the index before a match", () =>
+    Effect.gen(function* () {
+      const stream = bytesOf("10:1:A\n5:2:B\n").pipe(Dumps.multistreamIndexRecords);
+      const error = yield* Effect.flip(stream.pipe(Dumps.findMultistreamRange(Dumps.byTitle("B"))));
+      assertInstanceOf(error, Dumps.MultistreamIndexError);
+      expect(error.reason).toBe("dumps/index-offset-decreased");
+    }),
+  );
 
-  it("decodes every range's pages in order, sequentially and concurrently", async () => {
-    const ranges = entries().pipe(Dumps.multistreamRanges());
-    const sequential = await collect(ranges.pipe(Dumps.multistreamPageRecords(openRange)));
-    expect(titles(sequential)).toEqual([
-      "Ada Lovelace",
-      "AT&T",
-      "Category:Writers",
-      "Talk:Foo:Bar",
-      "Zebra",
-    ]);
-    const concurrent = await collect(
-      ranges.pipe(Dumps.multistreamPageRecords(openRange, { concurrency: 3 })),
-    );
-    expect(titles(concurrent)).toHaveLength(titles(sequential).length);
-    expect(titles(concurrent)).toEqual(expect.arrayContaining(titles(sequential)));
-  });
+  it.effect("decodes every range's pages in order, sequentially and concurrently", () =>
+    Effect.gen(function* () {
+      const ranges = entries().pipe(Dumps.multistreamRanges());
+      const sequential = yield* collect(ranges.pipe(Dumps.multistreamPageRecords(openRange)));
+      expect(titles(sequential)).toEqual([
+        "Ada Lovelace",
+        "AT&T",
+        "Category:Writers",
+        "Talk:Foo:Bar",
+        "Zebra",
+      ]);
+      const concurrent = yield* collect(
+        ranges.pipe(Dumps.multistreamPageRecords(openRange, { concurrency: 3 })),
+      );
+      expect(titles(concurrent)).toHaveLength(titles(sequential).length);
+      expect(titles(concurrent)).toEqual(expect.arrayContaining(titles(sequential)));
+    }),
+  );
 
-  it("resumes from a checkpoint without opening the ranges before it", async () => {
-    const opened: number[] = [];
-    const records = await collect(
-      entries().pipe(
-        Dumps.multistreamRanges(),
-        Dumps.fromCheckpoint(533),
-        Dumps.multistreamPageRecords((range) => {
-          opened.push(range.start);
-          return openRange(range);
-        }),
-      ),
-    );
-    expect(opened).toEqual([533, 814]);
-    expect(titles(records)).not.toContain("Ada Lovelace");
-    expect(titles(records)).toContain("Zebra");
-  });
+  it.effect("resumes from a checkpoint without opening the ranges before it", () =>
+    Effect.gen(function* () {
+      const opened: number[] = [];
+      const records = yield* collect(
+        entries().pipe(
+          Dumps.multistreamRanges(),
+          Dumps.fromCheckpoint(533),
+          Dumps.multistreamPageRecords((range) => {
+            opened.push(range.start);
+            return openRange(range);
+          }),
+        ),
+      );
+      expect(opened).toEqual([533, 814]);
+      expect(titles(records)).not.toContain("Ada Lovelace");
+      expect(titles(records)).toContain("Zebra");
+    }),
+  );
 });

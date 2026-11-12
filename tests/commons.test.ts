@@ -6,15 +6,15 @@
  * @module tests/commons
  */
 
-import { describe, expect, it } from "vite-plus/test";
+import { it, layer } from "@effect/vitest";
+import { assertInstanceOf } from "@effect/vitest/utils";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import { FetchHttpClient } from "effect/http";
 import { Commons, Core } from "../src/index.ts";
-import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 // ── FilePath URL construction ───────────────────────────────────────────
 
@@ -102,135 +102,139 @@ const stubRouter = (routes: Record<string, StubRoute>) => {
       }),
     );
   };
-  const fetchLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
-  );
-  return { urls, layer: Core.wikimediaClientLayer.pipe(Layer.provide(fetchLayer)) };
+  return { urls, provideFetch: Effect.provideService(FetchHttpClient.Fetch, fetch) };
 };
 
-/** Provides the stubbed client layer without running the effect — for `expectFailureInstanceOf`. */
-const toEffect = <A, E>(
-  layer: Layer.Layer<Core.WikimediaClient>,
-  effect: Effect.Effect<A, E, Core.WikimediaClient>,
-): Effect.Effect<A, E> => effect.pipe(Effect.provide(layer));
-
-const run = <A, E>(
-  layer: Layer.Layer<Core.WikimediaClient>,
-  effect: Effect.Effect<A, E, Core.WikimediaClient>,
-) => runTest(toEffect(layer, effect));
-
-describe("Commons.getFileInfo", () => {
-  it("extracts URL, dimensions, MIME, and size", async () => {
-    const { urls, layer } = stubRouter({
-      "prop=imageinfo": {
-        status: 200,
-        body: {
-          query: {
-            pages: {
-              "555": {
-                pageid: 555,
-                title: "File:Douglas adams portrait.jpg",
-                imageinfo: [
-                  {
-                    url: "https://upload.wikimedia.org/wikipedia/commons/d/douglas.jpg",
-                    descriptionurl:
-                      "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait.jpg",
-                    width: 800,
-                    height: 600,
-                    mime: "image/jpeg",
-                    size: 123456,
-                  },
-                ],
+layer(Core.wikimediaLayer)("Commons.getFileInfo", (it) => {
+  it.effect("extracts URL, dimensions, MIME, and size", () =>
+    Effect.gen(function* () {
+      const { urls, provideFetch } = stubRouter({
+        "prop=imageinfo": {
+          status: 200,
+          body: {
+            query: {
+              pages: {
+                "555": {
+                  pageid: 555,
+                  title: "File:Douglas adams portrait.jpg",
+                  imageinfo: [
+                    {
+                      url: "https://upload.wikimedia.org/wikipedia/commons/d/douglas.jpg",
+                      descriptionurl:
+                        "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait.jpg",
+                      width: 800,
+                      height: 600,
+                      mime: "image/jpeg",
+                      size: 123456,
+                    },
+                  ],
+                },
               },
             },
           },
         },
-      },
-    });
-    const result = await run(
-      layer,
-      Commons.getFileInfo("commons.wikimedia.org", "Douglas adams portrait.jpg"),
-    );
-    expect(result).toEqual(
-      Option.some({
-        title: "File:Douglas adams portrait.jpg",
-        url: Option.some("https://upload.wikimedia.org/wikipedia/commons/d/douglas.jpg"),
-        descriptionUrl: Option.some(
-          "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait.jpg",
-        ),
-        width: Option.some(800),
-        height: Option.some(600),
-        mime: Option.some("image/jpeg"),
-        size: Option.some(123456),
-      }),
-    );
-    expect(urls[0]).toContain("titles=File%3ADouglas_adams_portrait.jpg");
-  });
-
-  it("drops a media URL on a host outside the allowed family", async () => {
-    const { layer } = stubRouter({
-      "prop=imageinfo": {
-        status: 200,
-        body: {
-          query: {
-            pages: {
-              "555": {
-                pageid: 555,
-                title: "File:Example.jpg",
-                imageinfo: [{ url: "https://evil.example.com/steal.jpg" }],
-              },
-            },
-          },
-        },
-      },
-    });
-    const result = await run(layer, Commons.getFileInfo("commons.wikimedia.org", "Example.jpg"));
-    expect(Option.flatMap(result, (info) => info.url)).toEqual(Option.none());
-    expect(Option.isSome(result)).toBe(true);
-  });
-
-  it("succeeds with None when the file does not exist upstream", async () => {
-    const { layer } = stubRouter({
-      "prop=imageinfo": {
-        status: 200,
-        body: { query: { pages: { "-1": { ns: 6, title: "File:Nonexistent.jpg", missing: "" } } } },
-      },
-    });
-    expect(
-      await run(layer, Commons.getFileInfo("commons.wikimedia.org", "Nonexistent.jpg")),
-    ).toEqual(Option.none());
-  });
-
-  it("rejects a blank filename before any request", async () => {
-    const { urls, layer } = stubRouter({});
-    await expectFailureInstanceOf(
-      toEffect(layer, Commons.getFileInfo("commons.wikimedia.org", "   ")),
-      Core.InvalidRequest,
-    );
-    expect(urls).toEqual([]);
-  });
-
-  it.each([".", "..", "File:..", "../Foo.jpg"])(
-    "rejects the relative-path filename %j before any request",
-    async (filename) => {
-      const { urls, layer } = stubRouter({});
-      await expectFailureInstanceOf(
-        toEffect(layer, Commons.getFileInfo("commons.wikimedia.org", filename)),
-        Core.InvalidRequest,
+      });
+      const result = yield* Commons.getFileInfo(
+        "commons.wikimedia.org",
+        "Douglas adams portrait.jpg",
+      ).pipe(provideFetch);
+      expect(result).toEqual(
+        Option.some({
+          title: "File:Douglas adams portrait.jpg",
+          url: Option.some("https://upload.wikimedia.org/wikipedia/commons/d/douglas.jpg"),
+          descriptionUrl: Option.some(
+            "https://commons.wikimedia.org/wiki/File:Douglas_adams_portrait.jpg",
+          ),
+          width: Option.some(800),
+          height: Option.some(600),
+          mime: Option.some("image/jpeg"),
+          size: Option.some(123456),
+        }),
       );
-      expect(urls).toEqual([]);
-    },
+      expect(urls[0]).toContain("titles=File%3ADouglas_adams_portrait.jpg");
+    }),
   );
 
-  it.each(["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg"])(
-    "rejects the lone-surrogate filename %j before any request",
-    async (filename) => {
-      const { urls, layer } = stubRouter({});
-      await expectFailureInstanceOf(
-        toEffect(layer, Commons.getFileInfo("commons.wikimedia.org", filename)),
+  it.effect("drops a media URL on a host outside the allowed family", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = stubRouter({
+        "prop=imageinfo": {
+          status: 200,
+          body: {
+            query: {
+              pages: {
+                "555": {
+                  pageid: 555,
+                  title: "File:Example.jpg",
+                  imageinfo: [{ url: "https://evil.example.com/steal.jpg" }],
+                },
+              },
+            },
+          },
+        },
+      });
+      const result = yield* Commons.getFileInfo("commons.wikimedia.org", "Example.jpg").pipe(
+        provideFetch,
+      );
+      expect(Option.flatMap(result, (info) => info.url)).toEqual(Option.none());
+      expect(Option.isSome(result)).toBe(true);
+    }),
+  );
+
+  it.effect("succeeds with None when the file does not exist upstream", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = stubRouter({
+        "prop=imageinfo": {
+          status: 200,
+          body: {
+            query: { pages: { "-1": { ns: 6, title: "File:Nonexistent.jpg", missing: "" } } },
+          },
+        },
+      });
+      expect(
+        yield* Commons.getFileInfo("commons.wikimedia.org", "Nonexistent.jpg").pipe(provideFetch),
+      ).toEqual(Option.none());
+    }),
+  );
+
+  it.effect("rejects a blank filename before any request", () =>
+    Effect.gen(function* () {
+      const { urls, provideFetch } = stubRouter({});
+      assertInstanceOf(
+        yield* Effect.flip(Commons.getFileInfo("commons.wikimedia.org", "   ").pipe(provideFetch)),
         Core.InvalidRequest,
       );
       expect(urls).toEqual([]);
-    },
+    }),
+  );
+
+  it.effect.each([".", "..", "File:..", "../Foo.jpg"])(
+    "rejects the relative-path filename %j before any request",
+    (filename) =>
+      Effect.gen(function* () {
+        const { urls, provideFetch } = stubRouter({});
+        assertInstanceOf(
+          yield* Effect.flip(
+            Commons.getFileInfo("commons.wikimedia.org", filename).pipe(provideFetch),
+          ),
+          Core.InvalidRequest,
+        );
+        expect(urls).toEqual([]);
+      }),
+  );
+
+  it.effect.each(["Foo\uD800Bar.jpg", "File:Foo\uDC00Bar.jpg"])(
+    "rejects the lone-surrogate filename %j before any request",
+    (filename) =>
+      Effect.gen(function* () {
+        const { urls, provideFetch } = stubRouter({});
+        assertInstanceOf(
+          yield* Effect.flip(
+            Commons.getFileInfo("commons.wikimedia.org", filename).pipe(provideFetch),
+          ),
+          Core.InvalidRequest,
+        );
+        expect(urls).toEqual([]);
+      }),
   );
 });

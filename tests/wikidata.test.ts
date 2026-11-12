@@ -12,16 +12,16 @@ import * as Struct from "effect/Struct";
 import * as P from "effect/Predicate";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vite-plus/test";
+import { it, layer } from "@effect/vitest";
+import { assertInstanceOf } from "@effect/vitest/utils";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Core, Wikidata } from "../src/index.ts";
-import { expectFailureInstanceOf, runTest } from "./helpers/effect.ts";
 
 /** JSON text ↔ a JSON value, through the Schema JSON codec. */
 const Json = Schema.fromJsonString(Schema.Json);
@@ -42,21 +42,8 @@ const stubWikidata = (handler: (url: URL) => Schema.Json) => {
       headers: { "content-type": "application/json" },
     });
   };
-  const fetchLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
-  );
-  return { urls, layer: Core.wikimediaClientLayer.pipe(Layer.provide(fetchLayer)) };
+  return { urls, provideFetch: Effect.provideService(FetchHttpClient.Fetch, fetch) };
 };
-
-const toEffect = <A, E>(
-  layer: Layer.Layer<Core.WikimediaClient>,
-  effect: Effect.Effect<A, E, Core.WikimediaClient>,
-): Effect.Effect<A, E> => effect.pipe(Effect.provide(layer));
-
-const run = <A, E>(
-  layer: Layer.Layer<Core.WikimediaClient>,
-  effect: Effect.Effect<A, E, Core.WikimediaClient>,
-) => runTest(toEffect(layer, effect));
 
 // ── Typed narrowing helpers (keep each assertion flat) ───────────────────
 
@@ -308,189 +295,231 @@ describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
 
 // ── Fixture round-trip: decode → typed access ────────────────────────────
 
-describe("Wikidata.getEntities — recorded fixture round-trip", () => {
+layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip", (it) => {
   const load = () => {
-    const { urls, layer } = stubWikidata(() => fixture);
-    return { urls, layer };
+    const { urls, provideFetch } = stubWikidata(() => fixture);
+    return { urls, provideFetch };
   };
 
-  it("decodes the item's identity, labels, descriptions, aliases, and sitelinks", async () => {
-    const { layer } = load();
-    const entities = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const item = entities.Q42;
-    expect(item).toBeDefined();
-    if (item === undefined) return expect.unreachable("Q42 missing");
-    expect(item.id).toBe("Q42");
-    expect(item.type).toEqual(Option.some("item"));
-    expect(item.labels.en).toBe("Douglas Adams");
-    expect(item.descriptions.en).toContain("science fiction");
-    expect(item.aliases.en).toContain("Douglas Noel Adams");
-    expect(item.sitelinks.enwiki?.title).toBe("Douglas Adams");
-    expect(item.sitelinks.enwiki?.badges).toEqual(["Q17437798"]);
-  });
+  it.effect("decodes the item's identity, labels, descriptions, aliases, and sitelinks", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const entities = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const item = entities.Q42;
+      expect(item).toBeDefined();
+      if (item === undefined) return expect.unreachable("Q42 missing");
+      expect(item.id).toBe("Q42");
+      expect(item.type).toEqual(Option.some("item"));
+      expect(item.labels.en).toBe("Douglas Adams");
+      expect(item.descriptions.en).toContain("science fiction");
+      expect(item.aliases.en).toContain("Douglas Noel Adams");
+      expect(item.sitelinks.enwiki?.title).toBe("Douglas Adams");
+      expect(item.sitelinks.enwiki?.badges).toEqual(["Q17437798"]);
+    }),
+  );
 
-  it("decodes a wikibase-entityid main snak with rank, qualifiers, and references", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const statement = Q42?.claims.P31?.[0];
-    expect(statement?.rank).toBe("preferred");
-    const value = claimValue(Q42, "P31", "wikibase-entityid");
-    expect(value.id).toBe("Q5");
-    expect(value.entityType).toEqual(Option.some("item"));
-    // Qualifier (P805) and the date-of-birth reference are present and typed.
-    expect(statement?.qualifiers.P805?.[0]).toMatchObject({ _tag: "value" });
-    expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]).toMatchObject({ _tag: "value" });
-  });
+  it.effect("decodes a wikibase-entityid main snak with rank, qualifiers, and references", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const statement = Q42?.claims.P31?.[0];
+      expect(statement?.rank).toBe("preferred");
+      const value = claimValue(Q42, "P31", "wikibase-entityid");
+      expect(value.id).toBe("Q5");
+      expect(value.entityType).toEqual(Option.some("item"));
+      // Qualifier (P805) and the date-of-birth reference are present and typed.
+      expect(statement?.qualifiers.P805?.[0]).toMatchObject({ _tag: "value" });
+      expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]).toMatchObject({
+        _tag: "value",
+      });
+    }),
+  );
 
-  it("decodes a time value with precision and calendar model", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const time = claimValue(Q42, "P569", "time");
-    expect(time.time).toBe("+1952-03-11T00:00:00Z");
-    expect(time.precision).toEqual(Option.some(11));
-    expect(time.calendarModel).toEqual(Option.some("http://www.wikidata.org/entity/Q1985727"));
-  });
+  it.effect("decodes a time value with precision and calendar model", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const time = claimValue(Q42, "P569", "time");
+      expect(time.time).toBe("+1952-03-11T00:00:00Z");
+      expect(time.precision).toEqual(Option.some(11));
+      expect(time.calendarModel).toEqual(Option.some("http://www.wikidata.org/entity/Q1985727"));
+    }),
+  );
 
-  it("decodes a globecoordinate value", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const coord = claimValue(Q42, "P625", "globecoordinate");
-    expect(Option.getOrNull(coord.latitude)).toBeCloseTo(52.2053);
-    expect(Option.getOrNull(coord.longitude)).toBeCloseTo(0.1218);
-    expect(coord.altitude).toEqual(Option.none());
-    expect(coord.globe).toEqual(Option.some("http://www.wikidata.org/entity/Q2"));
-  });
+  it.effect("decodes a globecoordinate value", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const coord = claimValue(Q42, "P625", "globecoordinate");
+      expect(Option.getOrNull(coord.latitude)).toBeCloseTo(52.2053);
+      expect(Option.getOrNull(coord.longitude)).toBeCloseTo(0.1218);
+      expect(coord.altitude).toEqual(Option.none());
+      expect(coord.globe).toEqual(Option.some("http://www.wikidata.org/entity/Q2"));
+    }),
+  );
 
-  it("decodes a quantity value with unit and bounds (raw decimal strings)", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const quantity = claimValue(Q42, "P2048", "quantity");
-    expect(quantity.amount).toBe("+1.96");
-    expect(quantity.unit).toEqual(Option.some("http://www.wikidata.org/entity/Q11573"));
-    expect(quantity.upperBound).toEqual(Option.some("+1.97"));
-    expect(quantity.lowerBound).toEqual(Option.some("+1.95"));
-  });
+  it.effect("decodes a quantity value with unit and bounds (raw decimal strings)", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const quantity = claimValue(Q42, "P2048", "quantity");
+      expect(quantity.amount).toBe("+1.96");
+      expect(quantity.unit).toEqual(Option.some("http://www.wikidata.org/entity/Q11573"));
+      expect(quantity.upperBound).toEqual(Option.some("+1.97"));
+      expect(quantity.lowerBound).toEqual(Option.some("+1.95"));
+    }),
+  );
 
-  it("decodes a monolingualtext value", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const text = claimValue(Q42, "P1813", "monolingualtext");
-    expect(text.text).toBe("Douglas Adams");
-    expect(text.language).toEqual(Option.some("en"));
-  });
+  it.effect("decodes a monolingualtext value", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const text = claimValue(Q42, "P1813", "monolingualtext");
+      expect(text.text).toBe("Douglas Adams");
+      expect(text.language).toEqual(Option.some("en"));
+    }),
+  );
 
-  it("splits a string datavalue by datatype: external-id vs plain string", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    // P214 (VIAF) has datatype external-id → external-id member.
-    expect(claimValue(Q42, "P214", "external-id").value).toBe("113230702");
-    // P18 (image, commonsMedia) and P856 (url) are plain string members.
-    expect(claimValue(Q42, "P18", "string").value).toBe("Douglas adams portrait cropped.jpg");
-    expect(claimValue(Q42, "P856", "string").value).toBe("https://douglasadams.com");
-  });
+  it.effect("splits a string datavalue by datatype: external-id vs plain string", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      // P214 (VIAF) has datatype external-id → external-id member.
+      expect(claimValue(Q42, "P214", "external-id").value).toBe("113230702");
+      // P18 (image, commonsMedia) and P856 (url) are plain string members.
+      expect(claimValue(Q42, "P18", "string").value).toBe("Douglas adams portrait cropped.jpg");
+      expect(claimValue(Q42, "P856", "string").value).toBe("https://douglasadams.com");
+    }),
+  );
 
-  it("decodes somevalue and novalue snaks", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    expect(Q42?.claims.P1477?.[0]?.mainsnak).toMatchObject({ _tag: "somevalue" });
-    expect(Q42?.claims.P40?.[0]?.mainsnak).toMatchObject({ _tag: "novalue" });
-  });
+  it.effect("decodes somevalue and novalue snaks", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      expect(Q42?.claims.P1477?.[0]?.mainsnak).toMatchObject({ _tag: "somevalue" });
+      expect(Q42?.claims.P40?.[0]?.mainsnak).toMatchObject({ _tag: "novalue" });
+    }),
+  );
 
-  it("degrades an unknown datatype to a typed Unknown member (never a decode failure)", async () => {
-    const { layer } = load();
-    const { Q42 } = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q42"]));
-    const unknown = claimValue(Q42, "P9999", "unknown");
-    expect(unknown.type).toEqual(Option.some("future-datatype-not-yet-modelled"));
-    // The raw payload is preserved for inspection.
-    expect(unknown.value).toEqual({ some: "shape", the: "decoder", does: "not know" });
-  });
+  it.effect("degrades an unknown datatype to a typed Unknown member (never a decode failure)", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = load();
+      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+      const unknown = claimValue(Q42, "P9999", "unknown");
+      expect(unknown.type).toEqual(Option.some("future-datatype-not-yet-modelled"));
+      // The raw payload is preserved for inspection.
+      expect(unknown.value).toEqual({ some: "shape", the: "decoder", does: "not know" });
+    }),
+  );
 });
 
 // ── Batching / 50-id chunking ────────────────────────────────────────────
 
-describe("Wikidata.getEntities — batching", () => {
-  it("validates ids before any request and fails InvalidRequest on a bad id", async () => {
-    const { urls, layer } = stubWikidata(() => ({ entities: {} }));
-    await expectFailureInstanceOf(
-      toEffect(layer, Wikidata.getEntities("www.wikidata.org", ["Q42", "not-an-id"])),
-      Core.InvalidRequest,
-    );
-    expect(urls).toEqual([]);
-  });
+layer(Core.wikimediaLayer)("Wikidata.getEntities — batching", (it) => {
+  it.effect("validates ids before any request and fails InvalidRequest on a bad id", () =>
+    Effect.gen(function* () {
+      const { urls, provideFetch } = stubWikidata(() => ({ entities: {} }));
+      assertInstanceOf(
+        yield* Effect.flip(
+          Wikidata.getEntities("www.wikidata.org", ["Q42", "not-an-id"]).pipe(provideFetch),
+        ),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    }),
+  );
 
-  it("chunks a >50-id request into batches of at most 50 and merges the results", async () => {
-    const ids = Array.from({ length: 60 }, (_, i) => `Q${i + 1}`);
-    // Echo each requested id as a minimal present entity.
-    const { urls, layer } = stubWikidata((url) => {
-      const requested = (url.searchParams.get("ids") ?? "").split("|").filter(Boolean);
-      return {
-        entities: R.fromEntries(Arr.map(requested, (id) => [id, { id, type: "item" }])),
-      };
-    });
-    const result = await run(layer, Wikidata.getEntities("www.wikidata.org", ids));
-    expect(R.keys(result)).toHaveLength(60);
-    expect(result.Q1?.id).toBe("Q1");
-    expect(result.Q60?.id).toBe("Q60");
-    // 60 ids → two requests (50 + 10).
-    expect(urls).toHaveLength(2);
-    const firstIds = new URL(urls[0] ?? "").searchParams.get("ids")?.split("|") ?? [];
-    expect(firstIds.length).toBeLessThanOrEqual(50);
-  });
+  it.effect("chunks a >50-id request into batches of at most 50 and merges the results", () =>
+    Effect.gen(function* () {
+      const ids = Array.from({ length: 60 }, (_, i) => `Q${i + 1}`);
+      // Echo each requested id as a minimal present entity.
+      const { urls, provideFetch } = stubWikidata((url) => {
+        const requested = (url.searchParams.get("ids") ?? "").split("|").filter(Boolean);
+        return {
+          entities: R.fromEntries(Arr.map(requested, (id) => [id, { id, type: "item" }])),
+        };
+      });
+      const result = yield* Wikidata.getEntities("www.wikidata.org", ids).pipe(provideFetch);
+      expect(R.keys(result)).toHaveLength(60);
+      expect(result.Q1?.id).toBe("Q1");
+      expect(result.Q60?.id).toBe("Q60");
+      // 60 ids → two requests (50 + 10).
+      expect(urls).toHaveLength(2);
+      const firstIds = new URL(urls[0] ?? "").searchParams.get("ids")?.split("|") ?? [];
+      expect(firstIds.length).toBeLessThanOrEqual(50);
+    }),
+  );
 
-  it("omits an entity Wikidata flags as missing", async () => {
-    const { layer } = stubWikidata(() => ({
-      entities: { Q1: { id: "Q1", type: "item" }, Q999999999: { id: "Q999999999", missing: "" } },
-    }));
-    const result = await run(layer, Wikidata.getEntities("www.wikidata.org", ["Q1", "Q999999999"]));
-    expect(result.Q1).toBeDefined();
-    expect(result.Q999999999).toBeUndefined();
-  });
+  it.effect("omits an entity Wikidata flags as missing", () =>
+    Effect.gen(function* () {
+      const { provideFetch } = stubWikidata(() => ({
+        entities: { Q1: { id: "Q1", type: "item" }, Q999999999: { id: "Q999999999", missing: "" } },
+      }));
+      const result = yield* Wikidata.getEntities("www.wikidata.org", ["Q1", "Q999999999"]).pipe(
+        provideFetch,
+      );
+      expect(result.Q1).toBeDefined();
+      expect(result.Q999999999).toBeUndefined();
+    }),
+  );
 });
 
 // ── wbsearchentities ─────────────────────────────────────────────────────
 
-describe("Wikidata.searchEntities", () => {
-  it("normalises hits and drops entries whose id is not a valid entity id", async () => {
-    const { urls, layer } = stubWikidata(() => ({
-      search: [
+layer(Core.wikimediaLayer)("Wikidata.searchEntities", (it) => {
+  it.effect("normalises hits and drops entries whose id is not a valid entity id", () =>
+    Effect.gen(function* () {
+      const { urls, provideFetch } = stubWikidata(() => ({
+        search: [
+          {
+            id: "Q42",
+            label: "Douglas Adams",
+            description: "English writer",
+            match: { type: "label", language: "en", text: "Douglas Adams" },
+          },
+          { id: "not-an-id", label: "junk" },
+        ],
+      }));
+      const result = yield* Wikidata.searchEntities("www.wikidata.org", "Douglas Adams").pipe(
+        provideFetch,
+      );
+      expect(result).toEqual([
         {
           id: "Q42",
-          label: "Douglas Adams",
-          description: "English writer",
-          match: { type: "label", language: "en", text: "Douglas Adams" },
+          label: Option.some("Douglas Adams"),
+          description: Option.some("English writer"),
+          matchType: Option.some("label"),
+          matchText: Option.some("Douglas Adams"),
         },
-        { id: "not-an-id", label: "junk" },
-      ],
-    }));
-    const result = await run(layer, Wikidata.searchEntities("www.wikidata.org", "Douglas Adams"));
-    expect(result).toEqual([
-      {
-        id: "Q42",
-        label: Option.some("Douglas Adams"),
-        description: Option.some("English writer"),
-        matchType: Option.some("label"),
-        matchText: Option.some("Douglas Adams"),
-      },
-    ]);
-    expect(urls[0]).toContain("action=wbsearchentities");
-    expect(urls[0]).toContain("type=item");
-  });
+      ]);
+      expect(urls[0]).toContain("action=wbsearchentities");
+      expect(urls[0]).toContain("type=item");
+    }),
+  );
 
-  it("rejects a blank query before any request", async () => {
-    const { urls, layer } = stubWikidata(() => ({}));
-    await expectFailureInstanceOf(
-      toEffect(layer, Wikidata.searchEntities("www.wikidata.org", "   ")),
-      Core.InvalidRequest,
-    );
-    expect(urls).toEqual([]);
-  });
+  it.effect("rejects a blank query before any request", () =>
+    Effect.gen(function* () {
+      const { urls, provideFetch } = stubWikidata(() => ({}));
+      assertInstanceOf(
+        yield* Effect.flip(Wikidata.searchEntities("www.wikidata.org", "   ").pipe(provideFetch)),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    }),
+  );
 
-  it("rejects a malformed language before any request", async () => {
-    const { urls, layer } = stubWikidata(() => ({}));
-    await expectFailureInstanceOf(
-      toEffect(layer, Wikidata.searchEntities("www.wikidata.org", "x", { language: "en|junk" })),
-      Core.InvalidRequest,
-    );
-    expect(urls).toEqual([]);
-  });
+  it.effect("rejects a malformed language before any request", () =>
+    Effect.gen(function* () {
+      const { urls, provideFetch } = stubWikidata(() => ({}));
+      assertInstanceOf(
+        yield* Effect.flip(
+          Wikidata.searchEntities("www.wikidata.org", "x", { language: "en|junk" }).pipe(
+            provideFetch,
+          ),
+        ),
+        Core.InvalidRequest,
+      );
+      expect(urls).toEqual([]);
+    }),
+  );
 });
