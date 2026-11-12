@@ -75,7 +75,7 @@ Every gate runs in an agent session: none needs a credential or Docker. Two thin
 
 ## Documentation surfaces
 
-`README.md` is the npm-facing landing page and API overview; `vp run docgen` renders the per-export reference from the doc comments into `api-docs/` (gitignored, not published); `CONTRIBUTING.md` carries setup, the hooks and every command with its details; this file the conventions, pitfalls, gate order and tracker rules any agent follows; `.claude/CLAUDE.md` only what is specific to Claude Code (its hooks, plugins and session notes), importing the other three; `PUBLISHING.md` the release pipeline, versioning and the one-time owner setup; `SECURITY.md` the reporting channel and supply-chain posture; decisions go in issue comments.
+`README.md` is the npm-facing landing page and API overview; `MIGRATION.md` (published) tells apps how to move across each breaking minor, and a breaking PR adds its entry there alongside its changeset; `vp run docgen` renders the per-export reference from the doc comments into `api-docs/` (gitignored, not published); `CONTRIBUTING.md` carries setup, the hooks and every command with its details; this file the conventions, pitfalls, gate order and tracker rules any agent follows; `.claude/CLAUDE.md` only what is specific to Claude Code (its hooks, plugins and session notes), importing the other three; `PUBLISHING.md` the release pipeline, versioning and the one-time owner setup; `SECURITY.md` the reporting channel and supply-chain posture; decisions go in issue comments.
 
 ## Fallow local gate
 
