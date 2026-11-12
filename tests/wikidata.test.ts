@@ -10,26 +10,23 @@
 
 import * as Struct from "effect/Struct";
 import * as P from "effect/Predicate";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { it, layer } from "@effect/vitest";
 import { assertInstanceOf } from "@effect/vitest/utils";
 import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { Core, Wikidata } from "../src/index.ts";
 import { expectDefined } from "./helpers/narrow.ts";
+import { readFixtureJson } from "./helpers/fixtures.ts";
 
 /** JSON text ↔ a JSON value, through the Schema JSON codec. */
 const Json = Schema.fromJsonString(Schema.Json);
-
-const fixture = Schema.decodeSync(Json)(
-  readFileSync(fileURLToPath(new URL("./fixtures/wikidata-q42.json", import.meta.url)), "utf8"),
-);
 
 /** A fetch stub that dispatches on the Action `action` param, recording every URL. */
 const stubWikidata = (handler: (url: URL) => Schema.Json) => {
@@ -296,121 +293,131 @@ describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
 // ── Fixture round-trip: decode → typed access ────────────────────────────
 
 /** Stubs Wikidata to serve the recorded fixture, returning the requested URLs and the fetch provider. */
-const loadFixtureStub = () => {
+const loadFixtureStub = Effect.fnUntraced(function* () {
+  const fixture = yield* readFixtureJson("wikidata-q42.json");
   const { urls, provideFetch } = stubWikidata(() => fixture);
   return { urls, provideFetch };
-};
-
-layer(Core.wikimediaLayer)("Wikidata.getEntities — recorded fixture round-trip", (it) => {
-  it.effect("decodes the item's identity, labels, descriptions, aliases, and sitelinks", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const entities = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const item = expectDefined(entities.Q42, "Q42");
-      expect(item.id).toBe("Q42");
-      expect(item.type).toEqual(Option.some("item"));
-      expect(item.labels.en).toBe("Douglas Adams");
-      expect(item.descriptions.en).toContain("science fiction");
-      expect(item.aliases.en).toContain("Douglas Noel Adams");
-      expect(item.sitelinks.enwiki?.title).toBe("Douglas Adams");
-      expect(item.sitelinks.enwiki?.badges).toEqual(["Q17437798"]);
-    }),
-  );
-
-  it.effect("decodes a wikibase-entityid main snak with rank, qualifiers, and references", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const statement = Q42?.claims.P31?.[0];
-      expect(statement?.rank).toBe("preferred");
-      const value = claimValue(Q42, "P31", "wikibase-entityid");
-      expect(value.id).toBe("Q5");
-      expect(value.entityType).toEqual(Option.some("item"));
-      // Qualifier (P805) and the date-of-birth reference are present and typed.
-      expect(statement?.qualifiers.P805?.[0]).toMatchObject({ _tag: "value" });
-      expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]).toMatchObject({
-        _tag: "value",
-      });
-    }),
-  );
-
-  it.effect("decodes a time value with precision and calendar model", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const time = claimValue(Q42, "P569", "time");
-      expect(time.time).toBe("+1952-03-11T00:00:00Z");
-      expect(time.precision).toEqual(Option.some(11));
-      expect(time.calendarModel).toEqual(Option.some("http://www.wikidata.org/entity/Q1985727"));
-    }),
-  );
-
-  it.effect("decodes a globecoordinate value", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const coord = claimValue(Q42, "P625", "globecoordinate");
-      expect(Option.getOrNull(coord.latitude)).toBeCloseTo(52.2053);
-      expect(Option.getOrNull(coord.longitude)).toBeCloseTo(0.1218);
-      expect(coord.altitude).toEqual(Option.none());
-      expect(coord.globe).toEqual(Option.some("http://www.wikidata.org/entity/Q2"));
-    }),
-  );
-
-  it.effect("decodes a quantity value with unit and bounds (raw decimal strings)", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const quantity = claimValue(Q42, "P2048", "quantity");
-      expect(quantity.amount).toBe("+1.96");
-      expect(quantity.unit).toEqual(Option.some("http://www.wikidata.org/entity/Q11573"));
-      expect(quantity.upperBound).toEqual(Option.some("+1.97"));
-      expect(quantity.lowerBound).toEqual(Option.some("+1.95"));
-    }),
-  );
-
-  it.effect("decodes a monolingualtext value", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const text = claimValue(Q42, "P1813", "monolingualtext");
-      expect(text.text).toBe("Douglas Adams");
-      expect(text.language).toEqual(Option.some("en"));
-    }),
-  );
-
-  it.effect("splits a string datavalue by datatype: external-id vs plain string", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      // P214 (VIAF) has datatype external-id → external-id member.
-      expect(claimValue(Q42, "P214", "external-id").value).toBe("113230702");
-      // P18 (image, commonsMedia) and P856 (url) are plain string members.
-      expect(claimValue(Q42, "P18", "string").value).toBe("Douglas adams portrait cropped.jpg");
-      expect(claimValue(Q42, "P856", "string").value).toBe("https://douglasadams.com");
-    }),
-  );
-
-  it.effect("decodes somevalue and novalue snaks", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      expect(Q42?.claims.P1477?.[0]?.mainsnak).toMatchObject({ _tag: "somevalue" });
-      expect(Q42?.claims.P40?.[0]?.mainsnak).toMatchObject({ _tag: "novalue" });
-    }),
-  );
-
-  it.effect("degrades an unknown datatype to a typed Unknown member (never a decode failure)", () =>
-    Effect.gen(function* () {
-      const { provideFetch } = loadFixtureStub();
-      const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
-      const unknown = claimValue(Q42, "P9999", "unknown");
-      expect(unknown.type).toEqual(Option.some("future-datatype-not-yet-modelled"));
-      // The raw payload is preserved for inspection.
-      expect(unknown.value).toEqual({ some: "shape", the: "decoder", does: "not know" });
-    }),
-  );
 });
+
+layer(Layer.merge(Core.wikimediaLayer, NodeServices.layer))(
+  "Wikidata.getEntities — recorded fixture round-trip",
+  (it) => {
+    it.effect("decodes the item's identity, labels, descriptions, aliases, and sitelinks", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const entities = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(
+          provideFetch,
+        );
+        const item = expectDefined(entities.Q42, "Q42");
+        expect(item.id).toBe("Q42");
+        expect(item.type).toEqual(Option.some("item"));
+        expect(item.labels.en).toBe("Douglas Adams");
+        expect(item.descriptions.en).toContain("science fiction");
+        expect(item.aliases.en).toContain("Douglas Noel Adams");
+        expect(item.sitelinks.enwiki?.title).toBe("Douglas Adams");
+        expect(item.sitelinks.enwiki?.badges).toEqual(["Q17437798"]);
+      }),
+    );
+
+    it.effect("decodes a wikibase-entityid main snak with rank, qualifiers, and references", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        const statement = Q42?.claims.P31?.[0];
+        expect(statement?.rank).toBe("preferred");
+        const value = claimValue(Q42, "P31", "wikibase-entityid");
+        expect(value.id).toBe("Q5");
+        expect(value.entityType).toEqual(Option.some("item"));
+        // Qualifier (P805) and the date-of-birth reference are present and typed.
+        expect(statement?.qualifiers.P805?.[0]).toMatchObject({ _tag: "value" });
+        expect(Q42?.claims.P569?.[0]?.references[0]?.snaks.P248?.[0]).toMatchObject({
+          _tag: "value",
+        });
+      }),
+    );
+
+    it.effect("decodes a time value with precision and calendar model", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        const time = claimValue(Q42, "P569", "time");
+        expect(time.time).toBe("+1952-03-11T00:00:00Z");
+        expect(time.precision).toEqual(Option.some(11));
+        expect(time.calendarModel).toEqual(Option.some("http://www.wikidata.org/entity/Q1985727"));
+      }),
+    );
+
+    it.effect("decodes a globecoordinate value", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        const coord = claimValue(Q42, "P625", "globecoordinate");
+        expect(Option.getOrNull(coord.latitude)).toBeCloseTo(52.2053);
+        expect(Option.getOrNull(coord.longitude)).toBeCloseTo(0.1218);
+        expect(coord.altitude).toEqual(Option.none());
+        expect(coord.globe).toEqual(Option.some("http://www.wikidata.org/entity/Q2"));
+      }),
+    );
+
+    it.effect("decodes a quantity value with unit and bounds (raw decimal strings)", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        const quantity = claimValue(Q42, "P2048", "quantity");
+        expect(quantity.amount).toBe("+1.96");
+        expect(quantity.unit).toEqual(Option.some("http://www.wikidata.org/entity/Q11573"));
+        expect(quantity.upperBound).toEqual(Option.some("+1.97"));
+        expect(quantity.lowerBound).toEqual(Option.some("+1.95"));
+      }),
+    );
+
+    it.effect("decodes a monolingualtext value", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        const text = claimValue(Q42, "P1813", "monolingualtext");
+        expect(text.text).toBe("Douglas Adams");
+        expect(text.language).toEqual(Option.some("en"));
+      }),
+    );
+
+    it.effect("splits a string datavalue by datatype: external-id vs plain string", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        // P214 (VIAF) has datatype external-id → external-id member.
+        expect(claimValue(Q42, "P214", "external-id").value).toBe("113230702");
+        // P18 (image, commonsMedia) and P856 (url) are plain string members.
+        expect(claimValue(Q42, "P18", "string").value).toBe("Douglas adams portrait cropped.jpg");
+        expect(claimValue(Q42, "P856", "string").value).toBe("https://douglasadams.com");
+      }),
+    );
+
+    it.effect("decodes somevalue and novalue snaks", () =>
+      Effect.gen(function* () {
+        const { provideFetch } = yield* loadFixtureStub();
+        const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(provideFetch);
+        expect(Q42?.claims.P1477?.[0]?.mainsnak).toMatchObject({ _tag: "somevalue" });
+        expect(Q42?.claims.P40?.[0]?.mainsnak).toMatchObject({ _tag: "novalue" });
+      }),
+    );
+
+    it.effect(
+      "degrades an unknown datatype to a typed Unknown member (never a decode failure)",
+      () =>
+        Effect.gen(function* () {
+          const { provideFetch } = yield* loadFixtureStub();
+          const { Q42 } = yield* Wikidata.getEntities("www.wikidata.org", ["Q42"]).pipe(
+            provideFetch,
+          );
+          const unknown = claimValue(Q42, "P9999", "unknown");
+          expect(unknown.type).toEqual(Option.some("future-datatype-not-yet-modelled"));
+          // The raw payload is preserved for inspection.
+          expect(unknown.value).toEqual({ some: "shape", the: "decoder", does: "not know" });
+        }),
+    );
+  },
+);
 
 // ── Batching / 50-id chunking ────────────────────────────────────────────
 

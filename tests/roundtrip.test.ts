@@ -13,13 +13,16 @@
  * @module tests/roundtrip
  */
 
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Struct from "effect/Struct";
-import { readFileSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Order from "effect/Order";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import { type Node, parse, serialize, serializeNode, walk } from "../src/wikitext/index.ts";
+import { readFixture, readFixtureNames } from "./helpers/fixtures.ts";
 
 /** `JSON.stringify` through the `Schema` JSON boundary (encoding `Unknown` is the identity). */
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -28,10 +31,11 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const times = <A>(n: number, f: (i: number) => A): ReadonlyArray<A> =>
   n <= 0 ? [] : Arr.makeBy(n, f);
 
-const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
-const fixtures = readdirSync(fixturesDir)
-  .filter((f) => f.endsWith(".txt"))
-  .map((f) => ({ name: f, text: readFileSync(fixturesDir + f, "utf8") }));
+/**
+ * The recorded wikitext fixtures, named here so each gets its own tests; the
+ * first test below fails if `tests/fixtures/` holds a `.txt` this list lacks.
+ */
+const FIXTURES = ["ada-lovelace.txt", "pathological.txt", "tables-and-autolinks.txt"] as const;
 
 /** Asserts `serialize(node) === source.slice(span)` for every node, recursively. */
 function assertSpanFidelity(source: string, doc: ReturnType<typeof parse>): void {
@@ -43,30 +47,41 @@ function assertSpanFidelity(source: string, doc: ReturnType<typeof parse>): void
   });
 }
 
-describe("corpus round-trip", () => {
-  it("has fixtures to test", () => {
-    expect(fixtures.length).toBeGreaterThan(0);
-  });
+layer(NodeServices.layer)("corpus round-trip", (it) => {
+  it.effect("tests every .txt fixture", () =>
+    Effect.gen(function* () {
+      expect(Arr.sort(yield* readFixtureNames(".txt"), Order.String)).toEqual([...FIXTURES]);
+    }),
+  );
 
-  Arr.forEach(fixtures, ({ name, text }) => {
-    it(`round-trips ${name} byte-identically`, () => {
-      const doc = parse(text);
-      expect(serialize(doc)).toBe(text);
-    });
+  Arr.forEach(FIXTURES, (name) => {
+    it.effect(`round-trips ${name} byte-identically`, () =>
+      Effect.gen(function* () {
+        const text = yield* readFixture(name);
+        const doc = parse(text);
+        expect(serialize(doc)).toBe(text);
+      }),
+    );
 
-    it(`preserves span fidelity for every node in ${name}`, () => {
-      const doc = parse(text);
-      assertSpanFidelity(text, doc);
-    });
+    it.effect(`preserves span fidelity for every node in ${name}`, () =>
+      Effect.gen(function* () {
+        const text = yield* readFixture(name);
+        const doc = parse(text);
+        assertSpanFidelity(text, doc);
+      }),
+    );
 
-    it(`tiles ${name} contiguously with no gaps`, () => {
-      const doc = parse(text);
-      const cursor = Arr.reduce(doc.children, 0, (start, node) => {
-        expect(node.span.start).toBe(start);
-        return node.span.end;
-      });
-      expect(cursor).toBe(text.length);
-    });
+    it.effect(`tiles ${name} contiguously with no gaps`, () =>
+      Effect.gen(function* () {
+        const text = yield* readFixture(name);
+        const doc = parse(text);
+        const cursor = Arr.reduce(doc.children, 0, (start, node) => {
+          expect(node.span.start).toBe(start);
+          return node.span.end;
+        });
+        expect(cursor).toBe(text.length);
+      }),
+    );
   });
 });
 

@@ -5,13 +5,14 @@
  * @module tests/infobox
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import { expect } from "vite-plus/test";
 import {
   filter,
   type Infobox,
@@ -22,9 +23,7 @@ import {
   serializeNodes,
   templateName,
 } from "../src/wikitext/index.ts";
-
-const fixture = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** The value of `option`, failing the test when it is `None`. */
 const some = <A>(option: Option.Option<A>, what: string): A =>
@@ -38,22 +37,28 @@ const only = (boxes: readonly Infobox[]): Infobox => {
   return some(Arr.head(boxes), "infobox");
 };
 
-describe("infoboxes", () => {
-  it("reads the fixture's Infobox person with fragment values that keep links and templates", () => {
-    const doc = parse(fixture("ada-lovelace.txt"));
-    const box = only(infoboxes(doc));
-    expect(box.name).toBe("Infobox person");
-    expect(box.type).toEqual(Option.some("person"));
-    expect(HashMap.size(box.fields)).toBe(7);
-    expect(field(box, "name").text).toBe("Ada Lovelace");
-    const place = field(box, "birth_place");
-    expect(serializeNodes(place.value)).toBe("[[London]], England");
-    expect(place.text).toBe("London, England");
-    expect(filter(place.value, (node) => P.isTagged(node, "Wikilink"))).toHaveLength(1);
-    const born = field(box, "birth_date");
-    const date = some(Arr.head(born.value), "birth date value");
-    expect(P.isTagged(date, "Template") ? templateName(date) : "not a template").toBe("birth date");
-  });
+layer(NodeServices.layer)("infoboxes", (it) => {
+  it.effect(
+    "reads the fixture's Infobox person with fragment values that keep links and templates",
+    () =>
+      Effect.gen(function* () {
+        const doc = parse(yield* readFixture("ada-lovelace.txt"));
+        const box = only(infoboxes(doc));
+        expect(box.name).toBe("Infobox person");
+        expect(box.type).toEqual(Option.some("person"));
+        expect(HashMap.size(box.fields)).toBe(7);
+        expect(field(box, "name").text).toBe("Ada Lovelace");
+        const place = field(box, "birth_place");
+        expect(serializeNodes(place.value)).toBe("[[London]], England");
+        expect(place.text).toBe("London, England");
+        expect(filter(place.value, (node) => P.isTagged(node, "Wikilink"))).toHaveLength(1);
+        const born = field(box, "birth_date");
+        const date = some(Arr.head(born.value), "birth date value");
+        expect(P.isTagged(date, "Template") ? templateName(date) : "not a template").toBe(
+          "birth date",
+        );
+      }),
+  );
 
   it("keeps the template's own nodes, narrowing only the text at a value's edges", () => {
     const doc = parse("{{Infobox|a=  [[X]] y  \n|b=\n  {{t}}\n}}");

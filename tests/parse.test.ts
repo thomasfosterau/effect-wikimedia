@@ -8,11 +8,12 @@
  */
 
 import * as Struct from "effect/Struct";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import { layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
 import { firstNode, isNode } from "./helpers/nodes.ts";
 import {
@@ -28,6 +29,7 @@ import {
   walk,
 } from "../src/wikitext/index.ts";
 import { serializeNodes } from "../src/wikitext/index.ts";
+import { readFixture } from "./helpers/fixtures.ts";
 
 /** The single top-level node of `src`, asserted to be tag `T`. */
 function only<T extends Node["_tag"]>(src: string, tag: T): Extract<Node, { _tag: T }> {
@@ -801,32 +803,41 @@ describe("openers closed only at the page end (#179)", () => {
   });
 });
 
-describe("regression: existing vocabulary is unaffected by tables/autolink (issue #1287)", () => {
-  const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
-  const ada = readFileSync(`${fixturesDir}ada-lovelace.txt`, "utf8");
+const ada = readFixture("ada-lovelace.txt");
 
-  it("still round-trips a real article with no tables or bare urls, byte-identically", () => {
-    expect(serialize(parse(ada))).toBe(ada);
-  });
+layer(NodeServices.layer)(
+  "regression: existing vocabulary is unaffected by tables/autolink (issue #1287)",
+  (it) => {
+    it.effect(
+      "still round-trips a real article with no tables or bare urls, byte-identically",
+      () =>
+        Effect.gen(function* () {
+          const source = yield* ada;
+          expect(serialize(parse(source))).toBe(source);
+        }),
+    );
 
-  it("introduces no Table or AutoLink nodes into content that has neither", () => {
-    const doc = parse(ada);
-    expect(filter(doc, P.or(P.isTagged("Table"), P.isTagged("AutoLink")))).toHaveLength(0);
-  });
+    it.effect("introduces no Table or AutoLink nodes into content that has neither", () =>
+      Effect.gen(function* () {
+        const doc = parse(yield* ada);
+        expect(filter(doc, P.or(P.isTagged("Table"), P.isTagged("AutoLink")))).toHaveLength(0);
+      }),
+    );
 
-  it("does not mistake ordinary prose words starting with h/H for a url", () => {
-    const src = "History, Hello, high hopes, and Http (no protocol) stay ordinary text.";
-    const doc = parse(src);
-    expect(filter(doc, P.isTagged("AutoLink"))).toHaveLength(0);
-    expect(serialize(doc)).toBe(src);
-  });
+    it("does not mistake ordinary prose words starting with h/H for a url", () => {
+      const src = "History, Hello, high hopes, and Http (no protocol) stay ordinary text.";
+      const doc = parse(src);
+      expect(filter(doc, P.isTagged("AutoLink"))).toHaveLength(0);
+      expect(serialize(doc)).toBe(src);
+    });
 
-  it("does not mistake a template/argument/link kitchen sink for table syntax", () => {
-    const src =
-      "{{Infobox|a|b=c}} {{{arg|def}}} [[Wikilink|label]] [https://example.org ext] " +
-      "== Heading ==\n'''bold''' ''italic'' <ref>cite</ref> &nbsp; <!-- c -->";
-    const doc = parse(src);
-    expect(filter(doc, P.or(P.isTagged("Table"), P.isTagged("AutoLink")))).toHaveLength(0);
-    expect(serialize(doc)).toBe(src);
-  });
-});
+    it("does not mistake a template/argument/link kitchen sink for table syntax", () => {
+      const src =
+        "{{Infobox|a|b=c}} {{{arg|def}}} [[Wikilink|label]] [https://example.org ext] " +
+        "== Heading ==\n'''bold''' ''italic'' <ref>cite</ref> &nbsp; <!-- c -->";
+      const doc = parse(src);
+      expect(filter(doc, P.or(P.isTagged("Table"), P.isTagged("AutoLink")))).toHaveLength(0);
+      expect(serialize(doc)).toBe(src);
+    });
+  },
+);

@@ -9,9 +9,8 @@
  */
 
 import * as Struct from "effect/Struct";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { it } from "@effect/vitest";
+import { it, layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -20,10 +19,9 @@ import * as P from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { Dumps } from "../../src/index.ts";
 import { expectTagged } from "../helpers/narrow.ts";
+import { readFixture } from "../helpers/fixtures.ts";
 
-const fixtureXml = readFileSync(
-  fileURLToPath(new URL("../fixtures/dumps/pages-slice.xml", import.meta.url)),
-);
+const fixtureXml = readFixture("dumps/pages-slice.xml");
 
 const bytesOf = (text: string): Stream.Stream<Uint8Array> =>
   Stream.make(new TextEncoder().encode(text));
@@ -246,10 +244,10 @@ const multiSlot = (extraSlotText: string) =>
 const pageXml = (id: number, head: string, revision = `<revision><id>${id}0</id></revision>`) =>
   `<page><title>P${id}</title><ns>0</ns><id>${id}</id>${head}${revision}</page>`;
 
-describe("pageRecords pipeline", () => {
+layer(NodeServices.layer)("pageRecords pipeline", (it) => {
   it.effect("round-trips page/revision metadata and degrades the malformed revision", () =>
     Effect.gen(function* () {
-      const records = yield* collect(Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))));
+      const records = yield* collect(Dumps.pageRecords(bytesOf(yield* fixtureXml)));
       expect(records.length).toBe(3);
 
       const hits = records.filter(P.isTagged("revision"));
@@ -283,7 +281,7 @@ describe("pageRecords pipeline", () => {
 
   it.effect("is chunk-boundary safe: byte-by-byte input yields the same records", () =>
     Effect.gen(function* () {
-      const text = fixtureXml.toString("utf8");
+      const text = yield* fixtureXml;
       const whole = yield* collect(Dumps.pageRecords(bytesOf(text)));
       const chunked = yield* collect(Dumps.pageRecords(perByte(text)));
       expect(chunked).toEqual(whole);
@@ -308,9 +306,7 @@ describe("pageRecords pipeline", () => {
 
   it.effect("incrementalRecords decodes the same schema", () =>
     Effect.gen(function* () {
-      const records = yield* collect(
-        Dumps.incrementalRecords(bytesOf(fixtureXml.toString("utf8"))),
-      );
+      const records = yield* collect(Dumps.incrementalRecords(bytesOf(yield* fixtureXml)));
       expect(records.length).toBe(3);
     }),
   );
@@ -497,7 +493,7 @@ describe("pageRecords pipeline", () => {
   it.effect("onlyRevisions drops the error elements", () =>
     Effect.gen(function* () {
       const revs = yield* Stream.runCount(
-        Dumps.pageRecords(bytesOf(fixtureXml.toString("utf8"))).pipe(Dumps.onlyRevisions),
+        Dumps.pageRecords(bytesOf(yield* fixtureXml)).pipe(Dumps.onlyRevisions),
       );
       expect(revs).toBe(2);
     }),

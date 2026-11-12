@@ -9,30 +9,24 @@
  * @module tests/dumps/entities
  */
 
-import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { fileURLToPath } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import { createContext, runInContext } from "node:vm";
-import { createGzip, gzipSync } from "node:zlib";
-import { it } from "@effect/vitest";
-import { afterAll, beforeAll, describe, expect } from "vite-plus/test";
+import { it, layer } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Iterable from "effect/Iterable";
+import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Dumps, Wikidata } from "../../src/index.ts";
 import { expectTagged } from "../helpers/narrow.ts";
-
-const fixtureNdjson = readFileSync(
-  fileURLToPath(new URL("../fixtures/dumps/entities-slice.ndjson", import.meta.url)),
-);
+import { gzip, readFixtureBytes, TempDir, tempPath, writeTestFile } from "../helpers/fixtures.ts";
 
 const BIG_ITEM_COUNT = 300_000;
 
@@ -52,22 +46,36 @@ const decodedRecord = (line: string, lineNumber: number): Dumps.EntityRecord =>
     onSome: (record) => record,
   });
 
-let tmp: string;
-let slicePath: string;
-let bigPath: string;
-let bigUncompressedBytes: number;
+/** The gzipped entity slice, written to the suite's temporary directory. */
+class SliceDump extends Context.Service<SliceDump, { readonly path: string }>()(
+  "effect-wikimedia/tests/SliceDump",
+) {
+  static readonly layer = Layer.effect(SliceDump)(
+    Effect.gen(function* () {
+      const path = yield* tempPath("slice.json.gz");
+      const ndjson = yield* readFixtureBytes("dumps/entities-slice.ndjson");
+      yield* writeTestFile(path, yield* gzip(ndjson));
+      return { path };
+    }),
+  );
+}
 
-beforeAll(async () => {
-  tmp = mkdtempSync(join(tmpdir(), "dumps-entities-"));
-  slicePath = join(tmp, "slice.json.gz");
-  writeFileSync(slicePath, gzipSync(fixtureNdjson));
-  // Generate the large dump here (not inside the timed test) so the
-  // constant-memory assertion window covers only the streaming.
-  bigPath = join(tmp, "big.json.gz");
-  bigUncompressedBytes = await writeBigDump(bigPath, BIG_ITEM_COUNT);
-}, 120_000);
+/** The large gzipped dump and its uncompressed size, generated before the timed test. */
+class BigDump extends Context.Service<
+  BigDump,
+  { readonly path: string; readonly uncompressedBytes: number }
+>()("effect-wikimedia/tests/BigDump") {
+  static readonly layer = Layer.effect(BigDump)(
+    Effect.gen(function* () {
+      // Generated here (not inside the timed test) so the constant-memory
+      // assertion window covers only the streaming.
+      const path = yield* tempPath("big.json.gz");
+      return { path, uncompressedBytes: yield* writeBigDump(path, BIG_ITEM_COUNT) };
+    }),
+  );
+}
 
-afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+const platform = Layer.provideMerge(TempDir.layer("dumps-entities-"), NodeServices.layer);
 
 /** Collects a stream to an array under the test runtime. */
 const collect = <A, E>(stream: Stream.Stream<A, E>): Effect.Effect<ReadonlyArray<A>, E> =>
@@ -186,7 +194,7 @@ describe("predicates", () => {
 
 // ── The pipeline over the fixture ────────────────────────────────────────
 
-describe("entityRecords pipeline", () => {
+layer(Layer.provideMerge(SliceDump.layer, platform))("entityRecords pipeline", (it) => {
   it.effect("keeps streaming past a line whose nested containers are the wrong kind (#147)", () =>
     Effect.gen(function* () {
       const lines = [
@@ -210,7 +218,8 @@ describe("entityRecords pipeline", () => {
 
   it.effect("decodes the fixture: 5 entities + 2 error elements, in line order", () =>
     Effect.gen(function* () {
-      const records = yield* collect(Dumps.entityRecords(Dumps.fromFile(slicePath)));
+      const slice = yield* SliceDump;
+      const records = yield* collect(Dumps.entityRecords(Dumps.fromFile(slice.path)));
       const entities = records.filter(P.isTagged("entity"));
       const errors = records.filter(isLineError);
       expect(entities.length).toBe(5);
@@ -221,8 +230,9 @@ describe("entityRecords pipeline", () => {
 
   it.effect("byType keeps only items (4)", () =>
     Effect.gen(function* () {
+      const slice = yield* SliceDump;
       const n = yield* count(
-        Dumps.fromFile(slicePath).pipe(
+        Dumps.fromFile(slice.path).pipe(
           Dumps.entityRecords,
           Dumps.onlyEntities,
           Dumps.byType("item"),
@@ -234,8 +244,9 @@ describe("entityRecords pipeline", () => {
 
   it.effect("withClaim P569 keeps the 2 items with a date-of-birth claim", () =>
     Effect.gen(function* () {
+      const slice = yield* SliceDump;
       const n = yield* count(
-        Dumps.fromFile(slicePath).pipe(
+        Dumps.fromFile(slice.path).pipe(
           Dumps.entityRecords,
           Dumps.onlyEntities,
           Dumps.withClaim("P569"),
@@ -247,8 +258,9 @@ describe("entityRecords pipeline", () => {
 
   it.effect("withSitelink enwiki keeps the 1 item with an enwiki sitelink", () =>
     Effect.gen(function* () {
+      const slice = yield* SliceDump;
       const n = yield* count(
-        Dumps.fromFile(slicePath).pipe(
+        Dumps.fromFile(slice.path).pipe(
           Dumps.entityRecords,
           Dumps.onlyEntities,
           Dumps.withSitelink("enwiki"),
@@ -269,7 +281,7 @@ const BIG_ITEM_LINE =
  * line so the *fixture build* never buffers the whole dump either). Returns the
  * uncompressed byte size.
  */
-async function writeBigDump(path: string, n: number): Promise<number> {
+const writeBigDump = Effect.fn("writeBigDump")(function* (path: string, n: number) {
   // Written in ~256 KB blocks (not per line) — keeps the fixture build fast
   // and low-memory, ~200x faster than yielding 300k tiny strings. Every line
   // but the last carries the array's trailing comma.
@@ -287,13 +299,18 @@ async function writeBigDump(path: string, n: number): Promise<number> {
     bytes += Buffer.byteLength(text);
     return text;
   };
-  await pipeline(
-    Readable.from(Iterable.makeBy(block, { length: blockCount })),
-    createGzip(),
-    createWriteStream(path),
+  const fs = yield* FileSystem.FileSystem;
+  const gzipped = Stream.toReadableStream(
+    Stream.fromIterable(Iterable.makeBy(block, { length: blockCount })).pipe(
+      Stream.encodeText,
+      Stream.map((chunk) => new Uint8Array(chunk)),
+    ),
+  ).pipeThrough(new CompressionStream("gzip"));
+  yield* Stream.fromReadableStream({ evaluate: () => gzipped, onError: String }).pipe(
+    Stream.run(fs.sink(path)),
   );
   return bytes;
-}
+});
 
 /**
  * A full, synchronous garbage collection, for measuring *retained* memory.
@@ -322,7 +339,7 @@ interface Retained {
 /**
  * Heap and off-heap bytes still reachable after full collections. Two, because
  * some native memory is only released on the second: after one, `external`
- * still counts 10-17 MB left over from the gzip stream `beforeAll` wrote the
+ * still counts 10-17 MB left over from the gzip stream the layer wrote the
  * dump through, which the next collection frees. `external` includes
  * `arrayBuffers` (every `Buffer` and `Uint8Array`), so it alone is the
  * off-heap figure.
@@ -340,75 +357,79 @@ const SAMPLE_EVERY = 10_000;
 /** Converts a byte count to megabytes. */
 const toMegabytes = (bytes: number) => bytes / 1_000_000;
 
-describe("constant memory", () => {
-  // `heapUsed` read without a collection counts garbage V8 hasn't collected
-  // yet, so a peak of raw samples measures V8's GC heuristics (how far it has
-  // grown the young generation, when its next full collection is due), not
-  // the pipeline (#112). With a 64 MB semi-space the old raw-peak version of
-  // this test read 43 MB while the pipeline retained under 1 MB. Instead,
-  // sample memory retained after a full collection, from inside the stream,
-  // every `SAMPLE_EVERY` items: whatever the pipeline holds at that point
-  // (buffered lines, chunks, decoded items) is reachable, and nothing else
-  // is counted.
-  it.effect(
-    "streams a dump larger than the heap ceiling without buffering it",
-    () =>
-      Effect.gen(function* () {
-        // The ~300k-item dump (~57 MB uncompressed) was generated in beforeAll,
-        // so only the streaming is measured here.
-        expect(bigUncompressedBytes).toBeGreaterThan(45_000_000);
+layer(Layer.provideMerge(BigDump.layer, platform), { timeout: "120 seconds" })(
+  "constant memory",
+  (it) => {
+    // `heapUsed` read without a collection counts garbage V8 hasn't collected
+    // yet, so a peak of raw samples measures V8's GC heuristics (how far it has
+    // grown the young generation, when its next full collection is due), not
+    // the pipeline (#112). With a 64 MB semi-space the old raw-peak version of
+    // this test read 43 MB while the pipeline retained under 1 MB. Instead,
+    // sample memory retained after a full collection, from inside the stream,
+    // every `SAMPLE_EVERY` items: whatever the pipeline holds at that point
+    // (buffered lines, chunks, decoded items) is reachable, and nothing else
+    // is counted.
+    it.effect(
+      "streams a dump larger than the heap ceiling without buffering it",
+      () =>
+        Effect.gen(function* () {
+          const big = yield* BigDump;
+          // The ~300k-item dump (~57 MB uncompressed) was generated when the layer was built,
+          // so only the streaming is measured here.
+          expect(big.uncompressedBytes).toBeGreaterThan(45_000_000);
 
-        const base = retained();
-        const samples: Array<Retained> = [];
-        let seen = 0;
+          const base = retained();
+          const samples: Array<Retained> = [];
+          let seen = 0;
 
-        const n = yield* count(
-          Dumps.fromFile(bigPath).pipe(
-            Dumps.entityRecords,
-            Dumps.onlyEntities,
-            Dumps.withClaim("P569"),
-            Stream.tap(() =>
-              Effect.sync(() => {
-                seen += 1;
-                if (seen % SAMPLE_EVERY === 0) {
-                  const r = retained();
-                  samples.push({ heap: r.heap - base.heap, offHeap: r.offHeap - base.offHeap });
-                }
-              }),
+          const n = yield* count(
+            Dumps.fromFile(big.path).pipe(
+              Dumps.entityRecords,
+              Dumps.onlyEntities,
+              Dumps.withClaim("P569"),
+              Stream.tap(() =>
+                Effect.sync(() => {
+                  seen += 1;
+                  if (seen % SAMPLE_EVERY === 0) {
+                    const r = retained();
+                    samples.push({ heap: r.heap - base.heap, offHeap: r.offHeap - base.offHeap });
+                  }
+                }),
+              ),
             ),
-          ),
-        );
+          );
 
-        expect(n).toBe(BIG_ITEM_COUNT);
-        expect(samples).toHaveLength(BIG_ITEM_COUNT / SAMPLE_EVERY);
-        const peakHeapMb = toMegabytes(Math.max(...samples.map((s) => s.heap)));
-        const peakOffHeapMb = toMegabytes(Math.max(...samples.map((s) => s.offHeap)));
-        // Growth, on- and off-heap, from the first sample (pipeline warmed up,
-        // 10k items in) to the last (the whole dump read): a pipeline that holds
-        // one line at a time retains the same at both, while one that keeps
-        // something per line grows with the number of lines read in between.
-        const [first] = samples;
-        const last = samples.at(-1);
-        const growthMb =
-          first && last
-            ? toMegabytes(last.heap + last.offHeap - first.heap - first.offHeap)
-            : Number.NaN;
+          expect(n).toBe(BIG_ITEM_COUNT);
+          expect(samples).toHaveLength(BIG_ITEM_COUNT / SAMPLE_EVERY);
+          const peakHeapMb = toMegabytes(Math.max(...samples.map((s) => s.heap)));
+          const peakOffHeapMb = toMegabytes(Math.max(...samples.map((s) => s.offHeap)));
+          // Growth, on- and off-heap, from the first sample (pipeline warmed up,
+          // 10k items in) to the last (the whole dump read): a pipeline that holds
+          // one line at a time retains the same at both, while one that keeps
+          // something per line grows with the number of lines read in between.
+          const [first] = samples;
+          const last = samples.at(-1);
+          const growthMb =
+            first && last
+              ? toMegabytes(last.heap + last.offHeap - first.heap - first.offHeap)
+              : Number.NaN;
 
-        // Retained working set is one line at a time (observed: heap and off-heap
-        // each under 1 MB, growth within about 0.1 MB, with or without coverage).
-        // The 40 MB ceiling sits below the ~57 MB uncompressed dump, so a
-        // regression that kept the file, on- or off-heap, would blow it; the growth
-        // bound catches a leak too small to reach the ceiling. Observed growth is
-        // about -0.1 to -0.02 MB (Node 20-26), so the 2 MB bound is ~20x the
-        // largest drift, and still fails a pipeline that keeps one number per line
-        // (~2.9 MB over the 290k lines between the first and last samples). (The
-        // stronger proof, a 600 MB dump completing under a hard
-        // `--max-old-space-size=250` cap, is documented in the PR, not run in CI,
-        // to keep this suite fast.)
-        expect(peakHeapMb).toBeLessThan(40);
-        expect(peakOffHeapMb).toBeLessThan(40);
-        expect(growthMb).toBeLessThan(2);
-      }),
-    120_000,
-  );
-});
+          // Retained working set is one line at a time (observed: heap and off-heap
+          // each under 1 MB, growth within about 0.1 MB, with or without coverage).
+          // The 40 MB ceiling sits below the ~57 MB uncompressed dump, so a
+          // regression that kept the file, on- or off-heap, would blow it; the growth
+          // bound catches a leak too small to reach the ceiling. Observed growth is
+          // about -0.1 to -0.02 MB (Node 20-26), so the 2 MB bound is ~20x the
+          // largest drift, and still fails a pipeline that keeps one number per line
+          // (~2.9 MB over the 290k lines between the first and last samples). (The
+          // stronger proof, a 600 MB dump completing under a hard
+          // `--max-old-space-size=250` cap, is documented in the PR, not run in CI,
+          // to keep this suite fast.)
+          expect(peakHeapMb).toBeLessThan(40);
+          expect(peakOffHeapMb).toBeLessThan(40);
+          expect(growthMb).toBeLessThan(2);
+        }),
+      120_000,
+    );
+  },
+);
