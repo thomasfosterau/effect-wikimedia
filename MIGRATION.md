@@ -80,6 +80,22 @@ Wire-shape schemas (`*Response`) keep `undefined` for absent JSON keys. Only the
 - `WikidataLookup.enrich` succeeds with `Option<WikidataFacts>`.
 - The stored fact shapes (`WikidataFact`, `DateFact.precision` / `calendar`) still use `null`: they are JSON you persist.
 
+**Wikidata**
+
+- `parseItemId`, `parsePropertyId`, `parseLexemeId` and `parseEntityId` return `Option` of the branded id.
+- `decodeEntity`, `normaliseItem`, `normaliseStatement` and `normaliseSnak` return `Option`.
+- `normaliseDataValue` takes the datatype as `Option<string>`.
+- Model fields that are now `Option`s:
+  - `WikidataItem.type`, `Statement.id`, `Reference.hash` and each snak's `datatype`.
+  - The datavalue members' metadata:
+    - `WikibaseEntityIdValue.entityType`.
+    - `TimeValue`'s `precision`, `calendarModel`, `timezone`, `before` and `after`.
+    - `GlobeCoordinateValue`'s `latitude`, `longitude`, `altitude`, `precision` and `globe`.
+    - `QuantityValue`'s `unit`, `upperBound` and `lowerBound`.
+    - `MonolingualTextValue.language` and `UnknownValue.type`.
+  - `SearchHit`'s `label`, `description`, `matchType` and `matchText`.
+- `getEntities` still resolves to a record keyed by id, so absence there is still "no key".
+
 **Wikitext**
 
 - `paramName`, `getParam` and `redirectTarget` return `Option<string>`.
