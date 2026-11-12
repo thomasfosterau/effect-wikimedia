@@ -6,7 +6,7 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 1. **Land changesets.** Every change that should appear in the changelog ships with a changeset — a markdown file in `.changeset/` created by `pnpm changeset` (pick a bump type). Changes that don't affect the published package (docs, CI, tooling) need no changeset. Preview what is pending with `vp exec changeset status`.
 
-2. **Version Packages PR (automatic).** On every push to `trunk`, the Release workflow runs `pnpm run version` (`changeset version && vp fmt`): it consumes the pending changesets, bumps `package.json`, and writes `CHANGELOG.md` on the `changeset-release/trunk` branch, then opens (or updates) a **"chore: version packages"** PR. Review it like any other PR.
+2. **Version Packages PR (automatic).** On every push to `trunk`, the Release workflow runs `pnpm run version` (`changeset version && vp fmt`): it consumes the pending changesets, bumps `package.json`, and writes `CHANGELOG.md` on the `changeset-release/trunk` branch, then opens (or updates) a **"chore: version packages"** PR and assigns the owner to it (the workflow's `GITHUB_TOKEN` opens it, so it is not in the owner's name; Dependabot assigns its own PRs through `.github/dependabot.yml`). Review it like any other PR.
 
    Changesets v3 formats the changelogs it writes with whatever formatter it detects, and it detects the `oxfmt` shim that Vite+ installs whenever `node_modules/oxfmt` exists (a hoisted install, as in the other library repositories); that shim only serves editors and exits non-zero when run directly. So `.changeset/config.json` sets `"format": false` and the `version` script formats with `vp fmt` itself.
 
