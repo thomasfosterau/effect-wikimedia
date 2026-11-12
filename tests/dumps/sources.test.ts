@@ -73,6 +73,9 @@ const decodeUtf8 = (bytes: ReadonlyArray<Uint8Array>): string =>
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A callback that does nothing, the placeholder a deferred resolver holds until it is assigned. */
+const noop = (): void => undefined;
+
 /** The failure a fake stage, source or fetch body raises; its `message` is what a test asserts on. */
 class FakeFailure extends Schema.TaggedError<FakeFailure>()("FakeFailure", {
   message: Schema.String,
@@ -188,6 +191,18 @@ describe("fromFile", () => {
   );
 });
 
+/**
+ * A stage that errors in a later tick, after its output has ended, once the
+ * stream has completed and nothing listens any more (#139).
+ */
+const lateErroringStage = (): PassThrough => {
+  const stage = new PassThrough();
+  stage.once("end", () =>
+    setImmediate(() => stage.emit("error", new FakeFailure({ message: "late error" }))),
+  );
+  return stage;
+};
+
 describe("decompression stages", () => {
   it.live("gunzip stage decompresses a byte source that is not a file", () =>
     Effect.gen(function* () {
@@ -208,16 +223,6 @@ describe("decompression stages", () => {
       expect(decodeUtf8(bytes)).toBe(DUMP);
     }),
   );
-
-  // A stage that errors in a later tick, after its output has ended, once the
-  // stream has completed and nothing listens any more (#139).
-  const lateErroringStage = (): PassThrough => {
-    const stage = new PassThrough();
-    stage.once("end", () =>
-      setImmediate(() => stage.emit("error", new FakeFailure({ message: "late error" }))),
-    );
-    return stage;
-  };
 
   it.live("survives a decompressWith stage that errors after its output ended", () =>
     withoutUncaught(
@@ -252,6 +257,39 @@ const SLICE = readFileSync(fixturePath("entities-slice.ndjson"), "utf8");
 /** Whether a classic `through` stream, which has no `destroyed`, has been destroyed. */
 const throughDestroyed = (stream: LegacyStream & { readable: boolean; writable: boolean }) =>
   !stream.readable && !stream.writable;
+
+/**
+ * A hand-built classic duplex: a legacy `Stream` with the given `write`,
+ * which keeps none of the streams2 state (`_readableState` /
+ * `_writableState`) the adapter checks for, as `unbzip2-stream`'s keeps
+ * none. Its `destroyed` flag and empty async iterator are only there to
+ * meet {@link Dumps.NodeDuplexLike}: nothing iterates a stage.
+ */
+const classicStream = (
+  write: (this: LegacyStream) => void,
+): LegacyStream & { readable: boolean; writable: boolean } & Dumps.NodeDuplexLike => {
+  const stream = Object.assign(new LegacyStream(), {
+    readable: true,
+    writable: true,
+    destroyed: false,
+    write,
+    end: () => undefined,
+    pause: () => undefined,
+    resume: () => undefined,
+    destroy: () => {
+      stream.readable = stream.writable = false;
+      stream.destroyed = true;
+      stream.emit("close");
+    },
+    [Symbol.asyncIterator]: () => Readable.from([])[Symbol.asyncIterator](),
+  });
+  return stream;
+};
+
+/** A classic stage's `write`, which throws as `unbzip2-stream`'s does on corrupt input. */
+const explodingWrite = (): never => {
+  throw new FakeFailure({ message: "write exploded" });
+};
 
 describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
   // `unbzip2-stream` returns a classic `through` stream: no `read()`, and
@@ -367,39 +405,6 @@ describe("bzip2 through unbzip2-stream, a classic stream (#128)", () => {
       );
     }),
   );
-
-  /**
-   * A hand-built classic duplex: a legacy `Stream` with the given `write`,
-   * which keeps none of the streams2 state (`_readableState` /
-   * `_writableState`) the adapter checks for, as `unbzip2-stream`'s keeps
-   * none. Its `destroyed` flag and empty async iterator are only there to
-   * meet {@link Dumps.NodeDuplexLike}: nothing iterates a stage.
-   */
-  const classicStream = (
-    write: (this: LegacyStream) => void,
-  ): LegacyStream & { readable: boolean; writable: boolean } & Dumps.NodeDuplexLike => {
-    const stream = Object.assign(new LegacyStream(), {
-      readable: true,
-      writable: true,
-      destroyed: false,
-      write,
-      end: () => undefined,
-      pause: () => undefined,
-      resume: () => undefined,
-      destroy: () => {
-        stream.readable = stream.writable = false;
-        stream.destroyed = true;
-        stream.emit("close");
-      },
-      [Symbol.asyncIterator]: () => Readable.from([])[Symbol.asyncIterator](),
-    });
-    return stream;
-  };
-
-  /** A classic stage's `write`, which throws as `unbzip2-stream`'s does on corrupt input. */
-  const explodingWrite = (): never => {
-    throw new FakeFailure({ message: "write exploded" });
-  };
 
   it.live("fails with a SourceError when a classic stage's write() throws", () =>
     Effect.gen(function* () {
@@ -659,6 +664,43 @@ class TrackedGzSource extends Readable {
   }
 }
 
+/**
+ * A Readable that never pushes, and a promise that settles on its first
+ * `read()`. Node's async iterator calls `read()` from inside `next()`, so
+ * once `reading` settles a `next()` is pending that no data will settle.
+ */
+interface StalledReadable {
+  /** The Readable, which never pushes. */
+  readonly readable: Readable;
+  /** Settles on the Readable's first `read()`. */
+  readonly reading: Promise<void>;
+}
+/** A Readable that never pushes, paired with the promise that settles on its first `read()`. */
+const stalledReadable = (options: { readonly emitClose?: boolean } = {}): StalledReadable => {
+  let onRead = noop;
+  const reading = new Promise<void>((resolve) => (onRead = resolve));
+  return { readable: new Readable({ ...options, read: () => onRead() }), reading };
+};
+
+/**
+ * Interrupts the drain of `stream` once `reading` settles and asserts the
+ * interrupt returns promptly. A stalled Readable's async iterator queues
+ * `return()` behind the pending `next()`, so a teardown that waits on
+ * `return()` before destroying hangs (#83). Interrupting only once `reading`
+ * settles makes the test exercise that pending `next()` rather than pass
+ * before the drain reaches it.
+ */
+const interruptsPromptly = <A, E>(
+  stream: Stream.Stream<A, E>,
+  reading: Promise<void>,
+): Effect.Effect<void, Cause.UnknownError> =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.forkDetach(Stream.runDrain(stream));
+    expect(yield* promiseOrHung(reading)).toBeUndefined();
+    const outcome = yield* orHung(Fiber.interrupt(fiber).pipe(Effect.as("interrupted" as const)));
+    expect(outcome).toBe("interrupted");
+  });
+
 describe("interruption teardown", () => {
   it.live("destroys the decompression source when the Effect is interrupted", () =>
     Effect.gen(function* () {
@@ -677,38 +719,6 @@ describe("interruption teardown", () => {
       expect(source.destroyed).toBe(true);
     }),
   );
-
-  /**
-   * A Readable that never pushes, and a promise that settles on its first
-   * `read()`. Node's async iterator calls `read()` from inside `next()`, so
-   * once `reading` settles a `next()` is pending that no data will settle.
-   */
-  interface StalledReadable {
-    /** The Readable, which never pushes. */
-    readonly readable: Readable;
-    /** Settles on the Readable's first `read()`. */
-    readonly reading: Promise<void>;
-  }
-  const stalledReadable = (options: { readonly emitClose?: boolean } = {}): StalledReadable => {
-    let onRead = (): void => undefined;
-    const reading = new Promise<void>((resolve) => (onRead = resolve));
-    return { readable: new Readable({ ...options, read: () => onRead() }), reading };
-  };
-
-  // A stalled Readable's async iterator queues `return()` behind the pending
-  // `next()`, so a teardown that waits on `return()` before destroying hangs
-  // (#83). Interrupting only once `reading` settles makes the test exercise
-  // that pending `next()` rather than pass before the drain reaches it.
-  const interruptsPromptly = <A, E>(
-    stream: Stream.Stream<A, E>,
-    reading: Promise<void>,
-  ): Effect.Effect<void, Cause.UnknownError> =>
-    Effect.gen(function* () {
-      const fiber = yield* Effect.forkDetach(Stream.runDrain(stream));
-      expect(yield* promiseOrHung(reading)).toBeUndefined();
-      const outcome = yield* orHung(Fiber.interrupt(fiber).pipe(Effect.as("interrupted" as const)));
-      expect(outcome).toBe("interrupted");
-    });
 
   it.live("destroys a stalled Readable when the Effect is interrupted", () =>
     Effect.gen(function* () {
@@ -802,7 +812,7 @@ describe("interruption teardown", () => {
     Effect.gen(function* () {
       // `_destroy` finishes 200 ms after `destroy()`: inside the bound, so the
       // interrupt must wait for it; a near-zero bound would return first.
-      let onRead = (): void => undefined;
+      let onRead = noop;
       const reading = new Promise<void>((resolve) => (onRead = resolve));
       const readable = new Readable({
         read: () => onRead(),
@@ -823,8 +833,8 @@ describe("interruption teardown", () => {
       // must not escape as an unhandled rejection.
       const unhandled = collectProcessEvents("unhandledRejection");
       let destroyed = false;
-      let rejectReturn: (error: Error) => void = () => undefined;
-      let onRead = (): void => undefined;
+      let rejectReturn: (error: Error) => void = noop;
+      let onRead = noop;
       const reading = new Promise<void>((resolve) => (onRead = resolve));
       const source: Dumps.NodeReadableLike = {
         get destroyed() {
@@ -886,7 +896,7 @@ describe("interruption teardown", () => {
       // `destroy()`.
       let destroyCalls = 0;
       let pulled = 0;
-      let onThirdPull = (): void => undefined;
+      let onThirdPull = noop;
       const thirdPull = new Promise<void>((resolve) => (onThirdPull = resolve));
       const source: Dumps.NodeReadableLike = {
         get destroyed() {
@@ -948,7 +958,7 @@ describe("interruption teardown", () => {
         // interruption in that window deterministically; the source then parks.
         const fibers = { outer: Option.none<Fiber.Fiber<unknown, unknown>>() };
         let started = false;
-        let onReleased = (): void => undefined;
+        let onReleased = noop;
         const released = new Promise<"released">(
           (resolve) => (onReleased = () => resolve("released")),
         );
@@ -1062,32 +1072,35 @@ describe("interruption teardown", () => {
 
 // ── Byte ranges of a file ────────────────────────────────────────────────
 
-describe("fromFile with a byte range", () => {
-  const path = (): string => {
-    const file = join(tmp, "alphabet.txt");
-    writeFileSync(file, "abcdefghijklmnopqrstuvwxyz");
-    return file;
-  };
-  const read = (options: Dumps.FromFileOptions): Effect.Effect<string, Dumps.SourceError> =>
-    Effect.map(Stream.runCollect(Dumps.fromFile(path(), options)), decodeUtf8);
+/** Writes the alphabet fixture to the temp directory and returns its path. */
+const alphabetFile = (): string => {
+  const file = join(tmp, "alphabet.txt");
+  writeFileSync(file, "abcdefghijklmnopqrstuvwxyz");
+  return file;
+};
 
+/** Reads the alphabet fixture through `Dumps.fromFile` with `options`, decoded as UTF-8. */
+const readAlphabet = (options: Dumps.FromFileOptions): Effect.Effect<string, Dumps.SourceError> =>
+  Effect.map(Stream.runCollect(Dumps.fromFile(alphabetFile(), options)), decodeUtf8);
+
+describe("fromFile with a byte range", () => {
   it.live("reads [start, end) with end exclusive", () =>
     Effect.gen(function* () {
-      expect(yield* read({ start: 3, end: 6 })).toBe("def");
-      expect(yield* read({ start: 0, end: 1 })).toBe("a");
+      expect(yield* readAlphabet({ start: 3, end: 6 })).toBe("def");
+      expect(yield* readAlphabet({ start: 0, end: 1 })).toBe("a");
     }),
   );
 
   it.live("reads from start to the end of the file, or from the start to end", () =>
     Effect.gen(function* () {
-      expect(yield* read({ start: 23 })).toBe("xyz");
-      expect(yield* read({ end: 3 })).toBe("abc");
+      expect(yield* readAlphabet({ start: 23 })).toBe("xyz");
+      expect(yield* readAlphabet({ end: 3 })).toBe("abc");
     }),
   );
 
   it.live("reads to the end of the file for an end past it", () =>
     Effect.gen(function* () {
-      expect(yield* read({ start: 24, end: 1000 })).toBe("yz");
+      expect(yield* readAlphabet({ start: 24, end: 1000 })).toBe("yz");
     }),
   );
 

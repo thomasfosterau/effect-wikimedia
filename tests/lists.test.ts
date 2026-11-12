@@ -40,6 +40,9 @@ function expectExactSpans(doc: Document, all: readonly List[]): void {
 
 const summary = (item: ListItem) => [item.marker, item.kind, serializeNodes(item.nodes)];
 
+/** Narrows a node to a wikitext `Table`. */
+const isTable = (node: Node): node is Table => P.isTagged(node, "Table");
+
 describe("lists", () => {
   it("groups consecutive list lines into one list, with markers, depths and kinds", () => {
     const doc = parse("Intro\n* a\n** b\n*# c\n# d\nAfter");
@@ -114,7 +117,6 @@ describe("lists", () => {
 
   it("reads a fragment, such as a table cell's content", () => {
     const doc = parse("{|\n|\n* in a cell\n* two\n|}");
-    const isTable = (node: Node): node is Table => P.isTagged(node, "Table");
     const table = some(Arr.findFirst(doc.children, isTable), "table");
     const cell = some(Arr.head(some(Arr.head(table.rows), "row").cells), "cell");
     const content: readonly Node[] = cell.content;

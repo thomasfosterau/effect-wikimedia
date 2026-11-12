@@ -59,16 +59,18 @@ describe("odd-bold single-letter heuristic", () => {
   });
 });
 
-describe("odd-bold heuristic matches doQuotes (#137)", () => {
-  /** Which run on a one-line `src` is a reinterpreted `'''` (`-1` for none), checking it reads as `'` + `''`. */
-  const reinterpreted = (src: string): number => {
-    const runs = formatting(src);
-    const isReinterpreted = (r: Formatting): boolean =>
-      r.marks.length >= 3 && r.marks.length - r.leadingLiterals === 2;
-    expect(runs.filter(isReinterpreted).map((r) => r.mode)).not.toContain("bold");
-    return runs.findIndex(isReinterpreted);
-  };
+/** Whether `r` is a `'''` reinterpreted as a literal `'` followed by `''`. */
+const isReinterpreted = (r: Formatting): boolean =>
+  r.marks.length >= 3 && r.marks.length - r.leadingLiterals === 2;
 
+/** Which run on a one-line `src` is a reinterpreted `'''` (`-1` for none), checking it reads as `'` + `''`. */
+const reinterpreted = (src: string): number => {
+  const runs = formatting(src);
+  expect(runs.filter(isReinterpreted).map((r) => r.mode)).not.toContain("bold");
+  return runs.findIndex(isReinterpreted);
+};
+
+describe("odd-bold heuristic matches doQuotes (#137)", () => {
   it("leaves a lone bold run bold when the line has no italics (the issue's repro)", () => {
     const [f] = formatting("The '''bold");
     expect(f).toMatchObject({ mode: "bold", leadingLiterals: 0 });

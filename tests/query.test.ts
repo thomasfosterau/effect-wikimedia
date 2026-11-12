@@ -109,6 +109,9 @@ describe("normaliseTemplateName", () => {
   });
 });
 
+/** A node as `Tag@start`, for comparing traversal orders. */
+const tagAtStart = (n: Node) => `${Struct.get(n, "_tag")}@${n.span.start}`;
+
 describe("filter / walk", () => {
   it("collects every wikilink at any depth", () => {
     const doc = parse(ada);
@@ -149,12 +152,11 @@ describe("filter / walk", () => {
 
   it("agrees with filter on order, so findTemplates returns document order (#175)", () => {
     const doc = parse("{{A}} {{B|{{C}}}} {{D}}");
-    const tags = (n: Node) => `${Struct.get(n, "_tag")}@${n.span.start}`;
     const walked: string[] = [];
     walk(doc, (n) => {
-      walked.push(tags(n));
+      walked.push(tagAtStart(n));
     });
-    expect(walked).toEqual(filter(doc, () => true).map(tags));
+    expect(walked).toEqual(filter(doc, () => true).map(tagAtStart));
     expect(findTemplates(doc).map(templateName)).toEqual(["A", "B", "C", "D"]);
   });
 });
@@ -201,10 +203,28 @@ describe("strip to plain text", () => {
   });
 });
 
-describe("strip to plain text: template renderers (#210)", () => {
-  const withBasic = (src: string): string =>
-    stripToText(parse(src), { templates: basicTemplateRenderers });
+/** Strips `src` to plain text with the basic template renderers. */
+const withBasic = (src: string): string =>
+  stripToText(parse(src), { templates: basicTemplateRenderers });
 
+/** A renderer that renders any template as `!`. */
+const exclaim: TemplateRenderer = () => "!";
+
+/** A renderer that shows the first positional and the `k` named parameter as `[first|k]`. */
+const showRenderer: TemplateRenderer = (_, { param }) =>
+  `[${Option.getOrElse(param(1), () => "-")}|${Option.getOrElse(param("k"), () => "-")}]`;
+
+/** A fallback renderer that shows an unregistered template as `<name>`. */
+const angleBracketFallback: TemplateRenderer = (t) => `<${templateName(t)}>`;
+
+/** A renderer that strips its first parameter with the same options. */
+const firstParamRenderer: TemplateRenderer = (t, { strip }) => strip(t.params[0]?.value ?? []);
+
+/** Strips `src` to plain text with only the `show` renderer registered. */
+const stripWithShow = (src: string) =>
+  stripToText(parse(src), { templates: { show: showRenderer } });
+
+describe("strip to plain text: template renderers (#210)", () => {
   it("renders every template as nothing without options, as before", () => {
     expect(stripToText(parse("a {{nowrap|37 ft}} wall"))).toBe("a  wall");
     expect(stripToText(parse("a {{nowrap|37 ft}} wall"), {})).toBe("a  wall");
@@ -223,9 +243,8 @@ describe("strip to plain text: template renderers (#210)", () => {
 
   it("matches names via normaliseTemplateName, on both sides", () => {
     expect(withBasic("{{ Nowrap_ |x}}{{NOWRAP|y}}")).toBe("x");
-    const shout: TemplateRenderer = () => "!";
     expect(
-      stripToText(parse("{{Big deal}}{{big_deal}}"), { templates: { " big_deal ": shout } }),
+      stripToText(parse("{{Big deal}}{{big_deal}}"), { templates: { " big_deal ": exclaim } }),
     ).toBe("!!");
   });
 
@@ -236,30 +255,25 @@ describe("strip to plain text: template renderers (#210)", () => {
   });
 
   it("keeps positional whitespace and trims named values, as MediaWiki does", () => {
-    const show: TemplateRenderer = (_, { param }) =>
-      `[${Option.getOrElse(param(1), () => "-")}|${Option.getOrElse(param("k"), () => "-")}]`;
-    const strip = (src: string) => stripToText(parse(src), { templates: { show } });
-    expect(strip("{{show| a b | k = v }}")).toBe("[ a b |v]");
-    expect(strip("{{show|x|1= y }}")).toBe("[y|-]");
-    expect(strip("{{show}}")).toBe("[-|-]");
+    expect(stripWithShow("{{show| a b | k = v }}")).toBe("[ a b |v]");
+    expect(stripWithShow("{{show|x|1= y }}")).toBe("[y|-]");
+    expect(stripWithShow("{{show}}")).toBe("[-|-]");
   });
 
   it("calls the fallback for unregistered templates only", () => {
-    const fallback: TemplateRenderer = (t) => `<${templateName(t)}>`;
     expect(
       stripToText(parse("{{nowrap|a}} {{convert|37|ft}}"), {
         templates: basicTemplateRenderers,
-        templateFallback: fallback,
+        templateFallback: angleBracketFallback,
       }),
     ).toBe("a <convert>");
     expect(stripToText(parse("x{{a}}y"), { templateFallback: () => "-" })).toBe("x-y");
   });
 
   it("lets a renderer strip any fragment with the same options", () => {
-    const first: TemplateRenderer = (t, { strip }) => strip(t.params[0]?.value ?? []);
     expect(
       stripToText(parse("{{first|{{nowrap|n}}&amp;}}"), {
-        templates: { ...basicTemplateRenderers, first },
+        templates: { ...basicTemplateRenderers, first: firstParamRenderer },
       }),
     ).toBe("n&");
   });
@@ -277,6 +291,9 @@ describe("strip to plain text: template renderers (#210)", () => {
     expect(stripToText(doc.children, { templates: basicTemplateRenderers })).toBe("z");
   });
 });
+
+/** A fallback renderer that strips a fragment holding a hidden-prefix category link. */
+const templateFallback: TemplateRenderer = (_, { strip }) => strip(parse("[[Kategorie:Z]]f"));
 
 describe("strip to plain text: file, category and interlanguage links (#208)", () => {
   it.each([
@@ -338,7 +355,6 @@ describe("strip to plain text: file, category and interlanguage links (#208)", (
   });
 
   it("hides the supplied prefixes inside a parameter a renderer strips", () => {
-    const templateFallback: TemplateRenderer = (_, { strip }) => strip(parse("[[Kategorie:Z]]f"));
     const options = {
       hiddenLinkPrefixes: ["Kategorie"],
       templates: { ...basicTemplateRenderers },
@@ -355,16 +371,16 @@ describe("strip to plain text: file, category and interlanguage links (#208)", (
   });
 });
 
-describe("strip to plain text: entities (#107)", () => {
-  /** Strips `src`, first checking the parser read all of it as entities. */
-  const stripEntities = (src: string): string => {
-    const doc = parse(src);
-    expect(doc.children.map((n) => Struct.get(n, "_tag"))).toEqual(
-      doc.children.map(() => "HtmlEntity"),
-    );
-    return stripToText(doc);
-  };
+/** Strips `src`, first checking the parser read all of it as entities. */
+const stripEntities = (src: string): string => {
+  const doc = parse(src);
+  expect(doc.children.map((n) => Struct.get(n, "_tag"))).toEqual(
+    doc.children.map(() => "HtmlEntity"),
+  );
+  return stripToText(doc);
+};
 
+describe("strip to plain text: entities (#107)", () => {
   it.each([
     ["&#65;", "A"],
     ["&#0065;", "A"],

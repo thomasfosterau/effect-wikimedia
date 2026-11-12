@@ -84,6 +84,9 @@ function bestParseTime(src: string, runs = 20): number {
   return bestTime(() => parse(src), 3, runs);
 }
 
+/** A one-cell wikitable holding `content`. */
+const tableCell = (content: string): string => `{|\n| ${content}\n|}\n`;
+
 // The table scans step over nested constructs (#132) using one linear
 // bracket-matching pass. These guard against that turning quadratic, which
 // recursive descent does on unclosed braces: each failed `{{` rescans the rest
@@ -100,10 +103,9 @@ describe("performance floor: wikitables (#132)", () => {
   const strayTable = `{|\n${"|-\n| {{stray a || b\n| c\n".repeat(2000)}|}\n`;
   // Long closing runs: matching must consume a run of `}` or `]` in one pass,
   // not rescan the rest of the run after each 2- or 3-character match.
-  const cell = (content: string): string => `{|\n| ${content}\n|}\n`;
-  const braceRunTable = cell(`${"{".repeat(40_000)}${"}".repeat(40_000)}`);
-  const linkRunTable = cell(`${"[[".repeat(20_000)}${"]]".repeat(20_000)}`);
-  const mixedRunTable = cell(`${"[[{{".repeat(10_000)}${"}}".repeat(10_000)}`);
+  const braceRunTable = tableCell(`${"{".repeat(40_000)}${"}".repeat(40_000)}`);
+  const linkRunTable = tableCell(`${"[[".repeat(20_000)}${"]]".repeat(20_000)}`);
+  const mixedRunTable = tableCell(`${"[[{{".repeat(10_000)}${"}}".repeat(10_000)}`);
 
   Arr.forEach(
     [
@@ -127,6 +129,10 @@ describe("performance floor: wikitables (#132)", () => {
   );
 });
 
+/** A wikitable of `rows` rows, each opening its first cell with `cell`. */
+const repeatedCellRows = (cell: string, rows: number): string =>
+  `{|\n${`|-\n| ${cell} || b\n| c\n`.repeat(rows)}|}\n`;
+
 // An unclosed opener whose close is searched for past the region it sits in
 // (#152), or a construct that rescans the rest of the input before failing
 // (#159), costs time quadratic in the number of openers. Each close search is
@@ -135,13 +141,10 @@ describe("performance floor: wikitables (#132)", () => {
 // each; with it, a few tens of ms at most, under the same 250 ms ceiling as
 // above.
 describe("performance floor: unclosed openers (#152, #159)", () => {
-  const cellRows = (cell: string, rows: number): string =>
-    `{|\n${`|-\n| ${cell} || b\n| c\n`.repeat(rows)}|}\n`;
-
   Arr.forEach(
     [
-      ["a table with an unclosed <!-- in every row", cellRows("<!-- x", 8000)],
-      ["a table with an unclosed <ref> in every row", cellRows("<ref>x", 12_000)],
+      ["a table with an unclosed <!-- in every row", repeatedCellRows("<!-- x", 8000)],
+      ["a table with an unclosed <ref> in every row", repeatedCellRows("<ref>x", 12_000)],
       ["a page of unclosed <ref> lines", "<ref>x\n".repeat(20_000)],
       ["a page of unclosed {| lines", "{|\n".repeat(13_334)],
       ["a page of unclosed {| and {{ lines", "{|\n| {{\n".repeat(5000)],

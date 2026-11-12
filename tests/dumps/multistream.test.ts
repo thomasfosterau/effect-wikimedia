@@ -288,14 +288,15 @@ const pagesInRange = (
     ),
   );
 
-describe("a multistream range decoded on its own", () => {
-  const indexEntries = () =>
-    collect(
-      Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-        Dumps.multistreamIndexRecords,
-      ),
-    );
+/** Collects every entry of the fixture index. */
+const indexEntries = () =>
+  collect(
+    Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
+      Dumps.multistreamIndexRecords,
+    ),
+  );
 
+describe("a multistream range decoded on its own", () => {
   it.effect.each([
     { label: "without fileSize", fileSize: Option.none<number>(), lastEnd: null },
     {
@@ -400,22 +401,25 @@ describe("fromMultistreamRange", () => {
 
 // ── Random access, iteration and resume ──────────────────────────────────
 
-describe("random access and iteration over the fixture dump", () => {
-  const entries = (): Stream.Stream<
-    Dumps.MultistreamIndexEntry,
-    Dumps.SourceError | Dumps.MultistreamIndexError
-  > =>
-    Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(
-      Dumps.multistreamIndexRecords,
-    );
-  const openRange = (range: Dumps.MultistreamRange) =>
-    Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
-  const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
-    records.map((r) => Option.getOrNull(r.page.title));
+/** The fixture index as a stream of multistream index entries. */
+const indexEntryStream = (): Stream.Stream<
+  Dumps.MultistreamIndexEntry,
+  Dumps.SourceError | Dumps.MultistreamIndexError
+> =>
+  Dumps.fromFile(INDEX_BZ2, { decompressor: () => unbzip2() }).pipe(Dumps.multistreamIndexRecords);
 
+/** Opens `range` of the fixture dump and decodes it with bzip2. */
+const openRange = (range: Dumps.MultistreamRange) =>
+  Dumps.fromMultistreamRange(DUMP_PATH, range, () => unbzip2());
+
+/** The titles of `records`, null for a page without one. */
+const titles = (records: ReadonlyArray<Dumps.PageRevisionRecord>) =>
+  records.map((r) => Option.getOrNull(r.page.title));
+
+describe("random access and iteration over the fixture dump", () => {
   it.effect("finds the whole range holding a page by title, then reads just that range", () =>
     Effect.gen(function* () {
-      const found = yield* entries().pipe(
+      const found = yield* indexEntryStream().pipe(
         Dumps.findMultistreamRange(Dumps.byTitle("Category:Writers")),
       );
       expect(Option.isSome(found)).toBe(true);
@@ -430,25 +434,25 @@ describe("random access and iteration over the fixture dump", () => {
     "finds by page id, closes the last range with fileSize, and gives None for a miss",
     () =>
       Effect.gen(function* () {
-        const all = yield* collect(entries());
+        const all = yield* collect(indexEntryStream());
         const lastId = all.at(-1)?.pageId ?? -1;
-        const last = yield* entries().pipe(
+        const last = yield* indexEntryStream().pipe(
           Dumps.findMultistreamRange(Dumps.byPageId(lastId), { fileSize: DUMP_BZ2.length }),
         );
         expect(Option.map(last, (range) => [range.start, Option.getOrNull(range.end)])).toEqual(
           Option.some([814, DUMP_BZ2.length]),
         );
-        expect(yield* entries().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Nope")))).toEqual(
-          Option.none(),
-        );
+        expect(
+          yield* indexEntryStream().pipe(Dumps.findMultistreamRange(Dumps.byTitle("Nope"))),
+        ).toEqual(Option.none());
       }),
   );
 
   it.effect("counts every entry of the matched range, ones before the match included", () =>
     Effect.gen(function* () {
-      const first = yield* entries().pipe(Dumps.findMultistreamRange(() => true));
-      const ranges = yield* collect(entries().pipe(Dumps.multistreamRanges()));
-      const byLaterEntry = yield* entries().pipe(
+      const first = yield* indexEntryStream().pipe(Dumps.findMultistreamRange(() => true));
+      const ranges = yield* collect(indexEntryStream().pipe(Dumps.multistreamRanges()));
+      const byLaterEntry = yield* indexEntryStream().pipe(
         Dumps.findMultistreamRange(Dumps.byPageId(ranges[0]?.lastPageId ?? -1)),
       );
       expect(byLaterEntry).toEqual(first);
@@ -467,7 +471,7 @@ describe("random access and iteration over the fixture dump", () => {
 
   it.effect("decodes every range's pages in order, sequentially and concurrently", () =>
     Effect.gen(function* () {
-      const ranges = entries().pipe(Dumps.multistreamRanges());
+      const ranges = indexEntryStream().pipe(Dumps.multistreamRanges());
       const sequential = yield* collect(ranges.pipe(Dumps.multistreamPageRecords(openRange)));
       expect(titles(sequential)).toEqual([
         "Ada Lovelace",
@@ -488,7 +492,7 @@ describe("random access and iteration over the fixture dump", () => {
     Effect.gen(function* () {
       const opened: number[] = [];
       const records = yield* collect(
-        entries().pipe(
+        indexEntryStream().pipe(
           Dumps.multistreamRanges(),
           Dumps.fromCheckpoint(533),
           Dumps.multistreamPageRecords((range) => {
