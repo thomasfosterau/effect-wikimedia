@@ -121,7 +121,7 @@ describe("filter / walk", () => {
     const seen: string[] = [];
     walk(doc, (n) => {
       seen.push(Struct.get(n, "_tag"));
-      if (P.isTagged(n, "Template")) return false; // don't descend
+      return !P.isTagged(n, "Template"); // don't descend into a template
     });
     expect(seen).toContain("Template");
     expect(seen).not.toContain("Wikilink");
