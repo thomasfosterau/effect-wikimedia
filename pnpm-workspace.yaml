@@ -41,7 +41,7 @@ catalog:
   # TypeScript 7.0.2), and vite-plus 1.6.0 carries oxlint 1.93.0 and tsgolint
   # 7.0.2006. Bump `@effect/tsgo`, `@typescript/native` and `vite-plus`
   # together.
-  "@effect/tsgo": 0.67.7
+  "@effect/tsgo": 0.69.0
   # The Effect lint rules `vp check` runs (`effect.configs.recommended` in
   # vite.config.ts, every rule under the `effect/` namespace; it replaced
   # `@mpsuesser/oxlint-plugin-effect`, #221). It depends on `effect` 4.1.0
