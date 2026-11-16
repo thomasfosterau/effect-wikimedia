@@ -24,7 +24,7 @@ catalog:
   # moves with the `effect` pin below and the gates no longer pass with that
   # pin at 4.0.0 (the published peer range stays `^4.0.0`: no `src/` code
   # imports it).
-  "@effect/platform-node": 4.1.2
+  "@effect/platform-node": 4.1.4
   # Effect Language Service as a native (TypeScript-Go) binary: the TS7 side of
   # the 6/7 split. `effect-tsgo patch --typescript` (the root `prepare` script)
   # overwrites the native `tsc` binary with an Effect-patched build matched by
@@ -56,7 +56,7 @@ catalog:
   # version (`^4.1.2` for 4.1.2), so it moves with the `effect` pin below, and
   # on `vitest >=5 <6`, which the `vitest@*` override resolves to the
   # vite-plus copy `vp test` runs.
-  "@effect/vitest": 4.1.2
+  "@effect/vitest": 4.1.4
   "@types/node": ^26.1.2
   # Types for `unbzip2-stream` below (test-only). They describe its stream as a
   # `stream.Transform`, which it isn't: see that entry.
@@ -74,7 +74,7 @@ catalog:
   # stable release, website#2059). The published peer range in
   # `catalogs.peers` stays `^4.0.0` (the owner's peer-range policy), and the
   # gates pass with this pin set to 4.0.0.
-  effect: 4.1.2
+  effect: 4.1.4
   # The parser-combinator library the `Wikitext` parser is written in (#168):
   # the package's one runtime dependency besides the `effect` peer, which it
   # shares. First-party, so `minimumReleaseAgeExclude` lets a new release in
