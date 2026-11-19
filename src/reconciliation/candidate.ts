@@ -172,7 +172,7 @@ export function normaliseExternalIdValue(raw: string): Option.Option<string> {
   return Option.filter(trimmedToken(raw), (token) => /^[A-Za-z0-9 ._:/-]+$/.test(token));
 }
 
-// ── Enrich: the fact union + extraction helpers (website#613) ──────────
+// ── Enrich: the fact union + extraction helpers ──────────
 
 /**
  * The confirmed item itself (`_tag: "Item"`): the canonical Wikidata

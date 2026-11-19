@@ -137,7 +137,7 @@ describe("decodeEntityLine", () => {
   });
 
   // `null` is valid JSON, so it is not an invalid-json line: it parses, and
-  // what it parses to is not an entity, the same as `42` or `"x"` (#116).
+  // what it parses to is not an entity, the same as `42` or `"x"`.
   Arr.forEach(["null", "42", '"x"', "[]"], (body) => {
     it(`a JSON ${body} line degrades to a not-an-entity error element`, () => {
       const record = decodedRecord(`${body},`, 3);
@@ -149,7 +149,7 @@ describe("decodeEntityLine", () => {
   });
 
   // Wikibase marks an entity that does not exist with `missing`; such an
-  // object has a valid id but is still not an entity (#122).
+  // object has a valid id but is still not an entity.
   it("an object Wikibase flagged missing degrades to a not-an-entity error element", () => {
     const record = decodedRecord('{"id":"Q42","missing":""},', 5);
     expect(record).toMatchObject({ _tag: "error" });
@@ -185,7 +185,7 @@ describe("predicates", () => {
   it("hasSitelink", () => {
     expect(Dumps.hasSitelink(q42, "enwiki")).toBe(true);
     expect(Dumps.hasSitelink(q42, "dewiki")).toBe(false);
-    // Inherited names are never sitelinks (#164).
+    // Inherited names are never sitelinks.
     expect(Dumps.hasSitelink(q42, "toString")).toBe(false);
     expect(Dumps.hasSitelink(q42, "constructor")).toBe(false);
     expect(Dumps.hasSitelink(q42, "__proto__")).toBe(false);
@@ -195,7 +195,7 @@ describe("predicates", () => {
 // ── The pipeline over the fixture ────────────────────────────────────────
 
 layer(Layer.provideMerge(SliceDump.layer, platform))("entityRecords pipeline", (it) => {
-  it.effect("keeps streaming past a line whose nested containers are the wrong kind (#147)", () =>
+  it.effect("keeps streaming past a line whose nested containers are the wrong kind", () =>
     Effect.gen(function* () {
       const lines = [
         "[",
@@ -363,7 +363,7 @@ layer(Layer.provideMerge(BigDump.layer, platform), { timeout: "120 seconds" })(
     // `heapUsed` read without a collection counts garbage V8 hasn't collected
     // yet, so a peak of raw samples measures V8's GC heuristics (how far it has
     // grown the young generation, when its next full collection is due), not
-    // the pipeline (#112). With a 64 MB semi-space the old raw-peak version of
+    // the pipeline. With a 64 MB semi-space the old raw-peak version of
     // this test read 43 MB while the pipeline retained under 1 MB. Instead,
     // sample memory retained after a full collection, from inside the stream,
     // every `SAMPLE_EVERY` items: whatever the pipeline holds at that point

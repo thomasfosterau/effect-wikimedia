@@ -1,5 +1,5 @@
 /**
- * The citation view (#209): every `<ref>` with its name and group, a body
+ * The citation view: every `<ref>` with its name and group, a body
  * parsed with spans in the page, the citation templates in it, and reuses
  * linked to their definition.
  *

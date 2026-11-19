@@ -2,7 +2,7 @@
  * Unit tests for the Node-only dump sources (`src/dumps/sources.ts`): the file
  * source with inline gzip decompression, the pluggable {@link Dumps.gunzip} /
  * {@link Dumps.decompressWith} stages (including bzip2 through `unbzip2-stream`,
- * a classic stream, #128), the **interruption teardown** guarantee
+ * a classic stream), the **interruption teardown** guarantee
  * (cancelling the Effect destroys the decompression source — no orphaned
  * work), and the **resumable** HTTP range download (offset tracked across a
  * mid-stream failure). The network is stubbed at `FetchHttpClient.Fetch`.
@@ -194,7 +194,7 @@ layer(platform, { excludeTestServices: true })("fromFile", (it) => {
 
 /**
  * A stage that errors in a later tick, after its output has ended, once the
- * stream has completed and nothing listens any more (#139).
+ * stream has completed and nothing listens any more.
  */
 const lateErroringStage = (): PassThrough => {
   const stage = new PassThrough();
@@ -238,7 +238,7 @@ describe("decompression stages", () => {
   );
 });
 
-// ── bzip2 through a classic stream (#128) ────────────────────────────────
+// ── bzip2 through a classic stream ────────────────────────────────
 
 /**
  * `entities-slice.ndjson`, bzip2-compressed: made with
@@ -293,7 +293,7 @@ const explodingWrite = (): never => {
 };
 
 layer(NodeServices.layer, { excludeTestServices: true })(
-  "bzip2 through unbzip2-stream, a classic stream (#128)",
+  "bzip2 through unbzip2-stream, a classic stream",
   (it) => {
     // `unbzip2-stream` returns a classic `through` stream: no `read()`, and
     // `end` / `close` but never `finish`, so `stream.compose` failed it with
@@ -453,7 +453,7 @@ layer(NodeServices.layer, { excludeTestServices: true })(
 describe("structural stream types", () => {
   // The public signatures name `NodeReadableLike` / `NodeDuplexLike` rather
   // than `node:stream` classes, so the published declarations need no
-  // `@types/node` (#73). These pin that real Node streams still fit them.
+  // `@types/node`. These pin that real Node streams still fit them.
   it("accept real Node readables", () => {
     expectTypeOf<ReturnType<typeof createReadStream>>().toExtend<Dumps.NodeReadableLike>();
     expectTypeOf<ReturnType<typeof Readable.from>>().toExtend<Dumps.NodeReadableLike>();
@@ -540,8 +540,8 @@ layer(platform, { excludeTestServices: true })("a decompressor that is not a Nod
       // The stage is checked before the source is started, as `fromFile` checks
       // it before opening its file, so a rejected stage opens nothing that
       // teardown would have to close (an HTTP body, a file). Whether a source
-      // started and cancelled at once ever opens differs by Effect version
-      // (#235), so the check must come first for this to hold on every one.
+      // started and cancelled at once ever opens differs by Effect version,
+      // so the check must come first for this to hold on every one.
       let opened = false;
       const source = Dumps.fromNodeReadable(() => {
         opened = true;
@@ -574,7 +574,7 @@ layer(platform, { excludeTestServices: true })(
   "a decompressor that returns a used stream",
   (it) => {
     // `isReadable` / `isWritable` give `false`, not `null`, for a used stage, so
-    // the not-a-stream check let it through (#111). `compose` then throws on a
+    // the not-a-stream check let it through. `compose` then throws on a
     // destroyed stage or one whose input has ended, but only once the upstream
     // has been opened, which leaked; and it accepts one whose output has
     // already ended, which never settles. The stage must be rejected before
@@ -697,7 +697,7 @@ const stalledReadable = (options: { readonly emitClose?: boolean } = {}): Stalle
  * Interrupts the drain of `stream` once `reading` settles and asserts the
  * interrupt returns promptly. A stalled Readable's async iterator queues
  * `return()` behind the pending `next()`, so a teardown that waits on
- * `return()` before destroying hangs (#83). Interrupting only once `reading`
+ * `return()` before destroying hangs. Interrupting only once `reading`
  * settles makes the test exercise that pending `next()` rather than pass
  * before the drain reaches it.
  */
@@ -758,7 +758,7 @@ layer(platform, { excludeTestServices: true })("interruption teardown", (it) => 
   // Node's iterator settles its pending `next()`, and so the queued
   // `return()`, only on `close`. A source whose `destroy()` never gets there
   // would hold the interrupt up for good, so teardown waits for `close` only
-  // up to a bound (#94); these fail with "hung" without it.
+  // up to a bound; these fail with "hung" without it.
   it.effect(
     "completes the interrupt within a bound when the stalled Readable's destroy() never emits close",
     () =>
@@ -903,7 +903,7 @@ layer(platform, { excludeTestServices: true })("interruption teardown", (it) => 
   it.effect("destroys a hand-built source whose iterator's return() doesn't, exactly once", () =>
     Effect.gen(function* () {
       // A Node Readable's own iterator destroys the stream in `return()`, which
-      // would mask a teardown that never calls `destroy()` (#80). This source's
+      // would mask a teardown that never calls `destroy()`. This source's
       // `return()` leaves it open, so only `fromNodeReadable`'s teardown can
       // destroy it; and `fromNodeReadable`'s wrapping `return()` and its scope
       // finalizer both run, so the `destroyed` guard is what keeps it to one
@@ -941,7 +941,7 @@ layer(platform, { excludeTestServices: true })("interruption teardown", (it) => 
     Effect.gen(function* () {
       // An interruption the fiber observes right after `evaluate` returns, before
       // anything else runs, must still destroy the Readable: opening it and
-      // registering its teardown are one uninterruptible step (#95). Interrupting
+      // registering its teardown are one uninterruptible step. Interrupting
       // from inside `evaluate` lands it there deterministically.
       const readable = new Readable({ read() {} });
       const exit = yield* exitOrHung(
@@ -967,7 +967,7 @@ layer(platform, { excludeTestServices: true })("interruption teardown", (it) => 
         // which only cancelling the web stream stops. An interruption that lands
         // after the source has started but before `fromNodeReadable` opens the
         // stage must still stop it, or the upstream (an HTTP body, which parks
-        // holding its socket once a chunk is buffered) stays open (#109). The
+        // holding its socket once a chunk is buffered) stays open. The
         // source's first step interrupts the consuming fiber, which lands the
         // interruption in that window deterministically; the source then parks.
         const fibers = { outer: Option.none<Fiber.Fiber<unknown, unknown>>() };
@@ -1055,9 +1055,9 @@ layer(platform, { excludeTestServices: true })("interruption teardown", (it) => 
         // `fromFile` opens a `.gz` as a `stream.compose` chain, which emits an
         // `AbortError` when it is destroyed before it finishes. Destroyed by the
         // scope finalizer before the stream is first pulled, nothing listens for
-        // that error, and a real process would crash on it (#109). The
+        // that error, and a real process would crash on it. The
         // decompressor interrupts the fiber, which lands the interruption right
-        // after the open, as in the #95 test above.
+        // after the open, as in the test above.
         const path = yield* tempPath("interrupted-open.json.gz");
         yield* writeTestFile(path, gzipSync(Buffer.from(DUMP)));
         const created = { stage: Option.none<Transform>() };

@@ -42,7 +42,7 @@
         "diagnosticSeverity": {
           // Effect 4 marks much of `effect/http` `@stability unstable`, so as
           // a warning this fires on every HTTP client use and drowns the
-          // warnings that matter. Owner decision (#26): a suggestion.
+          // warnings that matter. Owner decision: a suggestion.
           "unstableApiUsage": "suggestion"
         }
       }

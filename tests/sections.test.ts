@@ -1,5 +1,5 @@
 /**
- * The section view (#209): the heading tree over a parsed document, its
+ * The section view: the heading tree over a parsed document, its
  * MediaWiki nesting and numbering (in-table headings included), and the
  * lossless partition back to the AST.
  *

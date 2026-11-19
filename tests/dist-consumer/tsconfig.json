@@ -1,5 +1,5 @@
 {
-  // The dist-consumer declaration check (`vp run check:dist`, #20): type-checks
+  // The dist-consumer declaration check (`vp run check:dist`): type-checks
   // `index.ts` the way a consumer's compiler sees the PUBLISHED package — the
   // emitted `dist/*.d.ts`, reached through package.json `exports` — so broken
   // declarations fail CI even when the source type-check passes. Run it after
@@ -25,7 +25,7 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     // No `@types/node`, as in a browser or Worker project: the published
-    // declarations must not need Node's types (#73). The `Dumps` byte sources
+    // declarations must not need Node's types. The `Dumps` byte sources
     // run on Node but type their streams structurally, and the build is
     // `platform: "neutral"`; a `Buffer`, `NodeJS.*` or `node:*` type leaking
     // into a declaration fails this check.

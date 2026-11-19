@@ -1,5 +1,5 @@
 /**
- * The table views (#209): `tableGrid` with rowspan / colspan expanded, and
+ * The table views: `tableGrid` with rowspan / colspan expanded, and
  * `tableRecords` keyed by the first all-header row and each row's own `!`
  * label.
  *

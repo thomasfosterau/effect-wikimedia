@@ -1,6 +1,5 @@
 /**
- * Proves the package's module-per-surface tree-shaking boundary (issue
- * #1063's acceptance criterion): importing one surface namespace from the
+ * Proves the package's module-per-surface tree-shaking boundary: importing one surface namespace from the
  * barrel (`Action`, `Rest`, or `Commons`) must not pull the other two
  * surface modules' code into a bundle.
  *
@@ -49,7 +48,7 @@ const MARKERS = {
     "WikidataLookup.enrich",
   ],
   // Wikitext has no `Effect.fn`: these are names from its HTML5 entity table
-  // (`src/wikitext/entities.ts`), the largest thing it bundles (#118).
+  // (`src/wikitext/entities.ts`), the largest thing it bundles.
   wikitext: ["CounterClockwiseContourIntegral", "DoubleLongLeftRightArrow"],
 } as const;
 

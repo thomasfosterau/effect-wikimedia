@@ -1,5 +1,5 @@
 /**
- * `Core.lenient`, `Core.lenientField` and `Core.lenientArray` (#224): a
+ * `Core.lenient`, `Core.lenientField` and `Core.lenientArray`: a
  * malformed leaf in a response degrades to absent instead of failing the
  * whole decode.
  *

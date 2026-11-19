@@ -1,13 +1,9 @@
 name: CI
 
-# One workflow whose only command is `vp run ci`: the `ci` task in
-# vite.config.ts runs every gate in order (AGENTS.md "Verification"), so CI
-# and a local `vp run ci` are the same thing. It runs on the LTS and the
-# Current release lines of Node.js. The task graph lives in vite.config.ts,
-# not in GitHub Actions steps or `needs:`.
-
 on:
   pull_request:
+    branches: [trunk]
+    types: [opened, reopened, synchronize, ready_for_review]
   push:
     branches: [trunk]
   workflow_dispatch:
@@ -16,13 +12,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
-# No permissions by default; each job grants only read access. Nothing here
-# needs a secret, so a Dependabot PR runs it exactly as any other PR does.
 permissions: {}
 
 jobs:
-  # One check per Node.js line, `ci (node lts)` and `ci (node latest)`: the
-  # ruleset requires each by name.
   ci:
     name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
@@ -32,42 +24,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The active LTS line and the Current line: setup-vp resolves `latest`
-        # to the newest released Node.js, so the matrix moves to each new
-        # Current line by itself. Both satisfy `engines.node` (>=22).
         node: [lts, latest]
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-
-      # Vite+ at the catalog pin, the matrix's Node.js, the `packageManager`
-      # pnpm, the pnpm store cache, and `vp install` (#254); pnpm installs with
-      # a frozen lockfile in CI, so a manifest/lockfile drift fails here.
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
+      - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
           node-version: ${{ matrix.node }}
           cache: true
-
-      # The `vp run` tasks are content-addressed (`run.cache` in
-      # vite.config.ts); restoring the cache lets an unchanged task replay.
-      # Keyed per Node.js line, since a task's output can depend on it.
+          run-install: true
       - name: Restore the Vite+ task cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: node_modules/.vite/task-cache
           key: vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-${{ github.sha }}
           restore-keys: |
             vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-
+      - run: vp run ci
 
-      - name: Install
-        run: vp install --frozen-lockfile
-
-      - name: Print the Node.js version
-        run: node --version
-
-      - name: Run every gate
-        run: vp run ci
+  devcontainer:
+    name: devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version: lts
+          run-install: false
+      - run: vp dlx @devcontainers/cli@0.89.0 up --workspace-folder .
+      - run: vp dlx @devcontainers/cli@0.89.0 exec --workspace-folder . vp --version

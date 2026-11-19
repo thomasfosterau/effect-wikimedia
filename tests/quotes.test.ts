@@ -70,7 +70,7 @@ const reinterpreted = (src: string): number => {
   return runs.findIndex(isReinterpreted);
 };
 
-describe("odd-bold heuristic matches doQuotes (#137)", () => {
+describe("odd-bold heuristic matches doQuotes", () => {
   it("leaves a lone bold run bold when the line has no italics (the issue's repro)", () => {
     const [f] = formatting("The '''bold");
     expect(f).toMatchObject({ mode: "bold", leadingLiterals: 0 });

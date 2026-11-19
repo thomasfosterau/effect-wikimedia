@@ -1,5 +1,5 @@
 /**
- * The sentence view (#209, slice 7): a paragraph's text cut by
+ * The sentence view: a paragraph's text cut by
  * `Intl.Segmenter`, each sentence trimmed and located in the paragraph text.
  *
  * @module tests/sentences

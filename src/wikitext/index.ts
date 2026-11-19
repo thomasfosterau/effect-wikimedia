@@ -1,5 +1,5 @@
 /**
- * The `Wikitext` module of `@thomasfosterau/effect-wikimedia` (website#1065):
+ * The `Wikitext` module of `@thomasfosterau/effect-wikimedia`:
  * a pure wikitext → typed AST parser in the `mwparserfromhell` niche,
  * written with the `@thomasfosterau/effect-parse` parser combinators.
  * Wikitext in, a manipulable {@link Document} out — no network, no template

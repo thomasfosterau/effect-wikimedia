@@ -369,7 +369,7 @@ layer(NodeServices.layer)("pageRecords pipeline", (it) => {
     }),
   );
 
-  it.effect("counts the cap in UTF-16 code units of the escaped text, not bytes (#155)", () =>
+  it.effect("counts the cap in UTF-16 code units of the escaped text, not bytes", () =>
     Effect.gen(function* () {
       // 16,777,216 code units of 3-byte UTF-8 (50 MB) is within the cap.
       const atCap = yield* collect(
@@ -384,7 +384,7 @@ layer(NodeServices.layer)("pageRecords pipeline", (it) => {
     }),
   );
 
-  describe("a multi-slot revision (export schema 0.11) (#154)", () => {
+  describe("a multi-slot revision (export schema 0.11)", () => {
     it.effect("reads model, format and text from the main slot (the issue's repro)", () =>
       Effect.gen(function* () {
         const records = yield* collect(Dumps.pageRecords(bytesOf(multiSlot("{}"))));
@@ -410,7 +410,7 @@ layer(NodeServices.layer)("pageRecords pipeline", (it) => {
     );
   });
 
-  describe("redirects (#207)", () => {
+  describe("redirects", () => {
     const dump =
       "<mediawiki>" +
       pageXml(1, '<redirect title="Ada &amp; &quot;Lovelace&quot;" />') +

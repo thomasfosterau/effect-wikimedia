@@ -1,5 +1,5 @@
 /**
- * The citation view over a parsed {@link Document} (#209): every `<ref>`
+ * The citation view over a parsed {@link Document}: every `<ref>`
  * with its `name` and `group`, its body parsed as wikitext with spans in the
  * page (so a splice edit there needs no arithmetic), and the citation
  * templates in it. A projection, not a change to the tree: each

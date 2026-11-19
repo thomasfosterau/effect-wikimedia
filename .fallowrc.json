@@ -1,49 +1,24 @@
-// fallow's three gates: dead code and duplication (`vp run fallow`) and
-// complexity (`vp run fallow:health`), each described at its settings below.
-// The dead-code gate (#20): `fallow dead-code` fails on an unused file,
-// export, type or dependency, a duplicate export, an unresolved import or a
-// circular dependency. fallow's vite, vitest, typescript, typedoc and
-// changesets plugins find most entry points on their own (`fallow list
-// --entry-points`); `entry` adds the ones loaded in a way they can't see.
 {
   "$schema": "./node_modules/fallow/schema.json",
   "entry": [
-    // The published surface: the package's one entry point. package.json
-    // `main` already makes it one; listing it here keeps every export on the
-    // barrel counted as used whatever fallow's manifest detection does.
     "src/index.ts",
-    // Type-checked against the emitted `dist/` by `vp run check:dist`
-    // (tests/dist-consumer/tsconfig.json), never imported.
+    // Type-checked against `dist/` by `vp run check:dist`, never imported.
     "tests/dist-consumer/index.ts",
-    // A TypeDoc plugin, loaded by path from typedoc.json's `plugin` list.
+    // A TypeDoc plugin, loaded by path from typedoc.json.
     "scripts/typedoc-effect-bases.mjs"
   ],
-  // Only devDependencies whose bins the Vite+ tasks in vite.config.ts run:
-  // fallow reads commands from package.json `scripts`, not from `run.tasks`.
-  "ignoreDependencies": [
-    // `tsc` (the patched TS 7 compiler) in the `check` and `check:dist` tasks.
-    "@typescript/native",
-    // `fallow` in the `fallow` task.
-    "fallow"
-  ],
+  // Bins run only by vite.config.ts tasks, which fallow doesn't read.
+  "ignoreDependencies": ["@typescript/native", "fallow"],
   "ignoreExports": [
-    // Exempt from the duplicate-exports check (`ignoreExports` also exempts
-    // them from unused-exports, a no-op while both namespaces are public):
-    // `Action.MAX_SEARCH_RESULTS` / `Action.normaliseSearch` and their
-    // `Wikidata` namesakes are separate public API on separate namespaces
-    // (`export * as` in src/index.ts), so no
-    // import resolves ambiguously, and neither module may import the other
-    // (module-per-surface, AGENTS.md).
+    // Same-named public API on separate namespaces, which may not import each other.
     {
       "file": "src/{action,wikidata}.ts",
       "exports": ["MAX_SEARCH_RESULTS", "normaliseSearch"]
     }
   ],
-  // Module-per-surface (AGENTS.md), as fallow import boundaries: each surface
-  // imports only `Core`, except `Dumps` (decodes through `Wikidata`'s model)
-  // and `Reconciliation` (drives `Action` and `Wikidata`); `Wikitext` imports
-  // no other surface. The barrel, src/index.ts, sits in no zone.
-  // tests/tree-shaking.test.ts pins the same property on the bundled output.
+  // Module-per-surface: each surface imports only `core`, except `dumps` and
+  // `reconciliation`; `wikitext` imports nothing. tests/tree-shaking.test.ts
+  // checks the same on the bundled output.
   "boundaries": {
     "zones": [
       { "name": "core", "patterns": ["src/core.ts"] },
@@ -70,41 +45,18 @@
   },
   "rules": {
     "boundary-violation": "error",
-    // fallow defaults both to `warn`, which prints without failing. Every
-    // dependency here is a devDependency (`effect` is also the one peer), and
-    // every version lives in the strict catalog, so at `warn` the gate would
-    // check no dependency at all.
     "unused-dev-dependencies": "error",
     "unused-catalog-entries": "error"
   },
-  // The complexity ratchet (`vp run fallow:health`, #102). Every function is
-  // held to fallow's default ceilings (cyclomatic 20, cognitive 15, CRAP 30);
-  // the functions already over one on 2026-10-14 are pinned below at today's
-  // value instead, so none of them may get worse and no new one may join
-  // them. CRAP is `CC^2 * (1 - coverage)^3 + CC`, computed from the Istanbul
-  // coverage `vp run test:unit` writes; without that file fallow exits 2
-  // rather than fall back to its estimate, which disagrees with these limits.
+  // CRAP scores need the coverage `vp run test:unit` writes.
   "health": {
     "coverage": "coverage/coverage-final.json"
-    // No function is pinned any more: `normaliseTitle` (src/core.ts) and
-    // `resolveLine` (src/wikitext/quotes.ts), the two over a limit when the
-    // gate landed, came within the defaults in the effect lint sweep, so
-    // their `thresholdOverrides` entries are gone and every function is held
-    // to the defaults.
   },
-  // The duplication ratchet (also `vp run fallow`, #102): `fallow dupes
-  // --fail-on-issues` fails on any clone group (5+ lines, 50+ tokens) not
-  // listed here. Each entry is a group's content fingerprint and instance
-  // count, so moving the code keeps it ignored, while editing either copy or
-  // adding a third makes it a new group that fails. After removing a clone,
-  // delete its entry (AGENTS.md).
   "duplicates": {
     "ignoredClones": [
-      // src/action.ts:112-122 and :200-208 (11 lines).
+      // src/action.ts: two near-identical request builders.
       "dup:f34feed5:2"
     ]
   },
-  // A file fallow can't parse is a file it can't vouch for: fail rather than
-  // pass on a partial graph.
   "failOnParseError": true
 }

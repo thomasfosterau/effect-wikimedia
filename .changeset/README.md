@@ -1,5 +1,3 @@
 # Changesets
 
-This folder holds [Changesets](https://github.com/changesets/changesets) for `@thomasfosterau/effect-wikimedia`.
-
-Every change that should appear in a changelog ships with a changeset — a markdown file in this folder created by `pnpm changeset`. See [PUBLISHING.md](../PUBLISHING.md) for the full release flow.
+Add one with `vp exec changeset` for every change to the published package's behaviour. See [docs/PUBLISHING.md](../docs/PUBLISHING.md).

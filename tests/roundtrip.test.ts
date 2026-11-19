@@ -1,5 +1,5 @@
 /**
- * The headline acceptance criteria for the wikitext parser (issue #1065):
+ * The headline acceptance criteria for the wikitext parser:
  *
  * - **Corpus round-trip**: recorded real-article fixtures (including
  *   pathological nesting) parse without error and `serialize(parse(x)) === x`
@@ -163,7 +163,7 @@ describe("fuzz: never throws, always round-trips", () => {
   });
 });
 
-// Table-heavy fuzz (#132): the table scans step over nested constructs, so
+// Table-heavy fuzz: the table scans step over nested constructs, so
 // mix table markers with their openers and closers, balanced or not.
 const TABLE_ATOMS = [
   "|}",
@@ -209,7 +209,7 @@ function randomTable(rand: () => number): string {
   return rand() < 0.8 ? `${out}\n|}` : out;
 }
 
-describe("fuzz: tables with nested constructs (#132)", () => {
+describe("fuzz: tables with nested constructs", () => {
   it("round-trips 3000 random tables with every span its own source slice", () => {
     const rand = prng(0x13213213);
     Arr.forEach(

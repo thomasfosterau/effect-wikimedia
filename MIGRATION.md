@@ -2,7 +2,7 @@
 
 ## 0.9 → 0.10: `Option` for absent values
 
-0.10 replaces `null` and `undefined` with Effect's `Option` wherever this package reports that a value is missing (#224). It is breaking for every surface, but the change is mechanical: each place you checked for `null` or `undefined`, you now match on an `Option`.
+0.10 replaces `null` and `undefined` with Effect's `Option` wherever this package reports that a value is missing. It is breaking for every surface, but the change is mechanical: each place you checked for `null` or `undefined`, you now match on an `Option`.
 
 ### If you only use `Reconciliation`
 

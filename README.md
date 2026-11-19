@@ -1,8 +1,9 @@
 # @thomasfosterau/effect-wikimedia
 
-**Disclaimer:** This is an experimental library mostly written using Claude Code. Not extensively tested, still a work in progress, use at your own risk.
-
 Typed [Effect](https://effect.website) clients for Wikimedia: Wikipedia, Wikidata, Commons, the Wikidata Query Service, wikitext and dumps.
+
+> [!CAUTION]
+> Experimental and pre-1.0, largely written with Claude Code and not extensively tested. The API may change between minor versions.
 
 ## Install
 
@@ -10,7 +11,7 @@ Typed [Effect](https://effect.website) clients for Wikimedia: Wikipedia, Wikidat
 pnpm add @thomasfosterau/effect-wikimedia effect
 ```
 
-`effect` (`^4.0.0`) is a peer dependency.
+`effect` (`^4.0.0`) is a peer dependency. ESM only; Node 22+, browsers and Workers (only `Dumps`' file sources need Node).
 
 ## Example
 
@@ -25,7 +26,7 @@ const page = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 
 ## Entry points
 
-Every namespace is exported from the package root and tree-shakes independently.
+Every namespace is exported from the package root and from its own subpath (`@thomasfosterau/effect-wikimedia/Action`), and tree-shakes independently.
 
 | Namespace        | For                                                                                                           |
 | ---------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -52,4 +53,4 @@ Questions, bug reports, and reports from Wikimedia operators about this client's
 
 ## License
 
-MIT. The `Wikitext` HTML entity table comes from the HTML Standard and the `character-entities` package; their licenses are in [THIRD_PARTY_NOTICES.md](https://unpkg.com/@thomasfosterau/effect-wikimedia/THIRD_PARTY_NOTICES.md).
+[MIT](https://unpkg.com/@thomasfosterau/effect-wikimedia/LICENSE.md). The `Wikitext` HTML entity table comes from the HTML Standard and the `character-entities` package; their licenses are in [THIRD_PARTY_NOTICES.md](https://unpkg.com/@thomasfosterau/effect-wikimedia/THIRD_PARTY_NOTICES.md).

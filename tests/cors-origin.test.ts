@@ -1,5 +1,5 @@
 /**
- * The Action API's anonymous-CORS parameter (issue #49): every `/w/api.php`
+ * The Action API's anonymous-CORS parameter: every `/w/api.php`
  * request carries exactly one `origin=*`, whichever surface sends it, and
  * REST (`/w/rest.php`) and WDQS requests carry none. Drives each surface
  * through the real `Core.wikimediaClientLayer` over a stubbed

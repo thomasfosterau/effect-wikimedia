@@ -1,14 +1,14 @@
 /**
- * The wikitext parser (website#1065): raw wikitext in, a typed {@link Document}
+ * The wikitext parser: raw wikitext in, a typed {@link Document}
  * out. Fail-soft by construction — every construct either matches whole or
  * fails without consuming input, so its opening delimiter degrades to
  * {@link Text}. The parser therefore *never throws* and *always tiles* its
  * input (see the invariants in `./ast.ts`), which is what makes the
  * round-trip and fuzz guarantees hold.
  *
- * ## Design notes (the decisions website#1065 left open)
+ * ## Design notes
  *
- * - **Parser combinators (#168).** The grammar is written with
+ * - **Parser combinators.** The grammar is written with
  *   `@thomasfosterau/effect-parse`: each construct (template, argument,
  *   wikilink, external link, autolink, comment, tag, entity, apostrophe run,
  *   heading, table) is a `Parser` over the source string, composed from
@@ -84,7 +84,7 @@ const MAX_DEPTH = 100;
  * Whether a tag name is one of {@link EXTENSION_TAGS}, tested as one
  * anchored alternation: the parser asks at every `<`, and a `HashSet` lookup
  * (hashing the name, then walking the trie) made a tag-heavy article parse
- * about a tenth slower (#174). The names are lowercase ASCII letters, so
+ * about a tenth slower. The names are lowercase ASCII letters, so
  * none needs escaping.
  */
 const EXTENSION_TAG_NAME = new RegExp(`^(?:${Arr.join(Arr.fromIterable(EXTENSION_TAGS), "|")})$`);
@@ -241,7 +241,7 @@ function addFailed(state: State, s: SessionState, pos: number, kind: OpenKind): 
  * successes are remembered too (in a cache of its own, `perSession`). Openers
  * that close only at the page end reach that level over and over, and a
  * template there with a parameter on every later line would otherwise
- * parse the rest of the page each time (#179).
+ * parse the rest of the page each time.
  */
 function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
   const deepest = perSession<Remembered<A>>();
@@ -281,7 +281,7 @@ function memoFailure<A>(kind: OpenKind, self: WikiParser<A>): WikiParser<A> {
  * Openers that close only at the page end each nest the next, so they share
  * their tails: without this, a page of lines each opening a template, with
  * a `|` between them, would have every template up to {@link MAX_DEPTH}
- * deep parse each later line as one of its parameters (#179).
+ * deep parse each later line as one of its parameters.
  */
 function segmentsThenClose<A>(
   kind: OpenKind,
@@ -377,7 +377,7 @@ function rememberTail<A>(
  * search per `key` is remembered: its match is also the first one for any
  * later offset up to that match (or, with no match, any later offset at
  * all), so a run of unclosed openers (`<!--`, `<ref>`, `{|`) costs one scan
- * of the source rather than one per opener (#152, #159).
+ * of the source rather than one per opener.
  */
 function nextClose(
   state: State,
@@ -422,7 +422,7 @@ const inRegion = (state: State, match: Option.Option<CloseMatch>): Option.Option
  * Succeeds, consuming nothing, when `close` occurs in the rest of the
  * region, and fails otherwise. A construct that can only end at `close`
  * checks this first, so a run of unclosed openers fails each at once
- * instead of scanning the rest of the input each (#159).
+ * instead of scanning the rest of the input each.
  */
 const canClose = (close: string): WikiParser<void> =>
   Parser.make((state) =>
@@ -544,7 +544,7 @@ function atStop(state: State, stop: Stop): boolean {
  * ends within the region; otherwise the region end. Every delimiter starts
  * with a {@link SPECIAL} character, so this is where a fragment that opens
  * no construct stops. The searches are {@link nextClose}'s, so a run of
- * such fragments over the same text scans it once (#179).
+ * such fragments over the same text scans it once.
  */
 function firstStop(state: State, stop: Stop): number {
   return Arr.reduce(stop.delimiters, state.end, (first, delimiter) => {
@@ -556,7 +556,7 @@ function firstStop(state: State, stop: Stop): number {
 /**
  * Records that a fragment with `stop` that started at `from` ran to the
  * region end (where the cursor is) without meeting it, if it did, so a later one with the same stop and region end
- * that reaches `from` jumps to that end (see `fragment`; #179).
+ * that reaches `from` jumps to that end (see `fragment`).
  *
  * A fragment's walk from an offset depends only on that offset, its stop
  * and the region end, so the later walk would run to the end as well. Every
@@ -589,7 +589,7 @@ function isDoomed(state: State, stop: Stop, pos: number): boolean {
  * {@link MAX_DEPTH}): one text run up to its stop, found by search rather
  * than by walking it, since every opener tried one level up walks it again:
  * a page of openers closed only at its end would cost time quadratic in its
- * length (#179).
+ * length.
  */
 function textToStop(state: State, stop: Stop): Node[] {
   const from = state.pos;
@@ -730,7 +730,7 @@ const template: WikiParser<Template> = memoFailure(
 // The scans that find a table's structure (where a line ends, the `||`/`!!`
 // cell separators, a cell's attribute `|`) step over every nested construct
 // whose `|`, `!` or line break belongs to it rather than to the table: a
-// template, argument, wikilink, closed comment or extension tag (#132; see
+// template, argument, wikilink, closed comment or extension tag (see
 // `findTopLevel`). MediaWiki gets the same effect, wikilinks aside, by
 // building tables only after its preprocessor has expanded templates and
 // hidden comments and extension tags. Line-start markers are therefore read
@@ -821,7 +821,7 @@ function fillerLine(state: State): boolean {
  * it was at `at`, or the region end when none does. Each answer is
  * remembered per region end, with those for the tables nested inside it, so
  * a page of `{|` lines closed only at its end, or not at all, scans each
- * line once rather than once per enclosing `{|` (#179).
+ * line once rather than once per enclosing `{|`.
  */
 function nestedTableEnd(state: State, at: number): number {
   const ends = session(state).tableEnds;
@@ -883,7 +883,7 @@ const trailingNewline = Parser.optional(literal("\n"));
  * the first `|` in `[from, to)` outside a nested construct (see
  * `findTopLevel`) splits attributes from content, *unless* a `[[` or a
  * `-{` comes before it (MediaWiki's guard, `/\[\[|-\{/`, against reading a
- * wikilink's or a LanguageConverter rule's surroundings as attributes; #158).
+ * wikilink's or a LanguageConverter rule's surroundings as attributes).
  */
 interface CellSplit {
   /** The attribute text, or `None` when no attribute `|` splits the cell. */
@@ -926,7 +926,7 @@ interface LinePiece {
  * `|}` line follows, so the table cannot close, and its cells' content is
  * not parsed. Parsing it first would make a page of `{|` lines, each
  * opening a cell, cost time quadratic in its length, since each table's
- * cell would hold the rest of the page (#179).
+ * cell would hold the rest of the page.
  */
 function linePieces(
   state: State,
@@ -979,7 +979,7 @@ function backtrackTo(state: State, start: number): Input.Fail {
 
 /**
  * A `|+` caption line, split on `||` into one caption per piece, as
- * MediaWiki emits a `<caption>` per piece (#157).
+ * MediaWiki emits a `<caption>` per piece.
  */
 const tableCaptions: WikiParser<Omit<TableCaption, "row">[]> = Parser.make((state) => {
   const start = state.pos;
@@ -1001,7 +1001,7 @@ const tableCaptions: WikiParser<Omit<TableCaption, "row">[]> = Parser.make((stat
  * Every cell opened on a `!`/`|` marker line, the last one extended across
  * any following non-marker lines. A data line splits on `||`; a header line
  * on `!!` and `||` alike, since MediaWiki rewrites `!!` to `||` there before
- * splitting (#157). Leaves the cursor at the next marker line (or the
+ * splitting. Leaves the cursor at the next marker line (or the
  * region end).
  */
 const tableCells: WikiParser<TableCell[]> = Parser.make((state) => {
@@ -1085,7 +1085,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
       Captions:
         ({ captions }) =>
         (body: TableBodyBuilder) => {
-          // A caption line ends the row it interrupts (#131); its pieces
+          // A caption line ends the row it interrupts; its pieces
           // all precede the next row.
           flushRow(body, captions[0].span.start);
           const row = body.rows.length;
@@ -1109,7 +1109,7 @@ const addTableItem: (item: TableItem) => (body: TableBodyBuilder) => void =
  * the next `|-`, the next caption or the closing `|}` at `closeStart`. A
  * caption ends the row it interrupts, as an HTML parser closes the row at
  * the `<caption>` MediaWiki emits there and opens a new one for the next
- * cell (#131); each caption records the index of the row it precedes.
+ * cell; each caption records the index of the row it precedes.
  */
 function tableRows(items: readonly TableItem[], closeStart: number): TableBody {
   const body: TableBodyBuilder = { captions: [], rows: [], row: Option.none() };
@@ -1259,8 +1259,7 @@ const AUTOLINK_EXTRA_SPACES = String.fromCharCode(
 /**
  * Protocols recognised for bare (unbracketed) URL autolinking — see
  * {@link AutoLink}. Deliberately narrower than {@link PROTOCOLS}: only
- * `http`/`https`, matching the scope of website#1287's deferred autolinking
- * work. The body runs to one of MediaWiki's `EXT_LINK_URL_CLASS` stops.
+ * `http`/`https`. The body runs to one of MediaWiki's `EXT_LINK_URL_CLASS` stops.
  */
 const autoLinkCandidate = Parser.seq(
   Parser.alt(Ascii.caseless("https://"), Ascii.caseless("http://")),
@@ -1317,8 +1316,7 @@ const autoLink: WikiParser<AutoLink> = Parser.make((state) => {
 /**
  * A comment's body and its `-->`, when the first `-->` after the cursor ends
  * within the region; fails otherwise. The search is {@link nextClose}'s, so
- * a run of unclosed `<!--` in table cells scans the rest of the source once
- * (#152).
+ * a run of unclosed `<!--` in table cells scans the rest of the source once.
  */
 const commentBody: WikiParser<string> = Parser.make((state) => {
   const found = inRegion(state, nextLiteral(state, "-->", state.pos));
@@ -1375,7 +1373,7 @@ const closeTags = MutableHashMap.empty<
  * An extension tag's raw body and its close tag (`</name>`, any case,
  * optional whitespace before the `>`), memoised per tag name. Fails when no
  * close tag ends within the region. The search is {@link nextClose}'s, so a
- * run of unclosed `<ref>` scans the rest of the source once (#152).
+ * run of unclosed `<ref>` scans the rest of the source once.
  */
 function extensionBody(name: string): WikiParser<readonly [string, string]> {
   return Option.getOrElse(MutableHashMap.get(closeTags, name), () => {

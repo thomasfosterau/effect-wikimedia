@@ -114,7 +114,7 @@ export function itemToCandidate(
   };
 }
 
-// ── wbgetentities → enrich facts (website#613) ──────────────────────────
+// ── wbgetentities → enrich facts ──────────────────────────
 
 /** The values of every `value`-kind statement on `property`, in claim order. */
 function statementValues(

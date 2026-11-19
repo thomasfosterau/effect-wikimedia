@@ -1,5 +1,5 @@
 /**
- * Multistream decoding on workers (#211, slice 4): the record schemas'
+ * Multistream decoding on workers: the record schemas'
  * round trip, the worker handlers, and the main side over an in-process
  * worker pool whose messages cross a real `structuredClone` boundary
  * (`tests/helpers/workers.ts`). The fixture dump is the synthetic

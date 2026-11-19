@@ -1,5 +1,5 @@
 /**
- * The infobox view (#209): infobox detection by name, fields as trimmed
+ * The infobox view: infobox detection by name, fields as trimmed
  * fragments that keep the template's own nodes, and their text.
  *
  * @module tests/infobox

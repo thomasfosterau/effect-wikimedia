@@ -1,6 +1,6 @@
 /**
  * Redirect detection (`src/wikitext/redirect.ts`): MediaWiki's
- * `#REDIRECT [[Target]]` rule over a parsed document (#207).
+ * `#REDIRECT [[Target]]` rule over a parsed document.
  *
  * @module tests/redirect
  */

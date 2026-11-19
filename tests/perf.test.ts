@@ -1,29 +1,7 @@
 /**
- * Performance floor (issue #1065): a full large article parses in
- * single-digit milliseconds — this parser is meant for dump pipelines, where
- * per-article cost is multiplied by millions.
- *
- * The threshold is a deliberately loose ceiling (well above the observed
- * single-digit figure) so the gate survives slow/contended CI runners while
- * still catching an order-of-magnitude regression. The measured best time is
- * logged for visibility.
- *
- * **The ceiling was raised 30 ms → 60 ms (#1540).** The old value did not in
- * fact survive a contended runner, despite the paragraph above claiming it
- * would: after #1523 collapsed CI into a single job, every task shares one
- * runner, and this test failed four times across three different heads —
- * including `trunk` itself — at 37.97, 33.28, 31.25 and 30.71 ms. Off that
- * runner the same measurement is **1.16 ms** on a developer machine and
- * **2.57 ms** in a loaded container, so the CI numbers are ~12–33× the real
- * cost and are measuring runner contention, not the parser.
- *
- * This is a **deliberate loosening of a real gate**, made knowingly rather than
- * by drift: `docs/performance.md` is explicit that performance regresses
- * silently in this repo, and a 60 ms ceiling against a 1–3 ms baseline is 20×
- * headroom at worst, so only an order-of-magnitude regression now trips it.
- * That is the stated intent of this test, but the margin for anything subtler
- * is gone. The alternative directions — a calibration-relative ratio, or
- * giving timing-sensitive tasks their own runner — stay open on #1540.
+ * Performance floors: a large article parses in single-digit milliseconds
+ * (parsing is per article in dump pipelines). The ceilings are loose so a
+ * contended CI runner passes while an order-of-magnitude regression fails.
  *
  * @module tests/perf
  */
@@ -86,7 +64,7 @@ function bestParseTime(src: string, runs = 20): number {
 /** A one-cell wikitable holding `content`. */
 const tableCell = (content: string): string => `{|\n| ${content}\n|}\n`;
 
-// The table scans step over nested constructs (#132) using one linear
+// The table scans step over nested constructs using one linear
 // bracket-matching pass. These guard against that turning quadratic, which
 // recursive descent does on unclosed braces: each failed `{{` rescans the rest
 // of the input (a first attempt that skipped with the parser's own `try*`
@@ -94,7 +72,7 @@ const tableCell = (content: string): string => `{|\n| ${content}\n|}\n`;
 // length). Uncontended, each
 // parse takes a few ms; the 250 ms ceiling leaves the same contended-runner
 // headroom as the article test above while staying far below a quadratic scan.
-describe("performance floor: wikitables (#132)", () => {
+describe("performance floor: wikitables", () => {
   const row =
     '|-\n| {{flagicon|FRA}} [[France]] || style="x" | 1<ref>{{cite web|url=http://x|title=y}}</ref>' +
     ' || {{Infobox\n|a=b\n}}\n! scope="row" | {{abbr|A|B}} !! [[a|b]] <!-- c -->\n';
@@ -132,14 +110,14 @@ describe("performance floor: wikitables (#132)", () => {
 const repeatedCellRows = (cell: string, rows: number): string =>
   `{|\n${`|-\n| ${cell} || b\n| c\n`.repeat(rows)}|}\n`;
 
-// An unclosed opener whose close is searched for past the region it sits in
-// (#152), or a construct that rescans the rest of the input before failing
-// (#159), costs time quadratic in the number of openers. Each close search is
+// An unclosed opener whose close is searched for past the region it sits in,
+// or a construct that rescans the rest of the input before failing,
+// costs time quadratic in the number of openers. Each close search is
 // now remembered, and a table, template, argument or wikilink that cannot
 // close fails at once. On `trunk` before the fix these took 0.4 s to 14 s
 // each; with it, a few tens of ms at most, under the same 250 ms ceiling as
 // above.
-describe("performance floor: unclosed openers (#152, #159)", () => {
+describe("performance floor: unclosed openers", () => {
   Arr.forEach(
     [
       ["a table with an unclosed <!-- in every row", repeatedCellRows("<!-- x", 8000)],
@@ -163,13 +141,13 @@ describe("performance floor: unclosed openers (#152, #159)", () => {
   );
 });
 
-// Openers that do close, but only at the very end of the page (#179): each
+// Openers that do close, but only at the very end of the page: each
 // opener nests the next, up to the parser's depth limit, and once the
 // innermost has failed every enclosing one walked the rest of the page again,
 // so the openers failed in time quadratic in their number. Before the fix
 // these took 0.5 s to 8 s each on a developer machine (the last over a
 // minute on a loaded one); with it, a few ms each.
-describe("performance floor: openers closed only at the page end (#179)", () => {
+describe("performance floor: openers closed only at the page end", () => {
   Arr.forEach(
     [
       ["a page of {| lines closed by one |}", `${"{|\n".repeat(8000)}|}\n`],

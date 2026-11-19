@@ -184,7 +184,7 @@ layer(Core.wikimediaLayer)("Rest.getPageMetadata", (it) => {
       }),
   );
 
-  // MediaWiki's default `$wgLegalTitleChars` never allows these (#165).
+  // MediaWiki's default `$wgLegalTitleChars` never allows these.
   it.effect.each(["Foo<Bar", "Foo>Bar", "Foo[Bar", "Foo]Bar", "Foo{Bar", "Foo}Bar"])(
     "rejects the illegal-character title %j before any request",
     (title) =>
@@ -253,7 +253,7 @@ layer(Core.wikimediaLayer)("Rest.getRevisionMetadata", (it) => {
         contentModel: Option.some("wikitext"),
         licenseUrl: Option.some("https://creativecommons.org/licenses/by-sa/4.0/"),
       });
-      // The metadata-only variant, without the revision's wikitext (#148).
+      // The metadata-only variant, without the revision's wikitext.
       expect(new URL(urls[0] ?? "").pathname).toBe("/w/rest.php/v1/revision/987654/bare");
     }),
   );

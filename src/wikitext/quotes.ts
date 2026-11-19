@@ -108,7 +108,7 @@ const PRECEDING_PRIORITY: readonly Preceding[] = [
  * What `before`, the text preceding a `'''` run, ends in, as `doQuotes`
  * reads it: only `' '` counts as a space, an empty text (the run starts the
  * line) is a longer word, and, as in PHP's `substr($s, -2, 1)`, the
- * second-to-last character of a one-character text is that character (#137).
+ * second-to-last character of a one-character text is that character.
  */
 function precedingKind(before: string): Preceding {
   const x1 = before.at(-1);
@@ -120,7 +120,7 @@ function precedingKind(before: string): Preceding {
 /**
  * The text `doQuotes` sees before token `i`: the line from the previous run
  * on it (or from the line start) up to this run, plus the literal apostrophe
- * a run of four sheds (#137).
+ * a run of four sheds.
  */
 function precedingText(
   tokens: readonly Formatting[],
@@ -139,7 +139,7 @@ function resolveLine(tokens: readonly Formatting[], src: string): Normalised[] {
   const norm = tokens.map((t) => normalise(t.marks.length));
   const numBold = Arr.countBy(norm, (n) => n.markupLen !== 2);
   const numItalics = Arr.countBy(norm, (n) => n.markupLen !== 3);
-  // MediaWiki requires an odd count of both (#137).
+  // MediaWiki requires an odd count of both.
   if (numBold % 2 === 0 || numItalics % 2 === 0) return norm;
   // Reinterpret one `'''` as a literal apostrophe + `''`.
   const kinds = tokens.map((_, i) =>

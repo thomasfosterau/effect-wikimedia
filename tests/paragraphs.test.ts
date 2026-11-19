@@ -1,5 +1,5 @@
 /**
- * The paragraph view (#209): prose runs split at blank and block-level
+ * The paragraph view: prose runs split at blank and block-level
  * lines, lossless back to their source, with the document's own nodes kept.
  *
  * @module tests/paragraphs

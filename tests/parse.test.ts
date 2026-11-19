@@ -231,7 +231,7 @@ describe("html entities", () => {
 
   // MediaWiki's `CHAR_REFS_REGEX` reads a name as ASCII letters and digits or
   // any non-ASCII character, so its Hebrew and Arabic aliases for `&rlm;`
-  // are entities (#118).
+  // are entities.
   it("parses a named entity whose name has non-ASCII letters", () => {
     const doc = parse("a&רלמ;b&café;c");
     expect(doc.children.map((n) => [Struct.get(n, "_tag"), serializeNodes([n])])).toEqual([
@@ -257,7 +257,7 @@ describe("html entities", () => {
   });
 });
 
-describe("bare url autolinking (issue #1287)", () => {
+describe("bare url autolinking", () => {
   it("recognises a bare http(s) url in running text", () => {
     const l = only("See http://example.org for details.", "AutoLink");
     expect(l.url).toBe("http://example.org");
@@ -333,7 +333,7 @@ describe("bare url autolinking (issue #1287)", () => {
   });
 });
 
-describe("wikitables (issue #1287)", () => {
+describe("wikitables", () => {
   it("parses a minimal table with an implicit first row", () => {
     const t = only("{|\n| a\n|}", "Table");
     expect(t.open).toBe("\n");
@@ -464,7 +464,7 @@ const names = (nodes: readonly Node[]): string[] =>
 /** The cells of the first row of the table `src` parses to. */
 const firstRowCells = (src: string) => table(src).rows[0].cells;
 
-describe("wikitables: nested constructs in cells and captions (#132)", () => {
+describe("wikitables: nested constructs in cells and captions", () => {
   it("keeps a template's own pipe out of the attribute split (the issue's example)", () => {
     const doc = parse("{|\n| {{flag|France}}\n|}");
     const cell = only("{|\n| {{flag|France}}\n|}", "Table").rows[0].cells[0];
@@ -627,7 +627,7 @@ describe("wikitables: nested constructs in cells and captions (#132)", () => {
   });
 });
 
-describe("wikitables: separators on header and caption lines (#157)", () => {
+describe("wikitables: separators on header and caption lines", () => {
   it("splits a header line on || as well as !!, every piece a header cell", () => {
     const cells = table("{|\n! a || b !! c\n|}").rows[0].cells;
     expect(
@@ -702,7 +702,7 @@ const layout = (t: Table): string[] => {
   ];
 };
 
-describe("wikitables: a caption after a row or cell (#131)", () => {
+describe("wikitables: a caption after a row or cell", () => {
   it("keeps a caption between two cells where it was, ending the first row (the issue's first repro)", () => {
     const t = table("{|\n|a\n|+cap\n|b\n|}");
     expect(layout(t)).toEqual(["row:a", "caption:cap", "row:b"]);
@@ -742,7 +742,7 @@ describe("wikitables: a caption after a row or cell (#131)", () => {
   });
 });
 
-describe("wikitables: the -{ attribute guard (#158)", () => {
+describe("wikitables: the -{ attribute guard", () => {
   it("reads a cell with -{ before its first | as all content (the issue's example)", () => {
     const cells = table("{|\n| -{ a|b }- || c\n|}").rows[0].cells;
     expect(cells.map((c) => [Option.getOrUndefined(c.attrs), text(c.content)])).toEqual([
@@ -781,7 +781,7 @@ function sole(src: string): readonly [string, number, number] {
   return [Struct.get(structural[0], "_tag"), structural[0].span.start, structural[0].span.end];
 }
 
-describe("openers closed only at the page end (#179)", () => {
+describe("openers closed only at the page end", () => {
   // Past the nesting limit (100), so the memos that make these linear are
   // all exercised; only the last opener closes, as before they were added.
   it.each([
@@ -806,7 +806,7 @@ describe("openers closed only at the page end (#179)", () => {
 const ada = readFixture("ada-lovelace.txt");
 
 layer(NodeServices.layer)(
-  "regression: existing vocabulary is unaffected by tables/autolink (issue #1287)",
+  "regression: existing vocabulary is unaffected by tables/autolink",
   (it) => {
     it.effect(
       "still round-trips a real article with no tables or bare urls, byte-identically",

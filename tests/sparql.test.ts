@@ -215,7 +215,7 @@ describe("Sparql.normaliseTerm", () => {
     expect(term).toMatchObject({ _tag: "unknown", type: Option.some("triple") });
   });
 
-  it("cuts an unrecognised type at 200 UTF-16 code units (#150)", () => {
+  it("cuts an unrecognised type at 200 UTF-16 code units", () => {
     const term = Sparql.normaliseTerm({ type: "z".repeat(20_000) });
     expect(term).toEqual({
       _tag: "unknown",
@@ -236,7 +236,7 @@ describe("Sparql.normaliseTerm", () => {
 
 // ── ASK ──────────────────────────────────────────────────────────────────
 
-layer(servicesLayer)("Sparql.query — ASK (#149)", (it) => {
+layer(servicesLayer)("Sparql.query — ASK", (it) => {
   // The SPARQL 1.1 Query Results JSON Format's ASK form.
   it.effect.each([true, false])("carries an ASK answer of %s through", (answer) =>
     Effect.gen(function* () {

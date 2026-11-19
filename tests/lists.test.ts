@@ -1,5 +1,5 @@
 /**
- * The list view (#209): list lines grouped into lists, markers and kinds,
+ * The list view: list lines grouped into lists, markers and kinds,
  * per-line text split with exact spans, and the document's own nodes kept.
  *
  * @module tests/lists

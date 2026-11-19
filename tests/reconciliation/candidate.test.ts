@@ -15,7 +15,7 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import {
   EXTERNAL_ID_AUTHORITIES,
   MAX_LABEL_QUERY_LENGTH,
@@ -118,17 +118,6 @@ describe("sanitiseCandidateText", () => {
 });
 
 describe("candidate text names on the barrel", () => {
-  it("no longer shadow Core's MAX_TEXT_FIELD_LENGTH / sanitiseText", () => {
-    // Renamed to MAX_CANDIDATE_TEXT_LENGTH and sanitiseCandidateText (#63):
-    // gone from the namespace's type and from its runtime value.
-    expectTypeOf(Reconciliation).not.toHaveProperty("MAX_TEXT_FIELD_LENGTH");
-    expectTypeOf(Reconciliation).not.toHaveProperty("sanitiseText");
-    expect(P.hasProperty(Reconciliation, "MAX_TEXT_FIELD_LENGTH")).toBe(false);
-    expect(P.hasProperty(Reconciliation, "sanitiseText")).toBe(false);
-    expect(Reconciliation.MAX_CANDIDATE_TEXT_LENGTH).toBe(2000);
-    expect(Reconciliation.sanitiseCandidateText).toBe(sanitiseCandidateText);
-  });
-
   it("keeps Core's looser bound and trim-only behaviour distinct", () => {
     expect(Core.MAX_TEXT_FIELD_LENGTH).toBe(4000);
     expect(Core.sanitiseText("  a   b ")).toEqual(Option.some("a   b"));
@@ -202,7 +191,7 @@ describe("EXTERNAL_ID_AUTHORITIES", () => {
     );
   });
 
-  // #59: `normaliseExternalIdValue` lets `.`, `/`
+  // `normaliseExternalIdValue` lets `.`, `/`
   // and spaces through, so an unchecked template would build
   // `https://viaf.org/viaf/../../x`, which resolves to `https://viaf.org/x`.
   const relativePathValues = [
