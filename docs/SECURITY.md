@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately to Thomas Foster at [me@thomasfoster.au](mailto:me@thomasfoster.au), not in a public channel (the source repository is private). Include a description, reproduction steps and the affected version.
+Report vulnerabilities privately to Thomas Foster at [me@thomasfoster.au](mailto:me@thomasfoster.au), not in a public issue or other public channel. Include a description, reproduction steps and the affected version.
 
 ## Scope
 
@@ -12,5 +12,5 @@ The package is an HTTP client for public Wikimedia APIs and a parser for untrust
 
 - Releases use npm trusted publishing; there is no long-lived npm token. The release jobs install with `--ignore-scripts`.
 - Workflows default to `permissions: {}`, never persist checkout credentials, and pin actions by `.github/workflows/actions.lock`.
-- `minimumReleaseAge` holds new third-party versions for 8 hours; Dependabot waits 1 day. CI runs `pnpm audit --audit-level high`.
+- `minimumReleaseAge` holds new third-party versions for 24 hours; Dependabot waits 1 day. CI runs `pnpm audit --audit-level high`.
 - The only runtime dependency is the first-party `@thomasfosterau/effect-parse`, besides the `effect` peer.

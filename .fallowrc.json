@@ -3,9 +3,7 @@
   "entry": [
     "src/index.ts",
     // Type-checked against `dist/` by `vp run check:dist`, never imported.
-    "tests/dist-consumer/index.ts",
-    // A TypeDoc plugin, loaded by path from typedoc.json.
-    "scripts/typedoc-effect-bases.mjs"
+    "tests/dist-consumer/index.ts"
   ],
   // Bins run only by vite.config.ts tasks, which fallow doesn't read.
   "ignoreDependencies": ["@typescript/native", "fallow"],

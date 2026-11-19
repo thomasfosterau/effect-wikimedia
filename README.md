@@ -45,11 +45,10 @@ Every namespace is exported from the package root and from its own subpath (`@th
 - [Requests: User-Agent, etiquette and CORS](https://unpkg.com/@thomasfosterau/effect-wikimedia/docs/requests.md)
 - [Dumps: bzip2, multistream and workers](https://unpkg.com/@thomasfosterau/effect-wikimedia/docs/dumps.md)
 - [Type-checking against the package](https://unpkg.com/@thomasfosterau/effect-wikimedia/docs/typescript.md)
-- [Migrating from 0.9 to 0.10](https://unpkg.com/@thomasfosterau/effect-wikimedia/MIGRATION.md)
 - [Changelog](https://unpkg.com/@thomasfosterau/effect-wikimedia/CHANGELOG.md)
 - The API reference is in each export's doc comments, shown in your editor and in the shipped `.d.ts` files.
 
-Questions, bug reports, and reports from Wikimedia operators about this client's traffic: [me@thomasfoster.au](mailto:me@thomasfoster.au). The source repository is private.
+Questions, bug reports, and reports from Wikimedia operators about this client's traffic: [me@thomasfoster.au](mailto:me@thomasfoster.au).
 
 ## License
 

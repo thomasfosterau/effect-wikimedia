@@ -43,4 +43,4 @@ Run `vp run ci`. CI ([ci.yml](../.github/workflows/ci.yml)) runs it on Node `lts
 
 ## Changesets
 
-Every change to the published package's behaviour or its `.d.ts` (doc comments included, as a `patch`) needs a changeset: `vp exec changeset`. Docs-, CI- and tooling-only changes need none. The package stays on 0.x: a breaking change is a `minor`, never a `major` (see [PUBLISHING.md](PUBLISHING.md#versioning)), and adds an entry to [MIGRATION.md](../MIGRATION.md). Never version or publish by hand: the Release workflow opens the `chore: version packages` PR, and merging it publishes.
+Every change to the published package's behaviour or its `.d.ts` (doc comments included, as a `patch`) needs a changeset: `vp exec changeset`. Docs-, CI- and tooling-only changes need none. The package stays on 0.x: a breaking change is a `minor`, never a `major` (see [PUBLISHING.md](PUBLISHING.md#versioning)), and its changeset says how to migrate. Never version or publish by hand: the Release workflow opens the `chore: version packages` PR, and merging it publishes.

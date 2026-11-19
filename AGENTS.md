@@ -11,7 +11,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 
 ## Pitfalls
 
-- **The README is the npm page** of a private repository: its links must stay absolute (unpkg), and the guides it links (`docs/dumps.md`, `docs/requests.md`, `docs/typescript.md`) are published through `package.json` `files`.
+- **The README is the npm page**: its links must stay absolute (unpkg), and the guides it links (`docs/dumps.md`, `docs/requests.md`, `docs/typescript.md`) are published through `package.json` `files`.
 - **No `major` changesets**: 1.0.0 was unpublished and can't be reused (docs/PUBLISHING.md).
 - **No live network in tests.** Wikimedia's projects are donation-funded; use the fixtures.
 - **`effect-tsgo patch` is version-locked.** `@effect/tsgo`, `@typescript/native` and `vite-plus` move together, or `vp install` fails; read the catalog comments first.

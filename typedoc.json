@@ -7,13 +7,6 @@
   "entryPoints": ["src/index.ts"],
   "out": "api-docs",
   "tsconfig": "tsconfig.json",
-  // Drops the members our classes inherit from Effect's base classes, keeping
-  // what a consumer uses: the `Service` shape of `Core.WikimediaClient` and
-  // `Reconciliation.WikidataLookup` (`Context.Service`), and the
-  // constructor, `_tag`, fields, `message` and `makeEffect` of the error
-  // classes (`Schema.TaggedError`). It fails docgen if a class on any
-  // other base still renders that base's internals.
-  "plugin": ["./scripts/typedoc-effect-bases.mjs"],
   // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
   // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
   "skipErrorChecking": true,
@@ -37,6 +30,26 @@
   "externalSymbolLinkMappings": {
     "effect": { "*": "https://effect.website/docs/v4/api/effect" }
   },
+  // The type-level brand of each error class (`Schema.TaggedError`'s second
+  // type argument), which has no runtime value to document.
+  "intentionallyNotDocumented": [
+    "Core.InvalidRequest.brand",
+    "Core.InvalidRequest.__type.brand",
+    "Core.RequestFailed.brand",
+    "Core.RequestFailed.__type.brand",
+    "Core.RateLimited.brand",
+    "Core.RateLimited.__type.brand",
+    "Reconciliation.InvalidQuery.brand",
+    "Reconciliation.InvalidQuery.__type.brand",
+    "Reconciliation.LookupFailed.brand",
+    "Reconciliation.LookupFailed.__type.brand",
+    "Dumps.MultistreamIndexError.brand",
+    "Dumps.MultistreamIndexError.__type.brand",
+    "Dumps.MultistreamRangeFailed.brand",
+    "Dumps.MultistreamRangeFailed.__type.brand",
+    "Dumps.SourceError.brand",
+    "Dumps.SourceError.__type.brand"
+  ],
   "validation": {
     "notExported": true,
     "invalidLink": true,

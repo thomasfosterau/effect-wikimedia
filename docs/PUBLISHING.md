@@ -8,7 +8,7 @@
 2. The Release workflow ([release.yml](../.github/workflows/release.yml)) opens or updates the `chore: version packages` PR, which bumps the version and writes `CHANGELOG.md`.
 3. Merging it publishes with `changeset publish` (`pnpm publish`, which does the OIDC exchange itself) after the `release` environment's approval, and tags the release.
 
-Don't add `--provenance`: the repository is private, and an explicit provenance request fails the publish. The release jobs install with `--ignore-scripts`, so no dependency script runs in a job holding `id-token: write`.
+Don't add `--provenance`: trusted publishing records provenance itself. The release jobs install with `--ignore-scripts`, so no dependency script runs in a job holding `id-token: write`.
 
 ## Versioning
 

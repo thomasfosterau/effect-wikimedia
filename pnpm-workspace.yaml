@@ -65,7 +65,7 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: false
 
-# Hold new versions for 8 hours; Dependabot's cooldown (1 day) is longer.
-minimumReleaseAge: 480
+# Hold new versions for 24 hours, matching Dependabot's 1-day cooldown.
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"
