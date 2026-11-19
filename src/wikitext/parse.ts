@@ -730,7 +730,7 @@ const template: WikiParser<Template> = memoFailure(
 // The scans that find a table's structure (where a line ends, the `||`/`!!`
 // cell separators, a cell's attribute `|`) step over every nested construct
 // whose `|`, `!` or line break belongs to it rather than to the table: a
-// template, argument, wikilink, closed comment or extension tag (; see
+// template, argument, wikilink, closed comment or extension tag (see
 // `findTopLevel`). MediaWiki gets the same effect, wikilinks aside, by
 // building tables only after its preprocessor has expanded templates and
 // hidden comments and extension tags. Line-start markers are therefore read
