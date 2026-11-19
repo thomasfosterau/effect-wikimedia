@@ -44,6 +44,42 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./Action": {
+      "types": "./dist/action.d.ts",
+      "import": "./dist/action.js"
+    },
+    "./Commons": {
+      "types": "./dist/commons.d.ts",
+      "import": "./dist/commons.js"
+    },
+    "./Core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./Dumps": {
+      "types": "./dist/dumps/index.d.ts",
+      "import": "./dist/dumps/index.js"
+    },
+    "./Reconciliation": {
+      "types": "./dist/reconciliation/index.d.ts",
+      "import": "./dist/reconciliation/index.js"
+    },
+    "./Rest": {
+      "types": "./dist/rest.d.ts",
+      "import": "./dist/rest.js"
+    },
+    "./Sparql": {
+      "types": "./dist/sparql.d.ts",
+      "import": "./dist/sparql.js"
+    },
+    "./Wikidata": {
+      "types": "./dist/wikidata.d.ts",
+      "import": "./dist/wikidata.js"
+    },
+    "./Wikitext": {
+      "types": "./dist/wikitext/index.d.ts",
+      "import": "./dist/wikitext/index.js"
     }
   },
   "publishConfig": {

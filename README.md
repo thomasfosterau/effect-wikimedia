@@ -26,7 +26,7 @@ const page = Action.getWikitext("en.wikipedia.org", "Douglas Adams").pipe(
 
 ## Entry points
 
-Every namespace is exported from the package root and tree-shakes independently.
+Every namespace is exported from the package root and from its own subpath (`@thomasfosterau/effect-wikimedia/Action`), and tree-shakes independently.
 
 | Namespace        | For                                                                                                           |
 | ---------------- | ------------------------------------------------------------------------------------------------------------- |

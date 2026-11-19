@@ -29,6 +29,8 @@ import {
   Wikidata,
   Wikitext,
 } from "@thomasfosterau/effect-wikimedia";
+import * as ActionSubpath from "@thomasfosterau/effect-wikimedia/Action";
+import * as WikitextSubpath from "@thomasfosterau/effect-wikimedia/Wikitext";
 
 /** `true` only when `A` and `B` are mutually assignable, invariantly. */
 type Equals<A, B> =
@@ -36,6 +38,11 @@ type Equals<A, B> =
 
 /** Fails to type-check unless its type argument is `true`. */
 const assert = <_ extends true>(): void => undefined;
+
+// --- Subpaths --------------------------------------------------------------
+
+assert<Equals<typeof ActionSubpath.search, typeof Action.search>>();
+assert<Equals<typeof WikitextSubpath.parse, typeof Wikitext.parse>>();
 
 // --- Core -------------------------------------------------------------------
 

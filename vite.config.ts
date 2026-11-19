@@ -20,10 +20,13 @@ const atError = (config: OxlintConfig): OxlintConfig => ({
 
 export default defineConfig({
   // Format with fixes, lint without: a type-aware autofix at commit time would
-  // make the commit differ from the verified tree. `vp check --no-fmt` fails
-  // when only JSON or Markdown is staged, so those are formatted only.
+  // make the commit differ from the verified tree. Lint ignores some paths
+  // (tests/dist-consumer/), so an unmatched pattern is not an error.
   staged: {
-    "*.{js,mjs,ts}": ["vp check --fix --no-lint", "vp check --no-fmt"],
+    "*.{js,mjs,ts}": [
+      "vp check --fix --no-lint",
+      "vp check --no-fmt --no-error-on-unmatched-pattern",
+    ],
     "*.{json,md}": "vp check --fix --no-lint",
   },
   run: {

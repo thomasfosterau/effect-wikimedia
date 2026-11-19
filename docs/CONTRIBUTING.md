@@ -29,6 +29,7 @@ Every external version lives in the `pnpm-workspace.yaml` catalog; never edit on
 
 - Use Effect idioms throughout, and strongly prefer Effect v4's own modules (`Array`, `Option`, `Match`, `Schema`, `effect/http`, …) over hand-rolled equivalents; convert existing code where practical. Exceptions: non-Effect APIs adapted at the edge (the Node streams in `src/dumps/sources.ts`), and hot paths where measured performance needs plain code (the wikitext cursor). Read the installed `effect` package rather than guessing at an API.
 - One module per surface: each namespace imports only `Core`, except `Dumps` (uses `Wikidata`'s model) and `Reconciliation` (drives `Action` and `Wikidata`); `Wikitext` imports nothing. Fallow's boundaries and `tests/tree-shaking.test.ts` enforce it.
+- Exports follow Effect's layout: `src/index.ts` re-exports each surface as a PascalCase namespace, and each is also importable from its own PascalCase subpath (`@thomasfosterau/effect-wikimedia/Action`). A new surface adds both, plus its `exports` entry in `package.json`.
 - The build is `platform: "neutral"`: Node imports stay in `src/dumps/sources.ts`.
 - Absent values are `Option`. Options-object members are `readonly x?: T` (`exactOptionalPropertyTypes` is on); wire schemas keep native optionals.
 - Errors are `Schema.TaggedError` classes with a brand type argument. Relative imports carry `.ts`.
