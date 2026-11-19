@@ -27,8 +27,10 @@
   "files": [
     "dist",
     "README.md",
-    "docs",
-    "LICENSE",
+    "docs/dumps.md",
+    "docs/requests.md",
+    "docs/typescript.md",
+    "LICENSE.md",
     "CHANGELOG.md",
     "MIGRATION.md",
     "THIRD_PARTY_NOTICES.md"
@@ -48,11 +50,7 @@
     "access": "public"
   },
   "scripts": {
-    "clean": "rm -rf dist",
-    "prepare": "vp config && effect-tsgo patch --typescript --oxlint",
-    "changeset": "changeset",
-    "version": "changeset version && vp fmt",
-    "release": "vp run build && changeset publish"
+    "prepare": "vp config && effect-tsgo patch --typescript --oxlint"
   },
   "dependencies": {
     "@thomasfosterau/effect-parse": "catalog:"
@@ -80,6 +78,12 @@
   },
   "peerDependencies": {
     "effect": "catalog:peers"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "lts"
+    }
   },
   "engines": {
     "node": ">=22"

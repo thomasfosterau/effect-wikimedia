@@ -1,0 +1,10 @@
+# `uvx zizmor --offline .github` should report nothing beyond what is configured here.
+# Actions are pinned by exact tag; .github/workflows/actions.lock locks them to commits.
+rules:
+  dependabot-cooldown:
+    config:
+      days: 1
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin

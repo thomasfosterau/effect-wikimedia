@@ -1,45 +1,15 @@
-# Dependabot version updates (the shape the @thomasfosterau family shares).
-#
-# The `npm` ecosystem at `/` reads pnpm-workspace.yaml's catalogs and
-# pnpm-lock.yaml. `groups` hold only the sets that MUST move together, so a
-# lockstep set arrives as one PR (every update type, majors included) and can
-# never drift one package at a time; every other dependency (typedoc, fallow,
-# `@changesets/*`, `@enfect/oxlint`, each GitHub Action, …) gets a PR of its
-# own. Dependabot puts a dependency in the FIRST group that matches, with
-# `exclude-patterns` keeping a package out of a broader group:
-#
-# - `toolchain`: `effect-tsgo patch` (the `prepare` script) matches the
-#   installed `tsc`, `oxlint` and `oxlint-tsgolint` by gitHead and hard-errors
-#   (UnsupportedTargetPackageVersionError) on any pairing it has no build for,
-#   failing `pnpm install` itself; `vite-plus` pins the oxlint, oxfmt,
-#   tsgolint and vitest it carries, `vite` is its core under an alias,
-#   `vitest` must equal its pin, and `@vitest/coverage-istanbul` peers on that
-#   exact `vitest`. Before merging a toolchain PR, check the `components`
-#   table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs (see the catalog
-#   comments). `@enfect/oxlint` is not in it: its `@oxlint/plugins`
-#   dependency is a caret range, not tied to vite-plus's oxlint.
-# - `effect`: the Effect release line is a lockstep, singleton set.
-#
-# Catalog entries Dependabot may not bump on its own (npm aliases: `vite` →
-# `@voidzero-dev/vite-plus-core`, `typescript` → `@typescript/typescript6`,
-# `@typescript/native` → `typescript`) are by-hand steps with their group;
-# AGENTS.md lists them. The `overrides` in pnpm-workspace.yaml are all
-# `catalog:` (`vite@*` / `vitest@*` are the keys `vp migrate` manages), so
-# they follow the catalog and need no bump of their own.
-#
-# `cooldown` follows pnpm-workspace.yaml's `minimumReleaseAge`, with
-# `@thomasfosterau/*` exempt as `minimumReleaseAgeExclude` is. pnpm waits 8
-# hours (480 minutes) but `cooldown` only takes whole days, so it waits 1 day:
-# longer than pnpm's gate, so Dependabot never proposes a version pnpm would
-# still refuse.
+# Groups cover only sets that must move together. By-hand steps for the
+# toolchain group are in docs/CONTRIBUTING.md.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "trunk"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 10
+    assignees: [thomasfosterau]
+    labels: [dependencies]
     commit-message:
       prefix: "chore"
     cooldown:
@@ -47,22 +17,14 @@ updates:
       exclude:
         - "@thomasfosterau/*"
     groups:
-      # vite-plus pins vitest / oxlint exactly; @effect/tsgo patches only listed
-      # TS / oxlint versions.
       toolchain:
         applies-to: version-updates
         patterns:
           - "vite-plus"
-          - "vite"
           - "@voidzero-dev/*"
           - "vitest"
           - "@vitest/*"
           - "@effect/tsgo"
-          - "@typescript/native"
-          - "typescript"
-          - "@typescript/typescript6"
-        update-types: ["major", "minor", "patch"]
-      # One release train, one singleton.
       effect:
         applies-to: version-updates
         patterns:
@@ -70,33 +32,27 @@ updates:
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
-        update-types: ["major", "minor", "patch"]
-    assignees:
-      - thomasfosterau
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "trunk"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 5
+    assignees: [thomasfosterau]
+    labels: [dependencies]
     commit-message:
       prefix: "chore"
-    # Third-party actions are pinned to full commit SHAs (with a `# vX.Y.Z`
-    # comment); Dependabot updates both.
     cooldown:
       default-days: 1
-    assignees:
-      - thomasfosterau
-  # The .devcontainer/ features (the image tag moves with vite-plus by hand).
   - package-ecosystem: "devcontainers"
     directory: "/"
+    target-branch: "trunk"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 5
+    assignees: [thomasfosterau]
+    labels: [dependencies]
     commit-message:
       prefix: "chore"
     cooldown:
       default-days: 1
-    assignees:
-      - thomasfosterau

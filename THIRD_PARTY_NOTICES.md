@@ -1,6 +1,6 @@
 # Third-party notices
 
-`@thomasfosterau/effect-wikimedia` is MIT-licensed (see `LICENSE`). It also contains the material below, under the licenses that follow.
+`@thomasfosterau/effect-wikimedia` is MIT-licensed (see `LICENSE.md`). It also contains the material below, under the licenses that follow.
 
 ## HTML Standard named character references
 
