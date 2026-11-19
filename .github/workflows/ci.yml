@@ -43,3 +43,21 @@ jobs:
           restore-keys: |
             vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-
       - run: vp run ci
+
+  devcontainer:
+    name: devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version: lts
+          run-install: false
+      - run: vp dlx @devcontainers/cli@0.89.0 up --workspace-folder .
+      - run: vp dlx @devcontainers/cli@0.89.0 exec --workspace-folder . vp --version

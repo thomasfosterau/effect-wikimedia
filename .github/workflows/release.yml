@@ -1,9 +1,9 @@
 name: Release
 
-# Changesets, split so only publishing waits for approval: `select` picks the
-# mode, `version` opens the "chore: version packages" PR, and `publish` (the
-# only job in the protected `release` environment, and the only one with
-# `id-token: write`) publishes via npm trusted publishing. See docs/PUBLISHING.md.
+# Changesets: `version` opens the "chore: version packages" PR; `publish` (the
+# only job with `id-token: write`, in the protected `release` environment)
+# publishes via npm trusted publishing. Nothing runs unless actions.lock verifies.
+# Privileged jobs skip the package cache and lifecycle scripts.
 
 on:
   push:
@@ -13,9 +13,26 @@ on:
 permissions: {}
 
 jobs:
+  verify-lockfile:
+    if: github.repository == 'thomasfosterau/effect-wikimedia' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install gh-actions-lock
+        run: gh extension install github/gh-actions-lock --pin v0.4.1
+      - name: Verify the workflow lockfile
+        run: gh actions-lock --verify
+
   select:
     name: Select mode
-    if: github.repository == 'thomasfosterau/effect-wikimedia' && github.actor != 'dependabot[bot]'
+    needs: verify-lockfile
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -32,6 +49,7 @@ jobs:
         with:
           version-file: pnpm-workspace.yaml
           node-version: lts
+          cache: false
           run-install: |
             - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Select mode
@@ -40,7 +58,7 @@ jobs:
 
   version:
     name: Version packages
-    needs: select
+    needs: [verify-lockfile, select]
     if: needs.select.outputs.mode == 'version'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -60,6 +78,7 @@ jobs:
         with:
           version-file: pnpm-workspace.yaml
           node-version: lts
+          cache: false
           run-install: |
             - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Create or update the version PR
@@ -70,7 +89,7 @@ jobs:
           pr-title: "chore: version packages"
 
   publish:
-    needs: select
+    needs: [verify-lockfile, select]
     if: needs.select.outputs.mode == 'publish'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -89,12 +108,11 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      # No package cache: a cache another workflow wrote must never feed a
-      # job holding `id-token: write`.
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
           node-version: lts
+          cache: false
           run-install: |
             - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Publish
