@@ -23,7 +23,7 @@ catalog:
   # Both minors pass the gates, so an app on either dedupes to one copy.
   "@thomasfosterau/effect-parse": ^0.5.0 || ^0.6.0
   esbuild: ^0.28.1
-  fallow: 3.43.1
+  fallow: 3.43.2
   # Runs on the TS6 JS API (the `typescript` alias below).
   typedoc: ^0.28.20
   # TypeScript 6/7 side by side: JS-API consumers (the language service,
