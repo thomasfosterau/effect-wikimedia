@@ -1,7 +1,7 @@
 /**
  * Typed lookups over wikitext nodes for the tests: a refinement by `_tag`
  * that narrows to the node type, so a test reads a node's fields without a
- * type assertion (#224).
+ * type assertion.
  *
  * @module tests/helpers/nodes
  */

@@ -1,5 +1,5 @@
 /**
- * The list view over parsed wikitext (#209): the `*`, `#`, `:` and `;`
+ * The list view over parsed wikitext: the `*`, `#`, `:` and `;`
  * lines MediaWiki renders as lists, grouped into lists of items. A
  * projection, not a change to the tree. The parser keeps list lines as
  * plain {@link Text}, and one text node can hold several lines, so this view

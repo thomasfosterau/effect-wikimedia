@@ -1,5 +1,5 @@
 /**
- * Bracket matching for the wikitable scans (#132): one linear pass over the
+ * Bracket matching for the wikitable scans: one linear pass over the
  * source that records where each template `{{…}}`, argument `{{{…}}}`,
  * wikilink `[[…]]`, closed comment and extension tag ends, so a table's
  * line, cell-separator and attribute scans can step over each one whole.

@@ -1,4 +1,4 @@
-// The docs gate (`vp run docgen`, #20). TypeDoc renders the API reference for
+// The docs gate (`vp run docgen`). TypeDoc renders the API reference for
 // everything reachable from the package's one entry point into the gitignored
 // `api-docs/`; the validation below, with warnings as errors, is what makes it
 // a gate.
@@ -9,16 +9,16 @@
   "tsconfig": "tsconfig.json",
   // Drops the members our classes inherit from Effect's base classes, keeping
   // what a consumer uses: the `Service` shape of `Core.WikimediaClient` and
-  // `Reconciliation.WikidataLookup` (`Context.Service`, #87), and the
+  // `Reconciliation.WikidataLookup` (`Context.Service`), and the
   // constructor, `_tag`, fields, `message` and `makeEffect` of the error
-  // classes (`Schema.TaggedError`, #99). It fails docgen if a class on any
-  // other base still renders that base's internals (#115).
+  // classes (`Schema.TaggedError`). It fails docgen if a class on any
+  // other base still renders that base's internals.
   "plugin": ["./scripts/typedoc-effect-bases.mjs"],
   // `vp check` (tsgolint) and the patched `tsc` already type-check `src/`;
   // TypeDoc's own TS 6 pass would only repeat them, over `tests/` too.
   "skipErrorChecking": true,
   // TypeDoc's default list: every export, method and property needs a doc
-  // comment, the fields of the schemas and interfaces included (#79).
+  // comment, the fields of the schemas and interfaces included.
   "requiredToBeDocumented": [
     "Enum",
     "EnumMember",

@@ -139,7 +139,7 @@ layer(NodeServices.layer)("filter / walk", (it) => {
     expect(seen).not.toContain("Wikilink");
   });
 
-  it("visits siblings in source order, each node's children before its next sibling (#175)", () => {
+  it("visits siblings in source order, each node's children before its next sibling", () => {
     const doc = parse("{{A|{{B}}}} {{C|[[D]]}}");
     const seen: string[] = [];
     walk(doc, (n) => {
@@ -159,7 +159,7 @@ layer(NodeServices.layer)("filter / walk", (it) => {
     ]);
   });
 
-  it("agrees with filter on order, so findTemplates returns document order (#175)", () => {
+  it("agrees with filter on order, so findTemplates returns document order", () => {
     const doc = parse("{{A}} {{B|{{C}}}} {{D}}");
     const walked: string[] = [];
     walk(doc, (n) => {
@@ -233,7 +233,7 @@ const firstParamRenderer: TemplateRenderer = (t, { strip }) => strip(t.params[0]
 const stripWithShow = (src: string) =>
   stripToText(parse(src), { templates: { show: showRenderer } });
 
-describe("strip to plain text: template renderers (#210)", () => {
+describe("strip to plain text: template renderers", () => {
   it("renders every template as nothing without options, as before", () => {
     expect(stripToText(parse("a {{nowrap|37 ft}} wall"))).toBe("a  wall");
     expect(stripToText(parse("a {{nowrap|37 ft}} wall"), {})).toBe("a  wall");
@@ -297,21 +297,18 @@ describe("strip to plain text: template renderers (#210)", () => {
 /** A fallback renderer that strips a fragment holding a hidden-prefix category link. */
 const templateFallback: TemplateRenderer = (_, { strip }) => strip(parse("[[Kategorie:Z]]f"));
 
-layer(NodeServices.layer)(
-  "strip to plain text: template renderers (#210), recorded article",
-  (it) => {
-    it.effect("restores the {{nowrap}} prose of the recorded Ada Lovelace article", () =>
-      Effect.gen(function* () {
-        const plain = stripToText(parse(yield* ada));
-        const rendered = stripToText(parse(yield* ada), { templates: basicTemplateRenderers });
-        expect(plain).toContain("including  and Michael Faraday.");
-        expect(rendered).toContain("including Charles Babbage and Michael Faraday.");
-      }),
-    );
-  },
-);
+layer(NodeServices.layer)("strip to plain text: template renderers, recorded article", (it) => {
+  it.effect("restores the {{nowrap}} prose of the recorded Ada Lovelace article", () =>
+    Effect.gen(function* () {
+      const plain = stripToText(parse(yield* ada));
+      const rendered = stripToText(parse(yield* ada), { templates: basicTemplateRenderers });
+      expect(plain).toContain("including  and Michael Faraday.");
+      expect(rendered).toContain("including Charles Babbage and Michael Faraday.");
+    }),
+  );
+});
 
-describe("strip to plain text: file, category and interlanguage links (#208)", () => {
+describe("strip to plain text: file, category and interlanguage links", () => {
   it.each([
     ["[[:Category:Foo]]", "Category:Foo"],
     ["[[:File:Bar.jpg]]", "File:Bar.jpg"],
@@ -396,7 +393,7 @@ const stripEntities = (src: string): string => {
   return stripToText(doc);
 };
 
-describe("strip to plain text: entities (#107)", () => {
+describe("strip to plain text: entities", () => {
   it.each([
     ["&#65;", "A"],
     ["&#0065;", "A"],
@@ -464,7 +461,7 @@ describe("strip to plain text: entities (#107)", () => {
     ["&hellip;", "\u2026"],
     ["&times;", "\u00d7"],
     ["&deg;", "\u00b0"],
-    // HTML5 names past the eleven `stripToText` knew before #118.
+    // HTML5 names past the eleven `stripToText` knew before.
     ["&eacute;", "\u00e9"],
     ["&Eacute;", "\u00c9"],
     ["&copy;", "\u00a9"],
@@ -499,7 +496,7 @@ describe("strip to plain text: entities (#107)", () => {
         // A digest of the sorted entries, so a changed value or a renamed entry
         // fails even though the round-trip test below reads its expectations from
         // the table itself. The same digest comes from `character-entities` 2.0.2
-        // and from remex-html's `;`-terminated entries (#123's review).
+        // and from remex-html's `;`-terminated entries.
         const entries = Arr.sort(
           NAMED_ENTITIES,
           Order.mapInput(Order.String, ([name]: readonly [string, string]) => name),
@@ -571,7 +568,7 @@ describe("strip to plain text: entities (#107)", () => {
   );
 });
 
-describe("tables and autolinks reachable via walk/filter (issue #1287)", () => {
+describe("tables and autolinks reachable via walk/filter", () => {
   it("finds an AutoLink node at any depth", () => {
     const doc = parse("'''bold''' http://example.org more");
     expect(filter(doc, P.isTagged("AutoLink"))).toHaveLength(1);

@@ -1,6 +1,6 @@
 /**
  * Line-level reading of a fragment for the views that work by line
- * (`lists`, `paragraphs`; #209): a text node that holds several lines is cut
+ * (`lists`, `paragraphs`): a text node that holds several lines is cut
  * into fresh per-line text nodes with their own spans, and every other node
  * is kept whole on the line it starts on. Internal to `Wikitext`.
  *

@@ -1,5 +1,5 @@
 /**
- * The paragraph view over parsed wikitext (#209): the runs of prose lines
+ * The paragraph view over parsed wikitext: the runs of prose lines
  * MediaWiki wraps in `<p>`, split at blank lines and at the block-level
  * lines (lists, tables, headings, rules, preformatted text) that end a
  * paragraph. A projection, not a change to the tree: text is cut into fresh

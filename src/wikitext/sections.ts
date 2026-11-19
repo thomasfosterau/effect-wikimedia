@@ -1,5 +1,5 @@
 /**
- * The section view over a parsed {@link Document} (#209): the heading tree
+ * The section view over a parsed {@link Document}: the heading tree
  * MediaWiki builds from `== … ==` lines, as flat records that point back at
  * the AST. A projection, not a change to the tree: every {@link Section}
  * holds the document's own {@link Heading} and child nodes (never copies),

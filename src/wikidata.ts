@@ -605,19 +605,18 @@ function stringOf(value?: Schema.Json): Option.Option<string> {
 
 /**
  * The objects in a JSON list; none when `raw` is not an array. A dump line
- * is unvalidated, so a statement list can be a number and an entry `null`
- * (#147).
+ * is unvalidated, so a statement list can be a number and an entry `null`.
  */
 function objectsIn(raw?: Schema.Json): readonly Schema.JsonObject[] {
   return Array.isArray(raw) ? Arr.filter(raw, isJsonObject) : [];
 }
 
 /**
- * The own entries of a JSON object; none when `raw` is not an object (#147).
+ * The own entries of a JSON object; none when `raw` is not an object.
  * A `__proto__` key is dropped: assigning it to the plain object a
  * normaliser builds would replace that object's prototype rather than add an
  * entry, and no language code, site id, property id or entity id is spelled
- * so (#164).
+ * so.
  */
 function entriesOf(raw?: Schema.Json): ReadonlyArray<readonly [string, Schema.Json]> {
   if (!isJsonObject(raw)) return [];
@@ -925,7 +924,7 @@ function normaliseClaims(raw?: Schema.Json): Record<string, readonly Statement[]
  * `somevalue`. A `__proto__` key in any keyed map is dropped. This is the
  * entry point the {@link Dumps} entity-dump pipeline runs each dump line
  * through; it reads the parsed JSON by hand rather than through a schema,
- * which would roughly double the per-line cost of a dump (#224).
+ * which would roughly double the per-line cost of a dump.
  */
 export function decodeEntity(raw: Schema.Json): Option.Option<WikidataItem> {
   return isJsonObject(raw) ? normaliseItem(raw) : Option.none();

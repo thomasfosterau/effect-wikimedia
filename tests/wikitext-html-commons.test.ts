@@ -1,5 +1,5 @@
 /**
- * Integration-style acceptance test (issue #1063): fetches wikitext
+ * Integration-style acceptance test: fetches wikitext
  * (Action), parsed HTML (Rest), and a Commons file URL for a real title —
  * "Douglas Adams" — end to end through the package barrel, against
  * responses recorded from the real Wikimedia APIs

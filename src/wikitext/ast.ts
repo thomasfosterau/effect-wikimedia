@@ -1,6 +1,6 @@
 /**
- * The typed AST vocabulary for the `Wikitext` parser
- * (website#1065). Wikitext in, this tree out — no network, no template
+ * The typed AST vocabulary for the `Wikitext` parser.
+ * Wikitext in, this tree out — no network, no template
  * expansion, no HTML rendering.
  *
  * Two invariants hold for every freshly-parsed tree and are the bedrock of
@@ -446,7 +446,7 @@ export interface Tag {
 }
 
 /**
- * A wikitable `{| … |}` (website#1287's largest vocabulary addition). Modelled
+ * A wikitable `{| … |}`. Modelled
  * as a block-level construct on the same footing as {@link Heading}: the
  * `{|` must open at the true start of a source line, and (like headings)
  * table recognition only applies where the fragment scanner runs with

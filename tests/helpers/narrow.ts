@@ -1,7 +1,7 @@
 /**
  * Narrowing lookups for the tests: each returns the narrowed value or fails
  * the test, so a test body reads the result without a conditional, an early
- * return or a type assertion (#224).
+ * return or a type assertion.
  *
  * @module tests/helpers/narrow
  */

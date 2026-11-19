@@ -1,5 +1,5 @@
 /**
- * `parse(source, { offset })` (#209): spans in a larger text, for a fragment
+ * `parse(source, { offset })`: spans in a larger text, for a fragment
  * parsed out of a page such as a `<ref>` body.
  *
  * @module tests/parse-offset

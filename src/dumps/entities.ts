@@ -142,7 +142,7 @@ function boundRaw(text: string): string {
 export function decodeEntityLine(line: string, lineNumber: number): Option.Option<EntityRecord> {
   return Option.map(stripFraming(line), (body): EntityRecord => {
     // Only a failed parse means the body is not JSON: a body of `null` parses
-    // to `Some(null)`, which the entity check below rejects (#116).
+    // to `Some(null)`, which the entity check below rejects.
     const parsed = parseJson(body);
     if (Option.isNone(parsed)) {
       return { _tag: "error", line: lineNumber, reason: "dumps/invalid-json", raw: boundRaw(body) };

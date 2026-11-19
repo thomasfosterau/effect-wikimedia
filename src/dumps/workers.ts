@@ -1,5 +1,5 @@
 /**
- * Multistream decoding on a pool of workers (#211, slice 4): each
+ * Multistream decoding on a pool of workers: each
  * {@link MultistreamRange} is sent to a worker as one RPC, which opens,
  * decompresses and decodes it there and streams its
  * {@link PageRevisionRecord}s back. Built on `effect/rpc`'s worker protocol,

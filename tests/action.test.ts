@@ -149,7 +149,7 @@ layer(Core.wikimediaLayer)("Action.getWikitext", (it) => {
       }),
   );
 
-  // MediaWiki's default `$wgLegalTitleChars` never allows these (#165).
+  // MediaWiki's default `$wgLegalTitleChars` never allows these.
   it.effect.each(["Foo<Bar", "Foo>Bar", "Foo[Bar", "Foo]Bar", "Foo{Bar", "Foo}Bar"])(
     "rejects the illegal-character title %j before any request, from every title-taking function",
     (title) =>
@@ -425,7 +425,7 @@ layer(Core.wikimediaLayer)("Action.parsePage", (it) => {
   // Hand-derived from MediaWiki's ApiParse (`prop=tocdata`, which writes
   // `jsonCodec->toJsonArray(TOCData)`) and Parsoid's
   // `SectionMetadata::toJsonArray()`, which omits a field at its default and
-  // `linkAnchor` when it equals `anchor` (#144). No live network.
+  // `linkAnchor` when it equals `anchor`. No live network.
   it.effect("reads the tocdata table of contents and requests it rather than sections", () =>
     Effect.gen(function* () {
       const { urls, provideFetch } = stubRouter({
@@ -497,7 +497,7 @@ layer(Core.wikimediaLayer)("Action.parsePage", (it) => {
   );
 });
 
-layer(Core.wikimediaLayer)("Action.getRedirectAliases (#220)", (it) => {
+layer(Core.wikimediaLayer)("Action.getRedirectAliases", (it) => {
   // The `formatversion=1` shape dewiki's siteinfo answers with, cut down.
   const dewikiMagicWords = {
     query: {
@@ -599,7 +599,7 @@ layer(Core.wikimediaLayer)("Action.getRedirectAliases (#220)", (it) => {
   );
 });
 
-layer(Core.wikimediaLayer)("Action.getHiddenLinkPrefixes (#208)", (it) => {
+layer(Core.wikimediaLayer)("Action.getHiddenLinkPrefixes", (it) => {
   // The `formatversion=1` shape dewiki's siteinfo answers with, cut down.
   const dewikiSiteinfo = {
     query: {
@@ -709,7 +709,7 @@ layer(Core.wikimediaLayer)("Action.getHiddenLinkPrefixes (#208)", (it) => {
   );
 });
 
-layer(Core.wikimediaLayer)("Action.getSiteTextConfig (#220)", (it) => {
+layer(Core.wikimediaLayer)("Action.getSiteTextConfig", (it) => {
   // A cut-down dewiki siteinfo answer to all four `siprop`s at once.
   const dewiki = {
     query: {

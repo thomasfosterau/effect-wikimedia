@@ -1,5 +1,5 @@
 /**
- * The sentence view over parsed wikitext (#209): a {@link Paragraph}'s plain
+ * The sentence view over parsed wikitext: a {@link Paragraph}'s plain
  * text cut into sentences by the runtime's `Intl.Segmenter`, for a locale the
  * caller names. The view adds no splitting rules of its own; where a
  * sentence ends is the Unicode sentence-boundary algorithm's call, as the

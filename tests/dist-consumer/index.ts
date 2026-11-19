@@ -129,7 +129,7 @@ const articles: Stream.Stream<Dumps.PageRevisionHit> = Dumps.onlyRevisions(
   Dumps.pageRecords(bytes),
 ).pipe(Dumps.skipRedirects);
 // The Node-only byte sources type their streams structurally, so naming them
-// needs no `@types/node` (#73).
+// needs no `@types/node`.
 assert<Equals<Dumps.Decompressor, () => Dumps.NodeDuplexLike>>();
 assert<
   Equals<Parameters<typeof Dumps.fromNodeReadable>, [evaluate: () => Dumps.NodeReadableLike]>

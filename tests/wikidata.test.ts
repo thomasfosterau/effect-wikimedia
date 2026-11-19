@@ -148,8 +148,8 @@ describe("Wikidata sitelink caps", () => {
   });
 });
 
-describe("Wikidata.decodeEntity on containers of the wrong kind (#147)", () => {
-  // Each threw a TypeError before #147; a dump line like this ended a whole
+describe("Wikidata.decodeEntity on containers of the wrong kind", () => {
+  // Each threw a TypeError before; a dump line like this ended a whole
   // `Dumps` stream as a defect.
   // Raw dump-line shapes, as `decodeEntity` (which takes `unknown`) meets them.
   const malformed: ReadonlyArray<readonly [string, object]> = [
@@ -243,7 +243,7 @@ describe("Wikidata.decodeEntity on containers of the wrong kind (#147)", () => {
   });
 });
 
-describe("Wikidata maps keyed by a response's __proto__ (#164)", () => {
+describe("Wikidata maps keyed by a response's __proto__", () => {
   // JSON decoding makes `__proto__` an own key, as a dump line or a decoded
   // `wbgetentities` body would carry it.
   const parseJson = Schema.decodeSync(Schema.fromJsonString(Schema.Json));

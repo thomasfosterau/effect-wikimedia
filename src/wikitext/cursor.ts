@@ -1,6 +1,6 @@
 /**
- * The cursor drivers every scan in the wikitext parser is built from
- * (#174): a scan is written as one step over the source, and a driver here
+ * The cursor drivers every scan in the wikitext parser is built from:
+ * a scan is written as one step over the source, and a driver here
  * repeats it. They are the parser's only loops.
  *
  * A scan advances a mutable index through the source and stops early, at a

@@ -1,6 +1,6 @@
 /**
- * Unit tests for the multistream index pipeline (`src/dumps/multistream.ts`,
- * #211): the per-line decode (table-driven), the index stream over the
+ * Unit tests for the multistream index pipeline (`src/dumps/multistream.ts`):
+ * the per-line decode (table-driven), the index stream over the
  * bzip2-compressed fixture and its strict failure on a malformed line,
  * grouping into per-stream byte ranges (with and without `fileSize`, and the
  * failure on an offset that goes backwards), and the end-to-end claim the

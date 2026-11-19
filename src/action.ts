@@ -926,7 +926,7 @@ export const getRedirectAliases = Effect.fn("Action.getRedirectAliases")(functio
   return normaliseRedirectAliases(response);
 });
 
-// ── Both, in one request (#220) ──────────────────────────────────────────
+// ── Both, in one request ──────────────────────────────────────────
 
 /**
  * Lenient schema for the

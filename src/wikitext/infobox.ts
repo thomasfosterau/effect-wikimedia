@@ -1,5 +1,5 @@
 /**
- * The infobox view over parsed wikitext (#209): each infobox template with
+ * The infobox view over parsed wikitext: each infobox template with
  * its fields as fragments, so a value keeps its links and templates as well
  * as its text. A projection, not a change to the tree: every
  * {@link Infobox} holds the document's own {@link Template} and

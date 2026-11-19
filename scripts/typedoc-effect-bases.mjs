@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * Trims the members our classes inherit from Effect's base classes out of the
- * API reference, keeping the ones a consumer uses (#87, #99, #115).
+ * API reference, keeping the ones a consumer uses.
  *
  * A `class X extends Context.Service<X, Shape>()(key) {}` inherits about 20
  * members from Effect (`key`, `of`, `use`, `pipe`, the symbol brands, …), and
@@ -45,7 +45,6 @@ import { Converter, DeclarationReflection, ReflectionFlag, ReflectionKind } from
  *
  * @typedef {object} EffectBase
  * @property {string} recorded How TypeDoc records the base, for the error messages.
- * @property {string} issue The issue that added it, for the error messages.
  * @property {(cls: Declaration) => string[] | undefined} keep The `memberKey`s
  *   to keep on `cls`, or `undefined` when `cls` isn't built on this base.
  */
@@ -89,7 +88,7 @@ function contextServiceKeep(cls) {
 function taggedErrorFields(type) {
   if (type.type !== "intersection" || !type.types.some(isYieldableError)) return [];
   // Only the literal that carries `_tag`: the brand literal `{ readonly brand:
-  // unique symbol }` (#224) is a compile-time marker, not a field.
+  // unique symbol }` is a compile-time marker, not a field.
   return type.types
     .map(literalMemberNames)
     .filter((names) => names.includes("_tag"))
@@ -136,20 +135,18 @@ function taggedErrorKeep(cls) {
 const EFFECT_BASES = [
   {
     recorded: "effect's `ServiceClass.Shape` (`Context.Service`)",
-    issue: "#87",
     keep: contextServiceKeep,
   },
   {
     recorded:
       "an intersection with effect's `YieldableError` and a `_tag` literal (`Schema.TaggedError`)",
-    issue: "#99",
     keep: taggedErrorKeep,
   },
 ];
 
 /**
  * The most inherited external members a class may still have after trimming
- * before docgen fails (#115). Every class in today's surface has none: the
+ * before docgen fails. Every class in today's surface has none: the
  * trimmed ones lose all but the members they keep, which are re-homed, and
  * the plain `Dumps.XmlPageReader` inherits nothing. An Effect base the plugin
  * doesn't trim brings at least 14 (measured on effect 4.0.0: `Data.Error` 14,
@@ -187,7 +184,7 @@ function isInheritedExternal(member) {
 
 /**
  * Whether `member` is the compile-time `brand` marker a class inherits from
- * its base's `{ readonly brand: unique symbol }` type argument (#224): not
+ * its base's `{ readonly brand: unique symbol }` type argument: not
  * external (it is declared in our source), but not an API member either.
  *
  * @param {Declaration} member
@@ -197,7 +194,7 @@ function isBrand(member) {
 }
 
 /**
- * The `brand` members of the object literals in `cls`'s base type (#224): the
+ * The `brand` members of the object literals in `cls`'s base type: the
  * `{ readonly brand: unique symbol }` marker is part of the base's
  * intersection, where docgen would demand a doc comment for it.
  *
@@ -275,7 +272,7 @@ function matchBase(cls) {
 function trimMatch(logger, project, { cls, base, keep }) {
   Arr.forEach(trimClass(project, cls, keep), (key) => {
     logger.error(
-      `typedoc-effect-bases: ${cls.getFriendlyFullName()} has no \`${key}\` member to keep; update the plugin (${base.issue}).`,
+      `typedoc-effect-bases: ${cls.getFriendlyFullName()} has no \`${key}\` member to keep; update the plugin.`,
     );
   });
   return base;
@@ -294,7 +291,7 @@ function reportUnmatched(logger, matched) {
     Arr.filter(EFFECT_BASES, (entry) => !HashSet.has(matched, entry)),
     (base) => {
       logger.error(
-        `typedoc-effect-bases: no class extends ${base.recorded}; update or remove its entry in the plugin (${base.issue}).`,
+        `typedoc-effect-bases: no class extends ${base.recorded}; update or remove its entry in the plugin.`,
       );
     },
   );
@@ -343,7 +340,7 @@ function reportUntrimmed(logger, project) {
     const count = inheritedExternalCount(cls);
     if (count <= MAX_INHERITED_EXTERNALS) return;
     logger.error(
-      `typedoc-effect-bases: ${cls.getFriendlyFullName()} still inherits ${count} external members (more than ${MAX_INHERITED_EXTERNALS}), so its page renders its base's internals; if the base is an Effect one, add it to \`EFFECT_BASES\` in the plugin with the members a consumer uses, otherwise change the base (#115).`,
+      `typedoc-effect-bases: ${cls.getFriendlyFullName()} still inherits ${count} external members (more than ${MAX_INHERITED_EXTERNALS}), so its page renders its base's internals; if the base is an Effect one, add it to \`EFFECT_BASES\` in the plugin with the members a consumer uses, otherwise change the base.`,
     );
   });
 }
@@ -371,8 +368,7 @@ function trimEffectBases(logger, project) {
  * @param {import("typedoc").Application} app
  */
 export function load(app) {
-  // Named, not inline: fallow names every anonymous arrow `<arrow>`, so a
-  // health pin on one would cover them all (#108's review).
+  // Named, not inline: fallow names every anonymous arrow `<arrow>`.
   const onResolveBegin = (/** @type {import("typedoc").Context} */ context) =>
     trimEffectBases(app.logger, context.project);
   app.converter.on(Converter.EVENT_RESOLVE_BEGIN, onResolveBegin);

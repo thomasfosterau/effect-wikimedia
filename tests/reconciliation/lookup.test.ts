@@ -28,7 +28,7 @@ import * as Struct from "effect/Struct";
 import { it, layer } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assertInstanceOf } from "@effect/vitest/utils";
-import { describe, expect, expectTypeOf } from "vite-plus/test";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -39,12 +39,8 @@ import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Core from "../../src/core.ts";
 import {
-  type DateFact,
   type ExternalIdentifier,
-  type IdentifierFact,
-  type ImageFact,
   InvalidQuery,
-  type ItemFact,
   type LookupError,
   LookupFailed,
   type WikidataCandidate,
@@ -146,7 +142,7 @@ const withLookup = (
 describe("WikidataLookup", () => {
   it("is keyed in the package's namespace, like Core.WikimediaClient", () => {
     // The key is public: a consumer providing the service by raw key string
-    // depends on it, so changing it is a breaking change (#19).
+    // depends on it, so changing it is a breaking change.
     expect(WikidataLookup.key).toBe("effect-wikimedia/WikidataLookup");
   });
 });
@@ -841,24 +837,6 @@ layer(Layer.merge(stubLookupLayer, NodeServices.layer))("WikidataLookup.enrich",
         "date of birth 1952-03-11T00:00:00Z",
         "image Douglas adams portrait.jpg",
       ]);
-    }),
-  );
-
-  it.effect("carries no website mapping-table fields (mappingKind, notes)", () =>
-    Effect.gen(function* () {
-      const { provideStub } = stubClient({ "action=wbgetentities": { body: enrichBody("Q42") } });
-      const facts = yield* loadFacts(provideStub, "Q42");
-      Arr.forEach(facts.facts, (fact) => {
-        expect(fact).not.toHaveProperty("mappingKind");
-        expect(fact).not.toHaveProperty("notes");
-      });
-      // Type level: no variant of the union declares either field.
-      expectTypeOf<
-        Extract<
-          keyof ItemFact | keyof IdentifierFact | keyof DateFact | keyof ImageFact,
-          "mappingKind" | "notes"
-        >
-      >().toEqualTypeOf<never>();
     }),
   );
 

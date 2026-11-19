@@ -396,8 +396,7 @@ export function requireRevisionId(revisionId: number): Effect.Effect<number, Inv
  * rather than failing the decode. Each surface's response schemas wrap their
  * leaves in {@link lenientField} (and array elements in {@link lenientArray}), so one
  * malformed leaf in a Wikimedia response degrades to absent while the rest
- * of the response still decodes, and the normalisers read typed values
- * (#224).
+ * of the response still decodes, and the normalisers read typed values.
  */
 export const lenient = <S extends Schema.Top>(schema: S) =>
   schema.pipe(Schema.catchDecoding(() => Effect.succeedNone));

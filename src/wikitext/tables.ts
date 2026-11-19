@@ -1,5 +1,5 @@
 /**
- * The table views over a parsed {@link Table} (#209): the grid with
+ * The table views over a parsed {@link Table}: the grid with
  * `rowspan` / `colspan` expanded, and the rows as records keyed by the
  * header row. A projection, not a change to the tree: every slot and value
  * is the table's own {@link TableCell}.

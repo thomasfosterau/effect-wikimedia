@@ -142,7 +142,7 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * but the type admits a plain object, and `compose` doesn't reject one: the
  * composed stream never settles. Nor is a used stream safe: `compose` throws
  * on one destroyed or whose input has ended, but only once the upstream has
- * been opened, which then leaks (#111), and accepts one whose output has
+ * been opened, which then leaks, and accepts one whose output has
  * ended, which yields nothing or never settles. So this checks first, before
  * anything is opened, and fails with a {@link SourceError}. `isReadable` / `isWritable` return `true`
  * only for a Node stream that is neither destroyed nor ended on that side (a
@@ -154,7 +154,7 @@ export interface NodeDuplexLike extends NodeReadableLike {
  * `readable: true`, `writable: true` and `pipe` / `write` / `on` functions
  * still passes it, is adapted as a classic stream, and hangs in `compose`.
  * Nor does it see a stage that another stream is still using (one shared
- * `createGunzip()` returned twice): that is neither destroyed nor ended (#129).
+ * `createGunzip()` returned twice): that is neither destroyed nor ended.
  * A composed streams2 stage has a non-`null` `readableFlowing`, but a classic
  * stream has no such field, and a check on it was not verified against the
  * stream libraries a stage may come from, so none is made.
@@ -219,7 +219,7 @@ const attempt = <A>(step: () => A, callback: (error: Error) => void): Option.Opt
 
 /**
  * Adapts a classic (pre-streams2) duplex, such as the `through` stream that
- * `unbzip2-stream` returns, into a streams2 `Duplex` for `compose` (#128). A
+ * `unbzip2-stream` returns, into a streams2 `Duplex` for `compose`. A
  * classic stream has no `read()` and emits `data`, `end` and `close` but never
  * `finish`, so `compose` fails it with "Premature close"; Node's
  * `Duplex.from` doesn't help, as it treats one as readable only. Compressed
@@ -292,7 +292,7 @@ const adaptClassicDuplex = (classic: Duplex): Duplex => {
  * go through `destroyReadable`, which adds a no-op `error` listener first:
  * destroying a fresh `fs.ReadStream` still runs its pending open, and if that
  * open fails (a missing file) the `error` it emits would otherwise crash the
- * process as an uncaught exception, as in #109.
+ * process as an uncaught exception.
  */
 const composeOrDestroy = (head: Readable, stage: Duplex): Effect.Effect<Duplex, SourceError> =>
   tryNode(() => compose(head, stage)).pipe(
@@ -314,8 +314,8 @@ const composeOrDestroy = (head: Readable, stage: Duplex): Effect.Effect<Duplex, 
  * Gives `stream` an `error` listener that drops the error, so one emitted
  * once nothing else listens cannot crash the process as an uncaught
  * exception. A stage can emit `error` after its output has ended, when
- * `compose` has removed its listeners and the stream has already completed
- * (#139). It costs no error the stream should report: while the stream is
+ * `compose` has removed its listeners and the stream has already completed.
+ * It costs no error the stream should report: while the stream is
  * read, `compose` and the async iterator (which also reads the errored state
  * a stream keeps) still see every error.
  */
@@ -331,7 +331,7 @@ const ignoreLateErrors = (stream: Duplex): void => {
  * decompressor, and what {@link decompressWith} opens) emits an `AbortError`
  * when it is destroyed before it finishes. Before the stream is first pulled
  * nothing listens for it, and Node throws an `error` event nobody listens for
- * as an uncaught exception, which crashes the process (#109). The stream's
+ * as an uncaught exception, which crashes the process. The stream's
  * outcome is already settled, so a listener that drops the error goes on
  * first.
  */
@@ -345,7 +345,7 @@ const destroyReadable = (readable: NodeReadableLike): void => {
 
 /**
  * How long, in milliseconds, stream teardown waits for a destroyed Readable to
- * finish closing before it gives up (#94). A well-behaved Readable (a file
+ * finish closing before it gives up. A well-behaved Readable (a file
  * read, a gunzip, an HTTP body) closes within milliseconds of `destroy()`,
  * far inside this bound, so it is released before the interruption returns;
  * the bound only stops the interruption hanging on a Readable that never
@@ -357,7 +357,7 @@ const CLOSE_WAIT_MS = 1000;
 
 /**
  * Destroys `readable` and waits for it to emit `close`, for at most
- * `CLOSE_WAIT_MS` (#94): the release of {@link fromNodeReadable}'s scope, so
+ * `CLOSE_WAIT_MS`: the release of {@link fromNodeReadable}'s scope, so
  * teardown waits for a well-behaved Readable to finish releasing what it
  * holds, and carries on without it once the bound passes. It listens for
  * `close` before destroying, so no `close` is missed, and doesn't wait for a
@@ -386,9 +386,9 @@ const destroyAndAwaitClose = (readable: NodeReadableLike): Effect.Effect<void> =
  * Readable, delegates to its own `return()` without waiting for it, and
  * settles at once. A Node Readable's iterator queues `return()` behind a
  * pending `next()`, which a stalled Readable never settles, so awaiting it
- * would hang teardown (#83); and whether `Stream.fromAsyncIterable` awaits
+ * would hang teardown; and whether `Stream.fromAsyncIterable` awaits
  * `return()` at all differs by Effect version (4.1 stopped awaiting it while
- * a `next()` is pending, #235). So the wait for the Readable to close lives
+ * a `next()` is pending). So the wait for the Readable to close lives
  * in {@link fromNodeReadable}'s scope finalizer instead, bounded there. A
  * rejection of the delegated `return()` is swallowed: teardown has already
  * moved on, and it would otherwise escape as an unhandled rejection.
@@ -450,12 +450,12 @@ const openNodeReadable = (
     Effect.gen(function* () {
       // Opening the Readable and registering its `destroy()` as a scope
       // finalizer are one uninterruptible step, so no interruption can land
-      // between them and leave it open (#95); opening is synchronous, so
+      // between them and leave it open; opening is synchronous, so
       // that costs nothing. The finalizer covers teardown that lands before
       // `Stream.fromAsyncIterable` has created the iterator and registered its
       // `return()` as a finalizer (an interruption the fiber observes between
       // this step and that one), and it is where teardown waits, bounded, for
-      // the Readable to close (#94, #235).
+      // the Readable to close.
       const readable = yield* Effect.acquireRelease(open, (opened) => destroyAndAwaitClose(opened));
       return Stream.fromAsyncIterable(destroyOnReturn(readable), (thrown) =>
         sourceError(P.isError(thrown) ? thrown : String(thrown)),
@@ -529,7 +529,7 @@ export const decompressWith =
             // Building `web` starts the source on a fiber of its own that only
             // `web.cancel()` stops, so build it here, inside the uninterruptible
             // open: an interruption can't then land between starting the
-            // source and registering the teardown that cancels it (#109).
+            // source and registering the teardown that cancels it.
             const stage = yield* openStage(transform);
             const web = yield* tryNode(() => Stream.toReadableStreamWith(source, context)).pipe(
               Effect.tapError(() => Effect.sync(() => destroyReadable(stage))),
