@@ -32,7 +32,6 @@
     "docs/typescript.md",
     "LICENSE.md",
     "CHANGELOG.md",
-    "MIGRATION.md",
     "THIRD_PARTY_NOTICES.md"
   ],
   "type": "module",
