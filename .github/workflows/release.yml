@@ -101,7 +101,7 @@ jobs:
       contents: write # release tags and GitHub releases
       id-token: write # npm trusted publishing
     env:
-      # Otherwise pnpm 11 may re-install with lifecycle scripts before a
+      # Otherwise pnpm may re-install with lifecycle scripts before a
       # `pnpm run`, undoing `--ignore-scripts` in a job holding `id-token`.
       pnpm_config_verify_deps_before_run: "false"
     steps:
