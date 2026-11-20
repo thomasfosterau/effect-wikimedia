@@ -4,8 +4,8 @@
 catalogMode: strict
 
 catalog:
-  "@effect/docgen": ^4.1.4
   "@changesets/cli": ^3.0.3
+  "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.3
   # Test-only (`NodeServices.layer`); moves with `effect`.
   "@effect/platform-node": 4.1.4
