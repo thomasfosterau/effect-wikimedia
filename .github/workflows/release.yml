@@ -107,6 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
@@ -115,9 +116,12 @@ jobs:
           cache: false
           run-install: |
             - args: ["--frozen-lockfile", "--ignore-scripts"]
+      # `vp run release` (vite.config.ts): builds, checks the emitted
+      # declarations, publishes the version with `vp pm publish -r` unless npm
+      # has it (pnpm exchanges the OIDC token itself), then `changeset git-tag`
+      # reports the new tag through CHANGESETS_OUTPUT, and the action pushes it
+      # and creates the release.
       - name: Publish
         uses: changesets/action/publish@v2.1.2
         with:
-          script: vp run changeset:publish
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          script: vp run release
