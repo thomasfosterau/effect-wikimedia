@@ -92,6 +92,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",
+    "@effect/docgen": "catalog:",
     "@effect/language-service": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/tsgo": "catalog:",

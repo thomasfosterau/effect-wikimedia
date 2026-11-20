@@ -142,3 +142,6 @@ api-docs/
 .fallow/
 fallow.sarif
 .vitest/
+
+# @effect/docgen output (`vp run docgen:pages`), published by the Pages workflow.
+docs/api/

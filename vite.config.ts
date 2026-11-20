@@ -32,6 +32,9 @@ export default defineConfig({
   run: {
     cache: true,
     tasks: {
+      // The API reference the Pages workflow publishes. Examples are
+      // rendered but not compiled (`tscExecutable: "true"` in docgen.json).
+      "docgen:pages": { command: "docgen", cache: false },
       // The Effect-patched native `tsc` (`prepare`), which reports the Effect
       // diagnostics tsgolint in `vp check` does not.
       check: "tsc -p tsconfig.json",
