@@ -74,9 +74,26 @@ export default defineConfig({
         command: ["changeset version", "vp fmt"],
         cache: false,
       },
-      "changeset:publish": {
-        command: "changeset publish",
-        dependsOn: ["build"],
+      // The release job's publish script (.github/workflows/release.yml),
+      // after the build and `check:dist`: pnpm publishes the version unless
+      // npm already has it (`-r` checks the registry; a plain publish would
+      // re-send it), under OIDC trusted publishing; then `changeset git-tag`
+      // tags it and reports the tag to `changesets/action` through
+      // `CHANGESETS_OUTPUT`, which pushes it and creates the GitHub release.
+      // Uncached, so it sees the full environment; a failed publish stops
+      // before tagging.
+      release: {
+        command: [
+          "vp pm publish -r --access public --no-git-checks -- --ignore-scripts",
+          "changeset git-tag",
+        ],
+        dependsOn: ["check:dist"],
+        cache: false,
+      },
+      // What `release` would publish, without publishing or tagging.
+      "release:dry-run": {
+        command: "vp pm publish -r --access public --dry-run --no-git-checks -- --ignore-scripts",
+        dependsOn: ["check:dist"],
         cache: false,
       },
       // Everything CI runs, in order; `pnpm audit` needs the network.
