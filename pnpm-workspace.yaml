@@ -13,13 +13,13 @@ catalog:
   # oxlint and tsgolint versions in the `components` table of
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs, and fails `vp install`
   # on any other. Moves with `@typescript/native` and `vite-plus`.
-  "@effect/tsgo": 0.69.0
+  "@effect/tsgo": 0.70.0
   "@enfect/oxlint": 0.10.0
   "@effect/vitest": 4.1.4
   "@types/node": ^26.1.2
   "@types/unbzip2-stream": ^1.4.3
   # Must equal the vitest that vite-plus bundles.
-  "@vitest/coverage-istanbul": 5.1.0
+  "@vitest/coverage-istanbul": 5.1.1
   effect: 4.1.4
   # Both minors pass the gates, so an app on either dedupes to one copy.
   "@thomasfosterau/effect-parse": ^0.5.0 || ^0.6.0
@@ -36,9 +36,9 @@ catalog:
   unbzip2-stream: ^1.4.3
   # vite-plus pins oxlint, oxfmt and vitest exactly; `vite` and `vitest` must
   # match it.
-  vite-plus: 1.6.0
+  vite-plus: 1.7.0
   vite: npm:@voidzero-dev/vite-plus-core@1.6.0
-  vitest: 5.1.0
+  vitest: 5.1.1
 
 # The published peer ranges: `effect ^4.0.0`, raised only when a dependency
 # requires more.
