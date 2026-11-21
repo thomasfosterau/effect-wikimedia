@@ -10,10 +10,10 @@ catalog:
   # Test-only (`NodeServices.layer`); moves with `effect`.
   "@effect/platform-node": 4.1.4
   # `effect-tsgo patch` (the `prepare` script) supports only the TypeScript,
-  # oxlint and tsgolint versions in the `components` table of
+  # oxlint and tsrs versions in the `components` table of
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs, and fails `vp install`
   # on any other. Moves with `@typescript/native` and `vite-plus`.
-  "@effect/tsgo": 0.69.0
+  "@effect/tsgo": 0.73.2
   "@enfect/oxlint": 0.10.0
   "@effect/vitest": 4.1.4
   "@types/node": ^26.1.2
@@ -34,10 +34,10 @@ catalog:
   "@typescript/native": "npm:typescript@7.0.2"
   # Test-only: proves the bzip2 recipe in docs/dumps.md streams end to end.
   unbzip2-stream: ^1.4.3
-  # vite-plus pins oxlint, oxfmt and vitest exactly; `vite` and `vitest` must
-  # match it.
-  vite-plus: 1.6.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
+  # `vite` and `vitest` must equal what vite-plus itself depends on
+  # (`npm view vite-plus@<v> dependencies`); `vite` no longer equals vite-plus.
+  vite-plus: 1.7.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
   vitest: 5.1.0
 
 # The published peer ranges: `effect ^4.0.0`, raised only when a dependency
@@ -51,15 +51,6 @@ overrides:
   effect: "catalog:"
   vite@*: "catalog:"
   vitest@*: "catalog:"
-
-# vitest peers on `vite` by name, which the aliased vite-plus core can't satisfy.
-peerDependencyRules:
-  allowAny:
-    - vite
-    - vitest
-  allowedVersions:
-    vite: "*"
-    vitest: "*"
 
 allowBuilds:
   # tests/tree-shaking.test.ts runs a real esbuild bundle.

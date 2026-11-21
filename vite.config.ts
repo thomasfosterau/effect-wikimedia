@@ -36,7 +36,7 @@ export default defineConfig({
       // rendered but not compiled (`tscExecutable: "true"` in docgen.json).
       "docgen:pages": { command: "docgen", cache: false },
       // The Effect-patched native `tsc` (`prepare`), which reports the Effect
-      // diagnostics tsgolint in `vp check` does not.
+      // diagnostics tsrs in `vp check` does not.
       check: "tsc -p tsconfig.json",
       build: "vp pack",
       // Writes coverage/coverage-final.json, which fallow reads for CRAP
@@ -128,6 +128,10 @@ export default defineConfig({
     dts: true,
     sourcemap: true,
     deps: {
+      // tsdown <0.23 compatibility: resolve external dependency subpaths.
+      // Remove to preserve subpath imports as written (the new default).
+      // https://tsdown.dev/options/dependencies#deps-resolvedepsubpath
+      resolveDepSubpath: true,
       neverBundle: [/^node:/],
     },
   },
