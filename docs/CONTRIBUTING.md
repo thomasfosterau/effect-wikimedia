@@ -4,7 +4,7 @@
 
 - Branch off `trunk` and open a pull request into `trunk`; never commit to `trunk` directly. Open a draft PR as soon as you start, and keep one PR per change, however large. Squash-merge with a conventional prefix (`feat:`, `fix:`, `docs:`, `chore:`). Rebase onto `origin/trunk` rather than merging it in.
 - File an issue for anything you notice that is out of scope, and keep issue bodies evergreen: edit the body as understanding improves rather than appending comments.
-- Dependabot keeps dependencies current. Its `toolchain` group needs hand edits on the same branch: the npm-alias catalog entries (`vite` must equal `vite-plus`; `typescript` / `@typescript/native` must be a pair `@effect/tsgo` supports), an `@effect/tsgo` release that supports the new oxlint, and the devcontainer image tag.
+- Dependabot keeps dependencies current. Its `toolchain` group needs hand edits it can't make: the npm-alias catalog entries (`vite` must equal `vite-plus`; `typescript` / `@typescript/native` must be a pair `@effect/tsgo` supports), an `@effect/tsgo` release that supports the new oxlint, and the devcontainer image tag. Make them in a PR from a new branch started from its PR's head (never push to a `dependabot/*` branch, which stops it rebasing); Dependabot closes its own PR once yours merges.
 
 ## Toolchain
 
