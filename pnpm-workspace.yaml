@@ -8,19 +8,19 @@ catalog:
   "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.3
   # Test-only (`NodeServices.layer`); moves with `effect`.
-  "@effect/platform-node": 4.1.4
+  "@effect/platform-node": 4.1.5
   # `effect-tsgo patch` (the `prepare` script) supports only the TypeScript,
   # oxlint and tsrs versions in the `components` table of
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs, and fails `vp install`
   # on any other. Moves with `@typescript/native` and `vite-plus`.
   "@effect/tsgo": 0.73.2
   "@enfect/oxlint": 0.10.0
-  "@effect/vitest": 4.1.4
+  "@effect/vitest": 4.1.5
   "@types/node": ^26.1.2
   "@types/unbzip2-stream": ^1.4.3
   # Must equal the vitest that vite-plus bundles.
   "@vitest/coverage-istanbul": 5.1.0
-  effect: 4.1.4
+  effect: 4.1.5
   # Both minors pass the gates, so an app on either dedupes to one copy.
   "@thomasfosterau/effect-parse": ^0.5.0 || ^0.6.0
   esbuild: ^0.28.1
