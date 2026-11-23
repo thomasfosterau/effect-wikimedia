@@ -19,7 +19,7 @@ catalog:
   "@types/node": ^26.1.2
   "@types/unbzip2-stream": ^1.4.3
   # Must equal the vitest that vite-plus bundles.
-  "@vitest/coverage-istanbul": 5.1.0
+  "@vitest/coverage-istanbul": 5.1.1
   effect: 4.1.4
   # Both minors pass the gates, so an app on either dedupes to one copy.
   "@thomasfosterau/effect-parse": ^0.5.0 || ^0.6.0
@@ -38,7 +38,7 @@ catalog:
   # (`npm view vite-plus@<v> dependencies`); `vite` no longer equals vite-plus.
   vite-plus: 1.7.0
   vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
-  vitest: 5.1.0
+  vitest: 5.1.1
 
 # The published peer ranges: `effect ^4.0.0`, raised only when a dependency
 # requires more.
