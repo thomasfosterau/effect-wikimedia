@@ -38,7 +38,7 @@ catalog:
   # (`npm view vite-plus@<v> dependencies`); `vite` no longer equals vite-plus.
   vite-plus: 1.8.0
   vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
-  vitest: 5.1.1
+  vitest: 5.1.2
 
 # The published peer ranges: `effect ^4.0.0`, raised only when a dependency
 # requires more.
