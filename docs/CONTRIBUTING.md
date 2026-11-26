@@ -41,6 +41,10 @@ Every external version lives in the `pnpm-workspace.yaml` catalog; never edit on
 
 Run `vp run ci`. CI ([ci.yml](../.github/workflows/ci.yml)) runs it on Node `lts` and `latest` with no secrets. Workflows pin actions by exact tag, locked to commits by `.github/workflows/actions.lock`: run `gh actions-lock` after changing a `uses:`. `uvx zizmor --offline .github` audits the workflows.
 
+## Dependencies
+
+Dependabot ([dependabot.yml](../.github/dependabot.yml)) opens `@thomasfosterau/*` updates daily and every other update weekly, on Wednesday morning Melbourne time: the named runtime sets (`effect` and the like) each in one PR, and every other development dependency in the single `toolchain` group. Security updates skip the schedule and open as soon as an advisory lands, one PR each. Vite+ selects Node.js from `.node-version` and pnpm from `packageManager`; pnpm's own switching is off (`runtimeOnFail` / `pmOnFail`), so one version of each is installed and used.
+
 ## Changesets
 
 Every change to the published package's behaviour or its `.d.ts` (doc comments included, as a `patch`) needs a changeset: `vp exec changeset`. Docs-, CI- and tooling-only changes need none. The package stays on 0.x: a breaking change is a `minor`, never a `major` (see [PUBLISHING.md](PUBLISHING.md#versioning)), and its changeset says how to migrate. Never version or publish by hand: the Release workflow opens the `chore: version packages` PR, and merging it publishes.
