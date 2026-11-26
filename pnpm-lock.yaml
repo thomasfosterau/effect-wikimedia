@@ -178,10 +178,10 @@ catalogs:
       version: 3.0.3
     '@effect/docgen':
       specifier: ^4.1.4
-      version: 4.1.4
+      version: 4.1.5
     '@effect/language-service':
       specifier: ^0.87.3
-      version: 0.87.3
+      version: 0.87.5
     '@effect/platform-node':
       specifier: 4.1.5
       version: 4.1.5
@@ -249,10 +249,10 @@ importers:
         version: 3.0.3
       '@effect/docgen':
         specifier: 'catalog:'
-        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.1)(tsx@4.23.15)
+        version: 4.1.5(@typescript/typescript6@6.0.2)(redis@6.3.1)(tsx@4.23.15)
       '@effect/language-service':
         specifier: 'catalog:'
-        version: 0.87.3
+        version: 0.87.5
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.1.5(effect@4.1.5)(redis@6.3.1)
@@ -412,16 +412,16 @@ packages:
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@effect/docgen@4.1.4':
-    resolution: {integrity: sha512-ROTVPve76XrqsL5YKlw6Wngv1tt/yX0nfq9HaT6WbibFDTQiZcDiaB0FwJWr53Usx2QSgJbpnwMXo8E3XlH+eg==}
+  '@effect/docgen@4.1.5':
+    resolution: {integrity: sha512-qDXsWPsrOliGFiAmNNScxcSJYwPJSWim3aor2z6+sSR9EQRcHsFd/OWpDaWBbjngmBJCYWZajtFgxfoqlYYQ9Q==}
     engines: {node: '>=22.19.0'}
     hasBin: true
     peerDependencies:
       tsx: '>=4.19.3 <5.0.0'
       typescript: '>=5.8.2 <7.0.0'
 
-  '@effect/language-service@0.87.3':
-    resolution: {integrity: sha512-g1OmRBZF5chbW9QMNoirPo5Bb4zzU2HfP88tR7/VSZEUxHJ1/qVb8AQ0kUh2ggctLH1I715yCwP4gkw56PTjpQ==}
+  '@effect/language-service@0.87.5':
+    resolution: {integrity: sha512-np/zJgk71/PyHxtoqyUKLYcpQhoRBI+L6+1Z0ILk35JSQ/lvXzwlwOwddYZLDkeC4bdF2ukKekqKlla/F88R5w==}
     hasBin: true
 
   '@effect/markdown-toc@0.1.0':
@@ -2573,7 +2573,7 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@effect/docgen@4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.1)(tsx@4.23.15)':
+  '@effect/docgen@4.1.5(@typescript/typescript6@6.0.2)(redis@6.3.1)(tsx@4.23.15)':
     dependencies:
       '@babel/code-frame': 8.0.6
       '@effect/markdown-toc': 0.1.0
@@ -2592,7 +2592,7 @@ snapshots:
       - redis
       - utf-8-validate
 
-  '@effect/language-service@0.87.3': {}
+  '@effect/language-service@0.87.5': {}
 
   '@effect/markdown-toc@0.1.0':
     dependencies:
