@@ -1,5 +1,15 @@
 # @thomasfosterau/effect-wikimedia
 
+## 0.11.0
+
+### Minor Changes
+
+- 3860db7: Each namespace is now also importable from its own subpath, e.g. `@thomasfosterau/effect-wikimedia/Action`.
+
+### Patch Changes
+
+- 3860db7: Doc comments no longer reference issue numbers or project history.
+
 ## 0.10.1
 
 ### Patch Changes
